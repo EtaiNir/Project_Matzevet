@@ -29,7 +29,10 @@ function newId() {
 
 /** האם האופרטור לא דורש ערך */
 function isValueless(op: FilterOperator) {
-  return op === 'empty' || op === 'not_empty'
+  return (
+    op === 'empty' || op === 'not_empty' ||
+    op === 'is_checked' || op === 'not_checked'
+  )
 }
 
 /** סרגל סינון — אפיון §6.3. שילוב מספר סינונים ב-AND. */
@@ -43,6 +46,29 @@ export default function FilterBar({ conditions, onChange, valuesFor, onReset }: 
 
   function remove(id: string) {
     onChange(conditions.filter((c) => c.id !== id))
+  }
+
+  /**
+   * החלפת השדה בתנאי קיים.
+   *
+   * אם האופרטור הנוכחי אינו תקף לסוג השדה החדש — הוא מוחלף בפועל, ולא
+   * רק בתצוגה. בלי זה נוצר מצב שקט ומסוכן: הבורר מציג "מסומן" בעוד
+   * התנאי עדיין מחזיק `contains` עם ערך ריק, ולכן הוא נשמט מהסינון
+   * ב-isConditionReady — הסינון נראה מופעל על המסך ואינו עושה דבר.
+   */
+  function changeField(cond: FilterCondition, key: string) {
+    const ops = operatorsForType(getField(key)?.type ?? 'text')
+    if (ops.some((o) => o.op === cond.operator)) {
+      update(cond.id, { field: key })
+      return
+    }
+    update(cond.id, {
+      field: key,
+      operator: ops[0].op,
+      value: '',
+      value2: undefined,
+      values: undefined,
+    })
   }
 
   function add() {
@@ -67,7 +93,7 @@ export default function FilterBar({ conditions, onChange, valuesFor, onReset }: 
           >
             <FieldCombobox
               value={c.field}
-              onChange={(key) => update(c.id, { field: key })}
+              onChange={(key) => changeField(c, key)}
             />
 
             <select

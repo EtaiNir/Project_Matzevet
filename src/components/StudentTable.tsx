@@ -1,6 +1,7 @@
 import { useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { fieldLabel } from '@/config/fields'
+import { fieldLabel, getField } from '@/config/fields'
+import { isChecked } from '@/lib/filters'
 import { IconFilter } from '@/components/brand/Icons'
 import type { SortState } from '@/lib/table'
 
@@ -31,12 +32,26 @@ interface Props {
    * הוא נראה זהה לחץ המיון שלידו, ואי אפשר היה לדעת מה כל אחד עושה.
    */
   onOpenFilter?: (field: string, anchor: DOMRect) => void
+  /** האם המשתמש רשאי לערוך ערכים בעמודות שהוא הוסיף */
+  canEditExtra?: boolean
+  /** שינוי ערך בעמודה תוספתית. null מוחק את הערך. */
+  onExtraChange?: (index: number, field: string, value: string | boolean | null) => void
+  /** הוספת עמודה — הכפתור יושב בקצה שורת הכותרת, אחרי העמודה האחרונה */
+  onAddColumn?: () => void
+  /** הסתרה/הצגה של כל העמודות שהמשתמש הוסיף */
+  onToggleExtra?: () => void
+  /** האם כל העמודות התוספתיות מוסתרות כרגע */
+  extraHidden?: boolean
+  /** האם יש בכלל עמודות תוספתיות ברשות */
+  hasExtraColumns?: boolean
 }
 
 const ROW_HEIGHT = 36
 const DEFAULT_COL_WIDTH = 96 // צר יותר מבעבר כדי שייכנסו יותר עמודות במסך
 const MIN_COL_WIDTH = 56
 const INDEX_WIDTH = 44
+// שוליים בקצה שורת הכותרת לכפתורי העמודות התוספתיות
+const GUTTER_WIDTH = 72
 
 /**
  * הטבלה הראשית — שורות מווירטואלות (~50k), רוחב עמודות ניתן לשינוי בגרירה (אפיון §6.1).
@@ -51,6 +66,12 @@ export default function StudentTable({
   onCellClick,
   filteredFields,
   onOpenFilter,
+  canEditExtra = false,
+  onExtraChange,
+  onAddColumn,
+  onToggleExtra,
+  extraHidden = false,
+  hasExtraColumns = false,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
   // רוחב לכל עמודה לפי מפתח השדה (נשמר גם במעבר בין תצורות/דפים)
@@ -85,7 +106,11 @@ export default function StudentTable({
     window.addEventListener('mouseup', onUp)
   }
 
-  const totalWidth = INDEX_WIDTH + fields.reduce((s, k) => s + widthOf(k), 0)
+  const gutter = Boolean(onAddColumn || (onToggleExtra && hasExtraColumns))
+  const totalWidth =
+    INDEX_WIDTH +
+    fields.reduce((s, k) => s + widthOf(k), 0) +
+    (gutter ? GUTTER_WIDTH : 0)
 
   return (
     <div ref={parentRef} className="thin-scrollbar h-full overflow-auto">
@@ -152,6 +177,46 @@ export default function StudentTable({
               </div>
             )
           })}
+
+          {/*
+            שוליים בקצה שורת הכותרת — אחרי העמודה האחרונה.
+            כאן, ולא בסרגל הכלים: הוספת עמודה היא פעולה על הטבלה, והמקום
+            שבו היא מתבקשת הוא בדיוק המקום שבו הטבלה נגמרת.
+          */}
+          {gutter && (
+            <div
+              style={{ width: GUTTER_WIDTH }}
+              className="flex shrink-0 items-center justify-center gap-1 border-b-2 border-sky-200 py-2"
+            >
+              {onAddColumn && (
+                <button
+                  onClick={onAddColumn}
+                  title="הוספת עמודה משלך — נשמרת בעדכון החודשי ואינה נדרסת"
+                  className="rounded-md px-2 text-lg leading-none text-sky-600 transition hover:bg-sky-100 hover:text-sky-800"
+                >
+                  +
+                </button>
+              )}
+              {onToggleExtra && hasExtraColumns && (
+                <button
+                  onClick={onToggleExtra}
+                  title={
+                    extraHidden
+                      ? 'הצגת העמודות שהוספת'
+                      : 'הסתרת כל העמודות שהוספת (הנתונים נשמרים)'
+                  }
+                  className={
+                    'rounded-md px-1.5 py-0.5 text-xs transition ' +
+                    (extraHidden
+                      ? 'bg-sky-600 text-white hover:bg-sky-700'
+                      : 'text-sky-500 hover:bg-sky-100 hover:text-sky-800')
+                  }
+                >
+                  {extraHidden ? '🙈' : '👁'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* גוף מווירטואל */}
@@ -182,26 +247,71 @@ export default function StudentTable({
                   ההפרדה נדרשה כי תפריט שנפתח בכל לחיצה שמאלית הפריע לגלישה
                   רגילה בטבלה.
                 */}
-                {fields.map((key) => (
-                  <div
-                    key={key}
-                    onClick={() => onRowClick(vItem.index)}
-                    onContextMenu={(e) => {
-                      if (!onCellClick) return
-                      e.preventDefault()
-                      onCellClick(
-                        vItem.index,
-                        key,
-                        new DOMRect(e.clientX, e.clientY, 0, 0),
-                      )
-                    }}
-                    style={{ width: widthOf(key) }}
-                    className="flex shrink-0 cursor-pointer items-center overflow-hidden whitespace-nowrap border-l border-slate-100 px-2 text-slate-700 hover:bg-sky-100/60"
-                    title={`${String(row[key] ?? '')}\n(לחיצה ימנית — סינון לפי העמודה)`}
-                  >
-                    <span className="truncate">{String(row[key] ?? '')}</span>
-                  </div>
-                ))}
+                {fields.map((key) => {
+                  const def = getField(key)
+                  const editable = Boolean(def?.extra) && canEditExtra && !!onExtraChange
+                  return (
+                    <div
+                      key={key}
+                      // בתא שניתן לעריכה הלחיצה שייכת לפקד עצמו ולא לפתיחת
+                      // הכרטיס — אחרת כל סימון היה פותח חלון.
+                      onClick={editable ? undefined : () => onRowClick(vItem.index)}
+                      onContextMenu={(e) => {
+                        if (!onCellClick) return
+                        e.preventDefault()
+                        onCellClick(
+                          vItem.index,
+                          key,
+                          new DOMRect(e.clientX, e.clientY, 0, 0),
+                        )
+                      }}
+                      style={{ width: widthOf(key) }}
+                      className={
+                        'flex shrink-0 items-center overflow-hidden whitespace-nowrap border-l border-slate-100 px-2 text-slate-700 ' +
+                        (editable ? 'bg-amber-50/40' : 'cursor-pointer hover:bg-sky-100/60')
+                      }
+                      title={
+                        def?.type === 'boolean'
+                          ? isChecked(row[key])
+                            ? 'מסומן'
+                            : 'אינו מסומן'
+                          : String(row[key] ?? '')
+                      }
+                    >
+                      {def?.type === 'boolean' ? (
+                        <input
+                          type="checkbox"
+                          checked={isChecked(row[key])}
+                          disabled={!editable}
+                          onChange={(e) => onExtraChange?.(vItem.index, key, e.target.checked)}
+                          className="mx-auto accent-sky-600 disabled:opacity-50"
+                        />
+                      ) : editable ? (
+                        <input
+                          defaultValue={String(row[key] ?? '')}
+                          // שמירה ביציאה מהשדה, לא על כל הקלדה — אחרת כל תו
+                          // היה מייצר בקשה למסד.
+                          onBlur={(e) => {
+                            const next = e.target.value
+                            if (next !== String(row[key] ?? '')) {
+                              onExtraChange?.(vItem.index, key, next || null)
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') e.currentTarget.blur()
+                            if (e.key === 'Escape') {
+                              e.currentTarget.value = String(row[key] ?? '')
+                              e.currentTarget.blur()
+                            }
+                          }}
+                          className="w-full bg-transparent focus:rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-400"
+                        />
+                      ) : (
+                        <span className="truncate">{String(row[key] ?? '')}</span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )
           })}

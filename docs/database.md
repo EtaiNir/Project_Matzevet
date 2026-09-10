@@ -35,6 +35,7 @@
 | institution_name | text | שם מוסד — תיאורי (מיגרציה 010) |
 | institution_code | text | סמל מוסד — תיאורי (מיגרציה 010) |
 | is_service_account | boolean | חשבון מכונה (הסוכן) — מיגרציה 014 |
+| can_edit_extra | boolean | רשאי למלא ערכים בעמודות שהמשתמש הוסיף — מיגרציה 016. רלוונטי ל-`viewer` בלבד; `admin` ומעלה רשאי ממילא |
 
 רשומת משתמש נוצרת אוטומטית בעת הרשמה ב-Auth דרך הטריגר `handle_new_auth_user()`,
 שקורא `role` ו-`authority_codes` מ-`raw_user_meta_data`.
@@ -65,6 +66,7 @@
 | `scope_level` | `council` / `locality` / `school` | **אילו תלמידים** נראים |
 | `scope_values` | `text[]` | סמלי היישובים או המוסדות המותרים |
 | `is_suspended` | boolean | מושהה — חסום בכניסה ובנתונים |
+| `can_edit_extra` | boolean | האם צופה רשאי למלא **ערכים** בעמודות תוספתיות. אינו מתיר ליצור עמודות, ואינו מרחיב את ההיקף |
 
 ### פונקציות עזר
 
@@ -212,6 +214,10 @@
 | 013 | `delete_authority` | מחיקת מועצה על כל נתוניה — מנהל-על, בהקלדת שם |
 | 014 | `audit_and_last_admin` | `admin_audit` + הגנה על מנהל-העל האחרון |
 | 015 | `authority_moe_code_unique` | `moe_code` ייחודי — חוסם ניתוב קבצים דו-משמעי |
+| 016 | `extra_columns` | עמודות שהמשתמש מוסיף, מסכים ייעודיים, וניקוי עם תקופת חסד |
+| 017 | `view_members` | טבלאות ייעודיות — חברוּת מפורשת לפי ת"ז |
+| 018 | `open_extra_columns` | *(בוטלה ע"י 019)* פתיחת יצירת עמודות לכל משתמש |
+| 019 | `revert_open_columns` | יצירת עמודות — מנהל רשות ומעלה, בכל רמת היקף |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.

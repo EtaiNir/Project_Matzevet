@@ -23,6 +23,8 @@ export interface UserProfile {
   institution_name?: string | null
   /** סמל המוסד — סבא ביקש "הכי טוב שניהם" */
   institution_code?: string | null
+  /** רשאי למלא ערכים בעמודות שהמשתמש הוסיף (מיגרציה 016) */
+  can_edit_extra?: boolean
 }
 
 const BASE_COLUMNS = 'id, email, display_name, role, authority_codes'
@@ -31,7 +33,8 @@ const BASE_COLUMNS = 'id, email, display_name, role, authority_codes'
  * הבקשה מנסה אותם קודם, ואם העמודות אינן קיימות היא נופלת בחזרה לבסיסיות —
  * כך האתר עובד לפני ההרצה, ומציג את השדות מיד אחריה בלי פריסה מחדש.
  */
-const EXTENDED_COLUMNS = `${BASE_COLUMNS}, job_title, institution_name, institution_code`
+const EXTENDED_COLUMNS =
+  `${BASE_COLUMNS}, job_title, institution_name, institution_code, can_edit_extra`
 
 interface AuthContextValue {
   session: Session | null

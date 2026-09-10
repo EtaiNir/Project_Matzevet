@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ALL_FIELDS, fieldLabel } from '@/config/fields'
+import { ALL_FIELDS, fieldLabel, useFieldsVersion } from '@/config/fields'
 
 interface Props {
   value: string
@@ -18,13 +18,18 @@ export default function FieldCombobox({ value, onChange }: Props) {
   const boxRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
 
+  // הרשימה משתנה כשנטענות העמודות התוספתיות של הרשות
+  const fieldsVersion = useFieldsVersion()
+
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return ALL_FIELDS
     return ALL_FIELDS.filter(
       (f) => f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q),
     )
-  }, [query])
+    // ALL_FIELDS הוא binding חי שמשתנה ברישום עמודות תוספתיות
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, fieldsVersion])
 
   // סגירה בלחיצה מחוץ לרכיב
   useEffect(() => {

@@ -17,6 +17,8 @@ export type FilterOperator =
   | 'empty' // ריק
   | 'not_empty' // לא ריק
   | 'one_of' // אחד מתוך רשימה
+  | 'is_checked' // מסומן        (תיבת סימון בלבד)
+  | 'not_checked' // אינו מסומן  (תיבת סימון בלבד)
 
 export interface FilterCondition {
   id: string
@@ -39,6 +41,9 @@ export interface OperatorDef {
 
 // סדר התצוגה בבורר האופרטורים
 export const OPERATORS: OperatorDef[] = [
+  // תיבת סימון בראש: הם היחידים שתקפים לה, ולכן גם ברירת המחדל שלה
+  { op: 'is_checked', label: 'מסומן', types: ['boolean'] },
+  { op: 'not_checked', label: 'אינו מסומן', types: ['boolean'] },
   { op: 'contains', label: 'מכיל', types: ['text'] },
   { op: 'not_contains', label: 'אינו מכיל', types: ['text'] },
   { op: 'equals', label: 'שווה', types: ['text', 'number', 'date'] },
@@ -48,10 +53,20 @@ export const OPERATORS: OperatorDef[] = [
   { op: 'gt', label: 'גדול מ', types: ['number', 'date'] },
   { op: 'lt', label: 'קטן מ', types: ['number', 'date'] },
   { op: 'between', label: 'בין...ל', types: ['number', 'date'] },
-  { op: 'one_of', label: 'אחד מתוך', types: ['text', 'number', 'date'] },
+  { op: 'one_of', label: 'אחד מתוך', types: ['text', 'number', 'date', 'boolean'] },
   { op: 'empty', label: 'ריק', types: ['text', 'number', 'date'] },
   { op: 'not_empty', label: 'לא ריק', types: ['text', 'number', 'date'] },
 ]
+
+/**
+ * האם ערך של תיבת סימון נחשב מסומן.
+ *
+ * הערך מגיע מ-jsonb ולכן הוא בוליאני אמיתי, אבל תא שמעולם לא נגעו בו
+ * פשוט אינו קיים במפתח — ומגיע כ-undefined. שניהם "אינו מסומן".
+ */
+export function isChecked(value: unknown): boolean {
+  return value === true || value === 'true'
+}
 
 export function operatorsForType(type: FieldType): OperatorDef[] {
   return OPERATORS.filter((o) => o.types.includes(type))
@@ -119,6 +134,10 @@ export function matchesCondition(row: Row, cond: FilterCondition): boolean {
       return !isEmpty(raw)
     case 'one_of':
       return (cond.values ?? []).includes(val)
+    case 'is_checked':
+      return isChecked(raw)
+    case 'not_checked':
+      return !isChecked(raw)
     default:
       return true
   }
@@ -135,6 +154,8 @@ export function isConditionReady(cond: FilterCondition): boolean {
   switch (cond.operator) {
     case 'empty':
     case 'not_empty':
+    case 'is_checked':
+    case 'not_checked':
       return true
     case 'between':
       return !!cond.value && !!cond.value2

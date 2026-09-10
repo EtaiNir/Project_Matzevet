@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
@@ -7,9 +7,20 @@ import {
   type StudentRow,
 } from '@/lib/students'
 import { withComputedFields } from '@/lib/computed'
+import {
+  extraFieldKey,
+  extraIdFromKey,
+  fetchExtraColumns,
+  fetchExtraValues,
+  setExtraValue,
+  toFieldDefs,
+  withExtraValues,
+  type ExtraColumn,
+  type ExtraValues,
+} from '@/lib/extraColumns'
 import { applyFilters, isConditionReady, type FilterCondition } from '@/lib/filters'
 import { columnValues } from '@/lib/columnValues'
-import { sortRows, paginateFields, type SortState } from '@/lib/table'
+import { sortRows, type SortState } from '@/lib/table'
 import { exportToExcel } from '@/lib/exportExcel'
 import {
   PRESETS,
@@ -18,14 +29,27 @@ import {
   ACTIVE_STATUS_VALUE,
   type Preset,
 } from '@/config/presets'
-import { PARENT_ID_FIELDS, fieldLabel } from '@/config/fields'
+import {
+  PARENT_ID_FIELDS,
+  fieldLabel,
+  registerExtraFields,
+  clearExtraFields,
+} from '@/config/fields'
 import { fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
+import {
+  fetchSavedView,
+  fetchViewMembers,
+  removeStudentFromView,
+  type SavedView,
+} from '@/lib/savedViews'
 import FilterBar from '@/components/FilterBar'
 import FieldPicker from '@/components/FieldPicker'
 import StudentTable from '@/components/StudentTable'
 import StudentCard from '@/components/StudentCard'
 import ColumnFilterMenu from '@/components/ColumnFilterMenu'
 import CellActionMenu from '@/components/CellActionMenu'
+import ExtraColumnsManager from '@/components/ExtraColumnsManager'
+import SaveToViewDialog from '@/components/SaveToViewDialog'
 import Logo from '@/components/brand/Logo'
 
 /** קו מפריד בין פריטי הסרגל העליון */
@@ -36,8 +60,6 @@ function Sep() {
     </span>
   )
 }
-
-const COL_MIN_WIDTH = 96 // רוחב עמודה משוער לחישוב כמות עמודות לדף
 
 function newId() {
   return Math.random().toString(36).slice(2, 9)
@@ -66,7 +88,8 @@ function presetFilters(preset: Preset): FilterCondition[] {
 export default function Dashboard() {
   const { profile, signOut } = useAuth()
   // קוד הרשות מגיע מהנתיב (/students/:code) כשמגיעים ממסך המנהל
-  const { code: codeFromUrl } = useParams()
+  // viewId קיים רק במסלול /views/:code/:viewId — מצב "טבלה ייעודית"
+  const { code: codeFromUrl, viewId } = useParams()
   const isSuperAdmin = profile?.role === 'super_admin'
 
   // הרשויות הזמינות: מנהל־על רואה את כולן, משתמש רגיל רק את שלו
@@ -98,6 +121,16 @@ export default function Dashboard() {
   const moeCode = authority?.moe_code ?? authorityCode
 
   const [rawStudents, setRawStudents] = useState<StudentRow[]>([])
+  // העמודות שהמשתמש הוסיף, והערכים שמולאו בהן. שתי בקשות נפרדות
+  // שמתחברות בזיכרון לפי תעודת זהות — ראה lib/extraColumns.ts
+  const [extraColumns, setExtraColumns] = useState<ExtraColumn[]>([])
+  const [extraValues, setExtraValues] = useState<ExtraValues>(() => new Map())
+  // null = סגור. adding = להיפתח ישר על טופס ההוספה (כפתור ה-+ שבכותרת)
+  const [manager, setManager] = useState<{ adding: boolean } | null>(null)
+  const [saveToView, setSaveToView] = useState(false)
+  // מצב טבלה ייעודית: הרשימה עצמה, והת"ז שבה
+  const [activeView, setActiveView] = useState<SavedView | null>(null)
+  const [viewMembers, setViewMembers] = useState<Set<string> | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -106,7 +139,6 @@ export default function Dashboard() {
   const [selectedFields, setSelectedFields] = useState<string[]>(DEFAULT_PRESET.defaultFields)
   const [filters, setFilters] = useState<FilterCondition[]>(() => presetFilters(DEFAULT_PRESET))
   const [sort, setSort] = useState<SortState | null>(null)
-  const [fieldPage, setFieldPage] = useState(0)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [cardIndex, setCardIndex] = useState<number | null>(null)
   const [siblingParentId, setSiblingParentId] = useState<string | null>(null)
@@ -115,8 +147,6 @@ export default function Dashboard() {
     { index: number; field: string; anchor: DOMRect } | null
   >(null)
 
-  const tableWrapRef = useRef<HTMLDivElement>(null)
-  const [perPage, setPerPage] = useState(8)
 
   // טעינת כל תלמידי הרשות (אפיון: "הכל ואז מצמצמים").
   // הטעינה עוברת דרך מטמון — חזרה למסך אינה טוענת הכל מחדש.
@@ -129,6 +159,55 @@ export default function Dashboard() {
       .catch((e) => setError(e.message ?? 'שגיאה בטעינת הנתונים'))
       .finally(() => setLoading(false))
   }, [authorityCode])
+
+  /**
+   * טוען את הקטלוג ואת הערכים, ורושם את העמודות כשדות.
+   * מרגע הרישום הן שדות רגילים לכל דבר — סינון, מיון, ייצוא ופיבוט.
+   */
+  const loadExtra = useCallback(async () => {
+    if (!authorityCode) {
+      clearExtraFields()
+      return
+    }
+    const [cols, vals] = await Promise.all([
+      // בטבלה ראשית — רק עמודות הרשות. בטבלה ייעודית — גם אלה ששייכות לה.
+      fetchExtraColumns(authorityCode, viewId ?? null),
+      fetchExtraValues(authorityCode),
+    ])
+    registerExtraFields(toFieldDefs(cols))
+    setExtraColumns(cols)
+    setExtraValues(vals)
+  }, [authorityCode, viewId])
+
+  /**
+   * מצב טבלה ייעודית: טוען את הרשימה ואת החברוּת, ופותח בתמהיל השדות
+   * שנשמר איתה. הסינון של התצורה מנוקה — ברשימה רוצים לראות את כולם.
+   */
+  const loadView = useCallback(async () => {
+    if (!viewId || !authorityCode) {
+      setActiveView(null)
+      setViewMembers(null)
+      return
+    }
+    const [view, members] = await Promise.all([
+      fetchSavedView(viewId),
+      fetchViewMembers(authorityCode, viewId),
+    ])
+    setActiveView(view)
+    setViewMembers(members)
+    if (view?.fields?.length) setSelectedFields(view.fields)
+    setFilters([])
+  }, [viewId, authorityCode])
+
+  useEffect(() => {
+    loadView()
+  }, [loadView])
+
+  useEffect(() => {
+    loadExtra()
+    // ברשות אחרת יש עמודות אחרות — הרישום הישן חייב להתנקות
+    return () => clearExtraFields()
+  }, [loadExtra])
 
   async function refresh() {
     if (!authorityCode) return
@@ -146,32 +225,129 @@ export default function Dashboard() {
 
   // השדות המחושבים נגזרים בתצוגה ולא ב-pipeline — ראה lib/computed.ts
   const allStudents = useMemo(
-    () => withComputedFields(rawStudents, moeCode),
-    [rawStudents, moeCode],
+    () => withExtraValues(withComputedFields(rawStudents, moeCode), extraValues),
+    [rawStudents, moeCode, extraValues],
   )
 
-  // חישוב כמות עמודות לדף לפי רוחב המסך (דפדוף שדות, אפיון §6.2)
-  useEffect(() => {
-    const el = tableWrapRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => {
-      const cols = Math.max(1, Math.floor((el.clientWidth - 48) / COL_MIN_WIDTH))
-      setPerPage(cols)
+  /** כמה תלמידים מחזיקים ערך בכל עמודה — מהנתונים שכבר בזיכרון,
+   *  במקום קריאה נפרדת למסד לכל עמודה. */
+  const extraUsage = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const values of extraValues.values()) {
+      for (const [id, value] of Object.entries(values)) {
+        if (value !== null && value !== undefined && value !== false && value !== '') {
+          out[id] = (out[id] ?? 0) + 1
+        }
+      }
+    }
+    return out
+  }, [extraValues])
+
+  /** יצירה ומחיקה של עמודות — מנהל רשות ומעלה, כמו העלאת מצב"ת */
+  const canManageColumns =
+    isSuperAdmin ||
+    (profile?.role === 'admin' && (profile.authority_codes ?? []).includes(authorityCode))
+
+  const extraKeys = useMemo(
+    () => extraColumns.map((c) => extraFieldKey(c.id)),
+    [extraColumns],
+  )
+
+  /**
+   * "מוסתרות" נגזר מהמצב ולא מדגל נפרד: יש עמודות תוספתיות, ואף אחת
+   * מהן אינה בתמהיל הנוכחי. כך אין שני מקורות אמת שיכולים להתנתק —
+   * גם הסתרה ידנית של העמודה האחרונה מצית את הכפתור.
+   */
+  const extraHidden =
+    extraColumns.length > 0 && !selectedFields.some((k) => extraKeys.includes(k))
+
+  function toggleExtraColumns() {
+    setSelectedFields((prev) =>
+      extraHidden
+        ? [...prev, ...extraKeys.filter((k) => !prev.includes(k))]
+        : prev.filter((k) => !extraKeys.includes(k)),
+    )
+  }
+
+  /** הסרת תלמיד מהטבלה הייעודית הפתוחה. נתוניו אינם נמחקים. */
+  async function removeFromView(misparZehut: string) {
+    if (!activeView || !authorityCode) return
+    try {
+      await removeStudentFromView(authorityCode, activeView.id, misparZehut)
+      setViewMembers((prev) => {
+        if (!prev) return prev
+        const next = new Set(prev)
+        next.delete(misparZehut)
+        return next
+      })
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  /** הסרה מהתצוגה בלבד — שום נתון אינו נמחק, והעמודה חוזרת מבורר השדות */
+  function hideColumn(field: string) {
+    setSelectedFields((prev) => (prev.length > 1 ? prev.filter((k) => k !== field) : prev))
+  }
+
+  /** מילוי ערכים — מדרגה נמוכה יותר: גם צופה, אם הוגדר לו can_edit_extra.
+   *  משקף בדיוק את may_edit_extra() במסד; שם זה נאכף, כאן רק מוצג. */
+  const canEditExtra =
+    isSuperAdmin ||
+    ((profile?.authority_codes ?? []).includes(authorityCode) &&
+      (profile?.role === 'admin' || Boolean(profile?.can_edit_extra)))
+
+  /**
+   * שינוי ערך בעמודה תוספתית.
+   *
+   * המצב המקומי מתעדכן מיד ורק אחר כך נשלחת הבקשה — סימון צ'קבוקס
+   * חייב להרגיש מיידי. אם הכתיבה נכשלה (למשל RLS), טוענים מחדש כדי
+   * שהמסך לא יישאר עם ערך שלא נשמר.
+   */
+  async function handleExtraChange(
+    index: number,
+    field: string,
+    value: string | boolean | null,
+  ) {
+    const columnId = extraIdFromKey(field)
+    const zehut = String(results[index]?.['MISPAR_ZEHUT'] ?? '')
+    if (!columnId || !zehut) return
+
+    setExtraValues((prev) => {
+      const next = new Map(prev)
+      const row = { ...(next.get(zehut) ?? {}) }
+      if (value === null || value === false || value === '') delete row[columnId]
+      else row[columnId] = value
+      next.set(zehut, row)
+      return next
     })
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+
+    try {
+      await setExtraValue(authorityCode, zehut, columnId, value)
+    } catch (e) {
+      setError(`שמירת «${fieldLabel(field)}» נכשלה — ${(e as Error).message}`)
+      await loadExtra()
+    }
+  }
+
 
   // סינון + מיון — קובע גם את הייצוא וגם את ניווט הכרטיס
   const activeFilters = useMemo(() => filters.filter(isConditionReady), [filters])
 
   /** השורות אחרי סינון האחים בלבד — הבסיס לחישוב ערכי העמודות */
   const scopedRows = useMemo(() => {
-    if (!siblingParentId) return allStudents
-    return allStudents.filter((r) =>
-      PARENT_ID_FIELDS.some((f) => String(r[f] ?? '') === siblingParentId),
-    )
-  }, [allStudents, siblingParentId])
+    let rows = allStudents
+    // טבלה ייעודית — רק מי שברשימה, לפי ת"ז
+    if (viewMembers) {
+      rows = rows.filter((r) => viewMembers.has(String(r['MISPAR_ZEHUT'] ?? '')))
+    }
+    if (siblingParentId) {
+      rows = rows.filter((r) =>
+        PARENT_ID_FIELDS.some((f) => String(r[f] ?? '') === siblingParentId),
+      )
+    }
+    return rows
+  }, [allStudents, siblingParentId, viewMembers])
 
   const results = useMemo(
     () => sortRows(applyFilters(scopedRows, activeFilters), sort),
@@ -219,13 +395,14 @@ export default function Dashboard() {
     })
   }
 
-  // דפדוף שדות אופקי
-  const fieldPages = useMemo(
-    () => paginateFields(selectedFields, perPage),
-    [selectedFields, perPage],
-  )
-  const safePage = Math.min(fieldPage, fieldPages.length - 1)
-  const currentFields = fieldPages[safePage] ?? []
+  /**
+   * כל השדות שנבחרו מוצגים יחד, והטבלה נגללת אופקית כשהם חורגים מהמסך.
+   *
+   * קודם הם חולקו לדפים ברוחב המסך (אפיון §6.2) עם חצי ניווט. הדפדוף
+   * הוסר: הוא מנע כל חריגה, ולכן סרגל הגלילה האופקי מעולם לא הופיע —
+   * וגלילה היא מה שמשתמש מצפה לו בטבלה.
+   */
+  const currentFields = selectedFields
 
   function changePreset(id: string) {
     const preset = PRESETS.find((p) => p.id === id) ?? DEFAULT_PRESET
@@ -233,7 +410,6 @@ export default function Dashboard() {
     setSelectedFields(preset.defaultFields)
     setFilters(presetFilters(preset))
     setSort(null)
-    setFieldPage(0)
     setSiblingParentId(null)
   }
 
@@ -246,14 +422,12 @@ export default function Dashboard() {
     setFilters(presetFilters(preset))
     setSort(null)
     setSiblingParentId(null)
-    setFieldPage(0)
   }
 
   /** חזרה לתמהיל השדות של התצורה, בלי לגעת בסינון */
   function resetFields() {
     const preset = PRESETS.find((p) => p.id === activePreset) ?? DEFAULT_PRESET
     setSelectedFields(preset.defaultFields)
-    setFieldPage(0)
   }
 
   function toggleField(key: string) {
@@ -426,6 +600,23 @@ export default function Dashboard() {
               </span>
             </span>
           </span>
+          {!activeView && (
+            <button
+              onClick={() => setSaveToView(true)}
+              disabled={results.length === 0}
+              title="לקחת את מי שסונן ולשמור אותו כרשימה קבועה"
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40"
+            >
+              ▦ טבלה ייעודית
+            </button>
+          )}
+          <Link
+            to={`/views/${authorityCode}`}
+            className="rounded-lg px-2 py-1.5 text-sm text-slate-500 transition hover:bg-sky-50 hover:text-sky-700"
+          >
+            הטבלאות הייעודיות
+          </Link>
+
           {/* מנהל רשות יכול לעדכן את הנתונים בעצמו, מתי שהוא רוצה */}
           {(isSuperAdmin || profile?.role === 'admin') && authorityCode && (
             <Link
@@ -453,30 +644,26 @@ export default function Dashboard() {
               ` (מתוך ${allStudents.length.toLocaleString('he-IL')})`}
           </span>
 
-          {/* דפדוף שדות */}
-          {fieldPages.length > 1 && (
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setFieldPage((p) => Math.max(0, p - 1))}
-                disabled={safePage === 0}
-                className="rounded-md border border-slate-300 px-2 py-0.5 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40 disabled:hover:border-slate-300 disabled:hover:bg-transparent"
-              >
-                →
-              </button>
-              <span>
-                דף {safePage + 1}/{fieldPages.length}
-              </span>
-              <button
-                onClick={() => setFieldPage((p) => Math.min(fieldPages.length - 1, p + 1))}
-                disabled={safePage >= fieldPages.length - 1}
-                className="rounded-md border border-slate-300 px-2 py-0.5 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40 disabled:hover:border-slate-300 disabled:hover:bg-transparent"
-              >
-                ←
-              </button>
-            </div>
-          )}
         </div>
       </div>
+
+      {activeView && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-900">
+          <span>
+            <strong>טבלה ייעודית: {activeView.name}</strong> ·{' '}
+            {(viewMembers?.size ?? 0).toLocaleString('he-IL')} תלמידים ברשימה
+            <span className="mr-2 text-sky-700">
+              הרשימה קבועה — תלמידים חדשים אינם מצטרפים אליה מעצמם
+            </span>
+          </span>
+          <Link
+            to={`/views/${authorityCode}`}
+            className="rounded border border-sky-300 bg-white px-2 py-0.5 hover:bg-sky-100"
+          >
+            כל הטבלאות
+          </Link>
+        </div>
+      )}
 
       {/* באנר זיהוי אחים */}
       {siblingParentId && (
@@ -500,7 +687,7 @@ export default function Dashboard() {
       />
 
       {/* הטבלה */}
-      <div ref={tableWrapRef} className="min-h-0 flex-1 bg-white">
+      <div className="min-h-0 flex-1 bg-white">
         {loading ? (
           <div className="p-8 text-center text-slate-400">טוען תלמידים…</div>
         ) : error ? (
@@ -515,6 +702,12 @@ export default function Dashboard() {
             onCellClick={(index, field, anchor) => setCellMenu({ index, field, anchor })}
             filteredFields={filteredFields}
             onOpenFilter={(field, anchor) => setColumnMenu({ field, anchor })}
+            canEditExtra={canEditExtra}
+            onExtraChange={handleExtraChange}
+            onAddColumn={canManageColumns ? () => setManager({ adding: true }) : undefined}
+            onToggleExtra={toggleExtraColumns}
+            extraHidden={extraHidden}
+            hasExtraColumns={extraColumns.length > 0}
           />
         )}
       </div>
@@ -536,6 +729,18 @@ export default function Dashboard() {
             setColumnMenu({ field: cellMenu.field, anchor: cellMenu.anchor })
             setCellMenu(null)
           }}
+          onRemoveFromView={
+            activeView
+              ? () => {
+                  removeFromView(String(results[cellMenu.index]?.['MISPAR_ZEHUT'] ?? ''))
+                  setCellMenu(null)
+                }
+              : undefined
+          }
+          onHideColumn={() => {
+            hideColumn(cellMenu.field)
+            setCellMenu(null)
+          }}
           onClose={() => setCellMenu(null)}
         />
       )}
@@ -549,6 +754,35 @@ export default function Dashboard() {
           onSort={(direction) => setSort({ field: columnMenu.field, direction })}
           anchor={columnMenu.anchor}
           onClose={() => setColumnMenu(null)}
+        />
+      )}
+
+      {saveToView && (
+        <SaveToViewDialog
+          code={authorityCode}
+          ids={results.map((r) => String(r['MISPAR_ZEHUT'] ?? '')).filter(Boolean)}
+          filters={activeFilters}
+          fields={selectedFields}
+          basePreset={activePreset}
+          onClose={() => setSaveToView(false)}
+        />
+      )}
+
+      {manager && (
+        <ExtraColumnsManager
+          code={authorityCode}
+          authorityName={authorityName}
+          columns={extraColumns}
+          usage={extraUsage}
+          canManage={canManageColumns}
+          onChanged={loadExtra}
+          viewId={viewId ?? null}
+          viewName={activeView?.name}
+          onCreated={(key) =>
+            setSelectedFields((prev) => (prev.includes(key) ? prev : [...prev, key]))
+          }
+          startAdding={manager.adding}
+          onClose={() => setManager(null)}
         />
       )}
 

@@ -3,8 +3,10 @@ import {
   ALL_FIELDS,
   FIELD_ORDER,
   PARENT_ID_FIELDS,
+  useFieldsVersion,
   type FieldGroup,
 } from '@/config/fields'
+import { isChecked } from '@/lib/filters'
 
 type Row = Record<string, unknown>
 
@@ -29,6 +31,7 @@ export default function StudentCard({
   onFindSiblings,
 }: Props) {
   const student = rows[index]
+  const fieldsVersion = useFieldsVersion()
 
   // כל השדות עם ערך, מקובצים לפי קבוצה לוגית
   const groups = useMemo(() => {
@@ -36,12 +39,19 @@ export default function StudentCard({
     for (const f of ALL_FIELDS) {
       const value = student[f.key]
       if (value === null || value === undefined || String(value).trim() === '') continue
+      // תיבת סימון: "מסומן" ולא "true". תא שאינו מסומן פשוט אינו מוצג,
+      // כמו כל שדה ריק אחר בכרטיס.
+      if (f.type === 'boolean' && !isChecked(value)) continue
+      const shown = f.type === 'boolean' ? '✓ מסומן' : String(value)
       const arr = map.get(f.group) ?? []
-      arr.push({ label: f.label, key: f.key, value: String(value) })
+      arr.push({ label: f.label, key: f.key, value: shown })
       map.set(f.group, arr)
     }
     return map
-  }, [student])
+    // ALL_FIELDS הוא binding חי שמשתנה ברישום עמודות תוספתיות;
+    // ה-linter מניח שייצוא הוא קבוע ולכן חושב שהתלות מיותרת.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [student, fieldsVersion])
 
   const fullName = `${student['SHEM_PRATI'] ?? ''} ${student['SHEM_MISHPACHA'] ?? ''}`.trim()
 

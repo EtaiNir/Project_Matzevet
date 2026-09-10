@@ -6,6 +6,7 @@ import Contact from './pages/Contact'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Pivot from './pages/Pivot'
+import SavedViews from './pages/SavedViews'
 import UpdateData from './pages/UpdateData'
 import Admin from './pages/Admin'
 import ClientDetail from './pages/ClientDetail'
@@ -53,6 +54,9 @@ export default function App() {
       <Route path="/students/:code" element={<Dashboard />} />
       <Route path="/pivot" element={<Pivot />} />
       <Route path="/pivot/:code" element={<Pivot />} />
+      {/* רשימת הטבלאות הייעודיות, ופתיחת אחת מהן בטבלה הראשית */}
+      <Route path="/views/:code" element={<SavedViews />} />
+      <Route path="/views/:code/:viewId" element={<Dashboard />} />
       {/* עדכון מצב"ת — מנהל רשות וגם מנהל־על; ההרשאה נאכפת ב-RLS */}
       <Route path="/upload/:code" element={<UpdateData />} />
 

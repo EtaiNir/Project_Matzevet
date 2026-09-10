@@ -67,6 +67,13 @@ export interface ManagedUser {
   scope_values: string[]
   /** מושהה — לא יכול להתחבר, ולא רואה נתונים גם עם טוקן ישן */
   is_suspended: boolean
+  /**
+   * רשאי למלא ערכים בעמודות שהמשתמש הוסיף (מיגרציה 016).
+   *
+   * רלוונטי ל-`viewer` בלבד: `admin` ו-`super_admin` רשאים ממילא, ולכן
+   * הדגל נשמר `false` אצלם — כדי שהורדה בתפקיד לא תשאיר הרשאה תלויה.
+   */
+  can_edit_extra?: boolean
   /** תיאוריים בלבד; קיימים רק אחרי מיגרציה 010 */
   job_title?: string | null
   institution_name?: string | null
@@ -352,7 +359,8 @@ export async function documentUrl(doc: ClientDocument): Promise<string | null> {
 
 const USER_BASE_COLUMNS =
   'id, email, display_name, role, authority_codes, scope_level, scope_values, is_suspended'
-const USER_PROFILE_COLUMNS = 'job_title, institution_name, institution_code'
+const USER_PROFILE_COLUMNS =
+  'job_title, institution_name, institution_code, can_edit_extra'
 
 /**
  * מחזירה את המשתמשים, ומדווחת אם שדות התפקיד והמוסד קיימים במסד.
@@ -454,6 +462,7 @@ export async function updateUserPermissions(
       | 'job_title'
       | 'institution_name'
       | 'institution_code'
+      | 'can_edit_extra'
     >
   >,
 ) {

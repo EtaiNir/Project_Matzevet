@@ -5,7 +5,7 @@ import { fetchAllStudents, type StudentRow } from '@/lib/students'
 import { withComputedFields } from '@/lib/computed'
 import { applyFilters, isConditionReady, type FilterCondition } from '@/lib/filters'
 import { fetchAuthorities, type Authority } from '@/lib/admin'
-import { fieldLabel, ALL_FIELDS } from '@/config/fields'
+import { fieldLabel, ALL_FIELDS, useFieldsVersion } from '@/config/fields'
 import { ACTIVE_STATUS_FIELD, ACTIVE_STATUS_VALUE } from '@/config/presets'
 import {
   buildPivot,
@@ -114,7 +114,10 @@ export default function Pivot() {
     )
   }
 
-  const fieldOptions = ALL_FIELDS
+  const fieldsVersion = useFieldsVersion()
+  // ALL_FIELDS הוא binding חי שמשתנה ברישום עמודות תוספתיות
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fieldOptions = useMemo(() => ALL_FIELDS, [fieldsVersion])
 
   return (
     <div className="flex h-full flex-col bg-slate-50">

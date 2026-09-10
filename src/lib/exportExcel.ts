@@ -5,6 +5,7 @@
 // גלישת טקסט, גבולות לכל התאים, ורוחב עמודות אוטומטי. ראה lib/xlsx.ts.
 
 import { fieldLabel, getField } from '@/config/fields'
+import { isChecked } from './filters'
 import { downloadWorkbook, type CellValue } from './xlsx'
 
 type Row = Record<string, unknown>
@@ -31,13 +32,18 @@ export async function exportToExcel(
   // רק שדות שהוגדרו כמספריים נכתבים כמספר. תעודות זהות וסמלי מוסד הם
   // טקסט בהגדרה — אחרת אקסל מוחק אפסים מובילים ומציג כתיב מדעי.
   const numericColumns = new Set<number>()
+  const checkboxColumns = new Set<number>()
   fields.forEach((key, i) => {
-    if (getField(key)?.type === 'number') numericColumns.add(i)
+    const type = getField(key)?.type
+    if (type === 'number') numericColumns.add(i)
+    if (type === 'boolean') checkboxColumns.add(i)
   })
 
   const data: CellValue[][] = rows.map((row) =>
     fields.map((key, i) => {
       const value = row[key]
+      // תיבת סימון: ✓ או תא ריק. לא TRUE/FALSE באנגלית באמצע גיליון עברי.
+      if (checkboxColumns.has(i)) return isChecked(value) ? '✓' : ''
       if (value === null || value === undefined) return ''
       if (numericColumns.has(i)) {
         const num = Number(value)

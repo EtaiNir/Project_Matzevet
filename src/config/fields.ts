@@ -1,8 +1,10 @@
+import { useSyncExternalStore } from 'react'
+
 // הגדרת כל השדות במערכת — מקור אמת אחד לתוויות בעברית, סוגים וקבוצות.
 // המפתח (key) הוא שם העמודה במסד הנתונים (Supabase), התווית (label) היא הטקסט המוצג.
 // נגזר מ-columns_name_dictionary.xlsx של ה-pipeline (python_name ↔ access_name).
 
-export type FieldType = 'text' | 'number' | 'date'
+export type FieldType = 'text' | 'number' | 'date' | 'boolean'
 
 export type FieldGroup =
   | 'פרטים אישיים'
@@ -11,6 +13,7 @@ export type FieldGroup =
   | 'כתובת'
   | 'שיבוץ וסטטוס'
   | 'הורים'
+  | 'נתונים תוספתיים'
 
 export interface FieldDef {
   /** שם העמודה במסד הנתונים */
@@ -23,6 +26,8 @@ export interface FieldDef {
   group: FieldGroup
   /** שדה מחושב שנוצר בעיבוד (pipeline), לא מגיע ישירות ממשרד החינוך */
   computed?: boolean
+  /** עמודה שהמשתמש הוסיף (extra_columns). ניתנת לעריכה, ואינה מגיעה ממצב"ת */
+  extra?: boolean
 }
 
 // שדות מחושבים (אפיון §4) — מגיעים מפלט ה-pipeline; הלוגיקה המלאה מטופלת בשלב ג'.
@@ -201,13 +206,75 @@ export const PRIMARY_KEY = 'MISPAR_ZEHUT'
 /** ת.ז. של גורמי קשר (הורים) — משמש לפונקציית זיהוי אחים (אפיון §5, תצורה 2). */
 export const PARENT_ID_FIELDS = ['GOREM_KESHER_1_ID', 'GOREM_KESHER_2_ID'] as const
 
-/** כל השדות במערכת — מחושבים תחילה, ואז שדות המקור. */
-export const ALL_FIELDS: FieldDef[] = [...COMPUTED_FIELDS, ...SOURCE_FIELDS]
+/** הקבוצה שאליה משויכות כל העמודות שהמשתמש הוסיף. */
+export const EXTRA_GROUP: FieldGroup = 'נתונים תוספתיים'
 
-const FIELD_MAP: Record<string, FieldDef> = Object.fromEntries(
-  ALL_FIELDS.map((f) => [f.key, f]),
-)
+/** שדות המקור והמחושבים — קבועים, ידועים בזמן בנייה. */
+const BASE_FIELDS: FieldDef[] = [...COMPUTED_FIELDS, ...SOURCE_FIELDS]
 
+function buildMap(fields: FieldDef[]): Record<string, FieldDef> {
+  return Object.fromEntries(fields.map((f) => [f.key, f]))
+}
+
+// ─────────────────── רישום העמודות שהמשתמש הוסיף ───────────────────
+//
+// העמודות התוספתיות אינן ידועות בזמן בנייה — הן נטענות מהמסד לפי רשות.
+// אחת-עשרה נקודות בקוד קוראות ל-getField / fieldLabel / ALL_FIELDS,
+// והעברת רשימה דינמית דרך context הייתה נוגעת בכולן. במקום זה — רישום
+// ברמת המודול, באותו דפוס של המטמון ב-lib/students.ts.
+//
+// ALL_FIELDS הוא `export let` ולא `const`: ב-ES modules הייבוא הוא
+// binding חי, ולכן כל מי שמייבא אותו רואה את הערך המעודכן בלי לשנות
+// שורה. מי שצריך גם *להתרנדר מחדש* כשהרשימה משתנה — משתמש
+// ב-useFieldsVersion() ומכניס אותו ל-deps.
+
+let extraFields: FieldDef[] = []
+let version = 0
+const listeners = new Set<() => void>()
+
+export let ALL_FIELDS: FieldDef[] = BASE_FIELDS
+let FIELD_MAP: Record<string, FieldDef> = buildMap(BASE_FIELDS)
+
+function rebuild(): void {
+  ALL_FIELDS = extraFields.length ? [...BASE_FIELDS, ...extraFields] : BASE_FIELDS
+  FIELD_MAP = buildMap(ALL_FIELDS)
+  version += 1
+  listeners.forEach((notify) => notify())
+}
+
+/** מחליף את העמודות התוספתיות הרשומות. נקרא בכל החלפת רשות. */
+export function registerExtraFields(defs: FieldDef[]): void {
+  extraFields = defs.map((d) => ({ ...d, extra: true, group: EXTRA_GROUP }))
+  rebuild()
+}
+
+export function clearExtraFields(): void {
+  if (extraFields.length === 0) return
+  extraFields = []
+  rebuild()
+}
+
+export function useFieldsVersion(): number {
+  return useSyncExternalStore(
+    (notify) => {
+      listeners.add(notify)
+      return () => {
+        listeners.delete(notify)
+      }
+    },
+    () => version,
+    () => version,
+  )
+}
+
+/**
+ * הגדרת שדה לפי מפתח.
+ *
+ * מחזיר undefined לשדה שאינו רשום — למשל עמודה תוספתית שנמחקה ומופיעה
+ * עדיין ב-fields של מסך שמור. כל המנועים נופלים במקרה כזה ל-'text',
+ * כלומר מסך ישן אינו קורס אלא רק מתעלם מהעמודה. אם העמודה תשוחזר
+ * מסל הגריעה — היא תחזור לשם מעצמה.
+ */
 export function getField(key: string): FieldDef | undefined {
   return FIELD_MAP[key]
 }
@@ -224,4 +291,5 @@ export const FIELD_ORDER: readonly FieldGroup[] = [
   'כתובת',
   'הורים',
   'שיבוץ וסטטוס',
+  EXTRA_GROUP,
 ]

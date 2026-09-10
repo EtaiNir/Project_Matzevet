@@ -133,6 +133,9 @@ export default function PermissionsTab({ code }: Props) {
         // נשלחים רק אם העמודות קיימות, אחרת העדכון כולו נכשל
         ...(hasProfileFields
           ? {
+              // מאופס למי שאינו צופה: הורדה בתפקיד לא תשאיר הרשאה
+              // תלויה שאיש אינו רואה במסך.
+              can_edit_extra: draft.role === 'viewer' ? Boolean(draft.can_edit_extra) : false,
               job_title: draft.job_title?.trim() || null,
               institution_name: draft.institution_name?.trim() || null,
               institution_code: draft.institution_code?.trim() || null,
@@ -255,6 +258,14 @@ export default function PermissionsTab({ code }: Props) {
                       <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
                         {ROLE_LABELS[user.role]}
                       </span>
+                      {user.role === 'viewer' && user.can_edit_extra && (
+                        <span
+                          title="רשאי למלא ערכים בעמודות שהמשתמש הוסיף"
+                          className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700"
+                        >
+                          עריכת עמודות
+                        </span>
+                      )}
                       {user.role !== 'super_admin' && (
                         <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-700">
                           {user.scope_level === 'council'
@@ -394,6 +405,34 @@ export default function PermissionsTab({ code }: Props) {
                         </label>
                       )}
                     </div>
+
+                    {/*
+                      רלוונטי ל-viewer בלבד. מנהל רשות ומעלה רשאי ממילא
+                      (may_edit_extra), ולכן תיבה אצלו הייתה מבלבלת —
+                      נראית כאילו אפשר לשלול ממנו משהו.
+                    */}
+                    {hasProfileFields && draft.role === 'viewer' && (
+                      <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(draft.can_edit_extra)}
+                          onChange={(e) =>
+                            setDraft({ ...draft, can_edit_extra: e.target.checked })
+                          }
+                          className="mt-0.5 accent-sky-600"
+                        />
+                        <span className="text-sm">
+                          <span className="font-medium text-slate-700">
+                            עריכת עמודות שהמשתמש הוסיף
+                          </span>
+                          <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                            מאפשר למלא ערכים בעמודות התוספתיות — לסמן תיבות ולכתוב
+                            הערות. <strong>אינו</strong> מאפשר ליצור או למחוק עמודות,
+                            ואינו משנה אילו תלמידים המשתמש רואה.
+                          </span>
+                        </span>
+                      </label>
+                    )}
 
                     {draft.role !== 'super_admin' && draft.scope_level !== 'council' && (
                       <div>

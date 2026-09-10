@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ALL_FIELDS, FIELD_ORDER, type FieldGroup } from '@/config/fields'
+import { ALL_FIELDS, FIELD_ORDER, useFieldsVersion, type FieldGroup } from '@/config/fields'
 
 interface Props {
   selected: string[]
@@ -20,6 +20,7 @@ export default function FieldPicker({
   onClose,
 }: Props) {
   const [query, setQuery] = useState('')
+  const fieldsVersion = useFieldsVersion()
   const selectedSet = useMemo(() => new Set(selected), [selected])
 
   /** השדות שעוברים את החיפוש — לפי התווית בעברית או שם העמודה באנגלית */
@@ -29,7 +30,10 @@ export default function FieldPicker({
     return ALL_FIELDS.filter(
       (f) => f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q),
     )
-  }, [query])
+    // ALL_FIELDS הוא binding חי שמשתנה ברישום עמודות תוספתיות;
+    // ה-linter מניח שייצוא הוא קבוע ולכן חושב שהתלות מיותרת.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, fieldsVersion])
 
   const grouped = useMemo(() => {
     const map = new Map<FieldGroup, typeof ALL_FIELDS>()

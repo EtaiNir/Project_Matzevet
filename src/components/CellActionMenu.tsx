@@ -11,6 +11,10 @@ interface Props {
   anchor: DOMRect
   onOpenCard: () => void
   onOpenFilter: () => void
+  /** הסרת העמודה מהתצוגה. אינה מוחקת דבר — רק מורידה אותה מהטבלה. */
+  onHideColumn?: () => void
+  /** הסרת התלמיד מהטבלה הייעודית הפתוחה. מוצג רק במצב הזה. */
+  onRemoveFromView?: () => void
   onClose: () => void
 }
 
@@ -33,6 +37,8 @@ export default function CellActionMenu({
   anchor,
   onOpenCard,
   onOpenFilter,
+  onHideColumn,
+  onRemoveFromView,
   onClose,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null)
@@ -102,6 +108,29 @@ export default function CellActionMenu({
         <span>▼</span>
         <span className="truncate">סינון לפי {columnLabel}</span>
       </button>
+
+      {onRemoveFromView && (
+        <button
+          onClick={onRemoveFromView}
+          title="התלמיד יוסר מהרשימה הזו בלבד. הנתונים שלו אינם נמחקים."
+          className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-red-50 hover:text-red-700"
+        >
+          <span>➖</span>
+          <span className="truncate">הסרה מהטבלה הייעודית</span>
+        </button>
+      )}
+
+      {/* הסתרה ולא מחיקה: העמודה יורדת מהתצוגה בלבד, וחוזרת מבורר השדות */}
+      {onHideColumn && (
+        <button
+          onClick={onHideColumn}
+          title="העמודה תרד מהתצוגה. אפשר להחזיר אותה מבורר השדות."
+          className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-sky-50 hover:text-sky-800"
+        >
+          <span>🚫</span>
+          <span className="truncate">הסתרת עמודת {columnLabel}</span>
+        </button>
+      )}
     </div>,
     document.body,
   )
