@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
   fetchAllStudents,
@@ -37,11 +37,14 @@ import {
 } from '@/config/fields'
 import { fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
+  deleteSavedView,
   fetchSavedView,
+  fetchSavedViews,
   fetchViewMembers,
   removeStudentFromView,
   type SavedView,
 } from '@/lib/savedViews'
+import type { PivotNavState } from '@/lib/pivot'
 import FilterBar from '@/components/FilterBar'
 import FieldPicker from '@/components/FieldPicker'
 import StudentTable from '@/components/StudentTable'
@@ -49,17 +52,9 @@ import StudentCard from '@/components/StudentCard'
 import ColumnFilterMenu from '@/components/ColumnFilterMenu'
 import CellActionMenu from '@/components/CellActionMenu'
 import ExtraColumnsManager from '@/components/ExtraColumnsManager'
+import StudentsRail from '@/components/StudentsRail'
+import RailTopBar from '@/components/RailTopBar'
 import SaveToViewDialog from '@/components/SaveToViewDialog'
-import Logo from '@/components/brand/Logo'
-
-/** קו מפריד בין פריטי הסרגל העליון */
-function Sep() {
-  return (
-    <span className="select-none text-slate-300" aria-hidden>
-      |
-    </span>
-  )
-}
 
 function newId() {
   return Math.random().toString(36).slice(2, 9)
@@ -90,6 +85,7 @@ export default function Dashboard() {
   // קוד הרשות מגיע מהנתיב (/students/:code) כשמגיעים ממסך המנהל
   // viewId קיים רק במסלול /views/:code/:viewId — מצב "טבלה ייעודית"
   const { code: codeFromUrl, viewId } = useParams()
+  const navigate = useNavigate()
   const isSuperAdmin = profile?.role === 'super_admin'
 
   // הרשויות הזמינות: מנהל־על רואה את כולן, משתמש רגיל רק את שלו
@@ -127,7 +123,11 @@ export default function Dashboard() {
   const [extraValues, setExtraValues] = useState<ExtraValues>(() => new Map())
   // null = סגור. adding = להיפתח ישר על טופס ההוספה (כפתור ה-+ שבכותרת)
   const [manager, setManager] = useState<{ adding: boolean } | null>(null)
+  const [savedViews, setSavedViews] = useState<SavedView[]>([])
+
   const [saveToView, setSaveToView] = useState(false)
+  /** הטבלה הייעודית שממתינה לאישור מחיקה מהסרגל */
+  const [deletingView, setDeletingView] = useState<SavedView | null>(null)
   // מצב טבלה ייעודית: הרשימה עצמה, והת"ז שבה
   const [activeView, setActiveView] = useState<SavedView | null>(null)
   const [viewMembers, setViewMembers] = useState<Set<string> | null>(null)
@@ -203,6 +203,15 @@ export default function Dashboard() {
     loadView()
   }, [loadView])
 
+  const loadViews = useCallback(async () => {
+    if (!authorityCode) return
+    setSavedViews(await fetchSavedViews(authorityCode))
+  }, [authorityCode])
+
+  useEffect(() => {
+    loadViews()
+  }, [loadViews])
+
   useEffect(() => {
     loadExtra()
     // ברשות אחרת יש עמודות אחרות — הרישום הישן חייב להתנקות
@@ -243,6 +252,20 @@ export default function Dashboard() {
     return out
   }, [extraValues])
 
+  /**
+   * כמה תלמידים בכל תצורה, לפי הסינון שנפתח איתה.
+   *
+   * מחושב על המערך שכבר בזיכרון — חמש תצורות על 8,000 שורות הן עבודה
+   * זניחה, ובלי המספרים הסרגל הוא רשימת שמות בלבד.
+   */
+  const presetCounts = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const p of PRESETS) {
+      out[p.id] = applyFilters(allStudents, presetFilters(p).filter(isConditionReady)).length
+    }
+    return out
+  }, [allStudents])
+
   /** יצירה ומחיקה של עמודות — מנהל רשות ומעלה, כמו העלאת מצב"ת */
   const canManageColumns =
     isSuperAdmin ||
@@ -267,6 +290,23 @@ export default function Dashboard() {
         ? [...prev, ...extraKeys.filter((k) => !prev.includes(k))]
         : prev.filter((k) => !extraKeys.includes(k)),
     )
+  }
+
+  /**
+   * מחיקת טבלה ייעודית מהסרגל.
+   *
+   * אם מחקנו את זו שפתוחה כרגע חוזרים לטבלה הראשית — אחרת המסך היה
+   * ממשיך להציג רשימה שכבר אינה קיימת.
+   */
+  async function confirmDeleteView(view: SavedView) {
+    try {
+      await deleteSavedView(view.id)
+      setDeletingView(null)
+      await loadViews()
+      if (viewId === view.id) navigate(`/students/${authorityCode}`)
+    } catch (e) {
+      setError((e as Error).message)
+    }
   }
 
   /** הסרת תלמיד מהטבלה הייעודית הפתוחה. נתוניו אינם נמחקים. */
@@ -376,6 +416,27 @@ export default function Dashboard() {
    * העמודות שיש עליהן סינון פעיל — לסימון המשפך בכותרת.
    * כל סוגי הסינון נספרים, לא רק בחירה מרובה.
    */
+  /**
+   * ההיקף שנשלח לפיבוט — בדיוק השורות שעל המסך, לפי ת"ז.
+   *
+   * נשלח רק כשבאמת צמצמנו משהו. בלי צמצום עדיף לא לשלוח 7,900 מזהים
+   * דרך ה-state של הניווט, והפיבוט פותח ממילא בסינון ברירת המחדל שלו.
+   */
+  const pivotState = useMemo<PivotNavState | undefined>(() => {
+    const narrowed = activeFilters.length > 0 || Boolean(viewMembers) || Boolean(siblingParentId)
+    if (!narrowed) return undefined
+    const label = activeView
+      ? `טבלה ייעודית «${activeView.name}»`
+      : siblingParentId
+        ? `האחים של ת.ז. ${siblingParentId}`
+        : `הסינון שבטבלה (${activeFilters.length} תנאים)`
+    return {
+      ids: results.map((r) => String(r['MISPAR_ZEHUT'] ?? '')).filter(Boolean),
+      filters: activeFilters,
+      fromLabel: label,
+    }
+  }, [results, activeFilters, viewMembers, siblingParentId, activeView])
+
   const filteredFields = useMemo(
     () => new Set(activeFilters.map((c) => c.field)),
     [activeFilters],
@@ -480,172 +541,42 @@ export default function Dashboard() {
   ].filter(Boolean) as string[]
 
   return (
-    <div className="flex h-full flex-col">
-      {/* פס עליון */}
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3">
-          <Logo className="h-8 w-8 shrink-0" />
-          <h1 className="text-lg font-bold text-sky-800">ניהול נתוני תלמידים</h1>
-          {authorities.length > 1 ? (
-            <select
-              value={authorityCode}
-              onChange={(e) => setAuthorityCode(e.target.value)}
-              className="rounded-lg border border-slate-300 px-2 py-1 text-sm"
-            >
-              {authorities.map((a) => {
-                const name = allAuthorities.find((x) => x.code === a)?.name
-                return (
-                  <option key={a} value={a}>
-                    {name ? `${name} (${a})` : `רשות ${a}`}
-                  </option>
-                )
-              })}
-            </select>
-          ) : (
-            <span className="rounded-lg bg-sky-50 px-2 py-1 text-sm font-medium text-sky-800">
-              {authorityName ? `${authorityName} (${authorityCode})` : `רשות ${authorityCode || '—'}`}
-            </span>
-          )}
-        </div>
-
-        {/*
-          זהות המשתמש — שם, תפקיד, מוסד וסוג הרשאה (הערות 1 ו-4).
-          הכל בשורה אחת, מופרד בקווים אנכיים.
-        */}
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          {isSuperAdmin && (
-            <>
-              <Link
-                to={authorityCode ? `/admin/client/${authorityCode}` : '/admin'}
-                className="rounded-lg px-2 py-1 text-slate-500 transition hover:bg-sky-50 hover:text-sky-700"
-                title="חזרה לכרטיס המועצה, בלי לצאת מהמערכת"
-              >
-                חזרה לניהול
-              </Link>
-              <Sep />
-            </>
-          )}
-
-          <span className="font-medium text-slate-700">
-            {profile?.display_name ?? profile?.email}
-          </span>
-
-          {identityParts.map((part, i) => (
-            <Fragment key={i}>
-              <Sep />
-              <span className="text-slate-400">{part}</span>
-            </Fragment>
-          ))}
-
-          <Sep />
-          <button
-            onClick={signOut}
-            className="rounded-lg px-2 py-1 text-slate-500 transition hover:bg-red-50 hover:text-red-600"
-          >
-            יציאה
-          </button>
-        </div>
-      </header>
-
-      {/* טאבים של תצורות */}
-      <div className="flex flex-wrap gap-1 border-b border-slate-200 bg-white px-4 pt-2">
-        {PRESETS.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => changePreset(p.id)}
-            title={p.description}
-            className={
-              'rounded-t-lg px-4 py-2 text-sm font-medium transition ' +
-              (activePreset === p.id
-                ? 'border-b-2 border-sky-600 bg-sky-600 text-white shadow-sm'
-                : 'border-b-2 border-transparent text-slate-600 hover:bg-sky-50 hover:text-sky-700')
-            }
-          >
-            {p.name}
-          </button>
-        ))}
-      </div>
-
-      {/* סרגל כלים */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setPickerOpen(true)}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700"
-          >
-            ⚙ בורר שדות ({selectedFields.length})
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={exporting}
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700 hover:shadow disabled:opacity-60"
-          >
-            {exporting ? '⬇ מייצא…' : '⬇ ייצוא לאקסל'}
-          </button>
-          {/* הסינון הנוכחי נוסע עם הניווט — סבא: "אחרי שהגדרת טבלה
-              שסיננת וצמצמת, ייצוא לדף הפיבוט" */}
-          <span className="group relative">
-            <Link
-              to={`/pivot/${authorityCode}`}
-              state={{ filters: activeFilters }}
-              className="block rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700"
-            >
-              ▦ פיבוטים
-            </Link>
-            {/* הסבר בריחוף — הפיבוט כבד ככל שהטבלה גדולה */}
-            <span className="pointer-events-none absolute right-0 top-full z-40 mt-1 w-64 rounded-lg bg-slate-800 px-3 py-2 text-xs leading-relaxed text-white opacity-0 shadow-lg transition group-hover:opacity-100">
-              דוחות סיכום — כמה תלמידים בכל מוסד, שכבה ויישוב.
-              <span className="mt-1 block text-amber-200">
-                מומלץ לסנן ולצמצם את הטבלה לפני השימוש בפיבוט.
-              </span>
-            </span>
-          </span>
-          {!activeView && (
-            <button
-              onClick={() => setSaveToView(true)}
-              disabled={results.length === 0}
-              title="לקחת את מי שסונן ולשמור אותו כרשימה קבועה"
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40"
-            >
-              ▦ טבלה ייעודית
-            </button>
-          )}
-          <Link
-            to={`/views/${authorityCode}`}
-            className="rounded-lg px-2 py-1.5 text-sm text-slate-500 transition hover:bg-sky-50 hover:text-sky-700"
-          >
-            הטבלאות הייעודיות
-          </Link>
-
-          {/* מנהל רשות יכול לעדכן את הנתונים בעצמו, מתי שהוא רוצה */}
-          {(isSuperAdmin || profile?.role === 'admin') && authorityCode && (
-            <Link
-              to={`/upload/${authorityCode}`}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700"
-              title="העלאת ששת קבצי המצב״ת ועדכון הנתונים"
-            >
-              ⬆ עדכון מצב״ת
-            </Link>
-          )}
-          <button
-            onClick={refresh}
-            disabled={refreshing || loading}
-            title="טעינה מחדש מהמסד — אחרי עדכון מצב״ת"
-            className="rounded-lg px-2 py-1.5 text-sm text-slate-500 transition hover:bg-sky-50 hover:text-sky-700 disabled:opacity-40"
-          >
-            {refreshing ? '⟳ מרענן…' : '⟳ רענון'}
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3 text-sm text-slate-600">
-          <span>
-            <strong className="text-sky-700">{results.length.toLocaleString('he-IL')}</strong> תלמידים
-            {(activeFilters.length > 0 || siblingParentId) &&
-              ` (מתוך ${allStudents.length.toLocaleString('he-IL')})`}
-          </span>
-
-        </div>
-      </div>
+    <div className="flex h-full flex-col overflow-hidden">
+      <RailTopBar
+        authorityCode={authorityCode}
+        authorityName={authorityName}
+        authorities={authorities}
+        authorityLabel={(a) => {
+          const name = allAuthorities.find((x) => x.code === a)?.name
+          return name ? `${name} (${a})` : `רשות ${a}`
+        }}
+        onAuthorityChange={setAuthorityCode}
+        shown={results.length}
+        total={allStudents.length}
+        filtered={activeFilters.length > 0 || Boolean(siblingParentId)}
+        filterSlot={
+          <FilterBar
+            conditions={filters}
+            onChange={setFilters}
+            valuesFor={valuesForField}
+            onReset={resetView}
+            compact
+          />
+        }
+        pivotState={pivotState}
+        selectedFieldCount={selectedFields.length}
+        onOpenPicker={() => setPickerOpen(true)}
+        onExport={handleExport}
+        exporting={exporting}
+        onRefresh={refresh}
+        refreshing={refreshing}
+        canUpdateMoe={isSuperAdmin || profile?.role === 'admin'}
+        isSuperAdmin={isSuperAdmin}
+        identity={[profile?.display_name ?? profile?.email, ...identityParts]
+          .filter(Boolean)
+          .join(" · ")}
+        onSignOut={signOut}
+      />
 
       {activeView && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-900">
@@ -678,38 +609,55 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* סינון */}
-      <FilterBar
-        conditions={filters}
-        onChange={setFilters}
-        valuesFor={valuesForField}
-        onReset={resetView}
-      />
 
-      {/* הטבלה */}
-      <div className="min-h-0 flex-1 bg-white">
-        {loading ? (
-          <div className="p-8 text-center text-slate-400">טוען תלמידים…</div>
-        ) : error ? (
-          <div className="p-8 text-center text-red-600">שגיאה: {error}</div>
-        ) : (
-          <StudentTable
-            rows={results}
-            fields={currentFields}
-            sort={sort}
-            onSort={handleSort}
-            onRowClick={setCardIndex}
-            onCellClick={(index, field, anchor) => setCellMenu({ index, field, anchor })}
-            filteredFields={filteredFields}
-            onOpenFilter={(field, anchor) => setColumnMenu({ field, anchor })}
-            canEditExtra={canEditExtra}
-            onExtraChange={handleExtraChange}
-            onAddColumn={canManageColumns ? () => setManager({ adding: true }) : undefined}
-            onToggleExtra={toggleExtraColumns}
-            extraHidden={extraHidden}
-            hasExtraColumns={extraColumns.length > 0}
-          />
-        )}
+      {/* הסרגל מימין; הטבלה משמאלו וגוללת בשני הצירים */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <StudentsRail
+          authorityCode={authorityCode}
+          presets={PRESETS}
+          activePreset={activePreset}
+          onPresetChange={(id) => {
+            changePreset(id)
+            // בחירת תצורה בזמן שטבלה ייעודית פתוחה — יוצאים ממנה,
+            // אחרת התצורה מתחלפת אבל הרשימה ממשיכה לצמצם את השורות.
+            if (viewId) navigate(`/students/${authorityCode}`)
+          }}
+          presetCounts={presetCounts}
+          views={savedViews}
+          activeViewId={viewId ?? null}
+          onSaveToView={() => setSaveToView(true)}
+          canSaveToView={!activeView && results.length > 0}
+          onDeleteView={setDeletingView}
+          // צופה מוחק רק את מה שהוא עצמו יצר — אותו כלל כמו במסך הטבלאות
+          canDeleteView={(v) => v.created_by === profile?.id || profile?.role !== 'viewer'}
+        />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* הטבלה */}
+          <div className="min-h-0 flex-1 bg-white">
+            {loading ? (
+              <div className="p-8 text-center text-slate-400">טוען תלמידים…</div>
+            ) : error ? (
+              <div className="p-8 text-center text-red-600">שגיאה: {error}</div>
+            ) : (
+              <StudentTable
+                rows={results}
+                fields={currentFields}
+                sort={sort}
+                onSort={handleSort}
+                onRowClick={setCardIndex}
+                onCellClick={(index, field, anchor) => setCellMenu({ index, field, anchor })}
+                filteredFields={filteredFields}
+                onOpenFilter={(field, anchor) => setColumnMenu({ field, anchor })}
+                canEditExtra={canEditExtra}
+                onExtraChange={handleExtraChange}
+                onAddColumn={canManageColumns ? () => setManager({ adding: true }) : undefined}
+                onToggleExtra={toggleExtraColumns}
+                extraHidden={extraHidden}
+                hasExtraColumns={extraColumns.length > 0}
+              />
+            )}
+        </div>
+        </div>
       </div>
 
       {cellMenu && results[cellMenu.index] && (
@@ -755,6 +703,33 @@ export default function Dashboard() {
           anchor={columnMenu.anchor}
           onClose={() => setColumnMenu(null)}
         />
+      )}
+
+      {/* מחיקת טבלה ייעודית מהסרגל — אישור מפורש, כי אין ממנה חזרה */}
+      {deletingView && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div dir="rtl" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="font-bold text-red-800">מחיקת «{deletingView.name}»</h3>
+            <p className="mt-2 text-sm text-slate-700">
+              הרשימה תימחק על {(deletingView.member_count ?? 0).toLocaleString('he-IL')} התלמידים
+              שבה. <strong>נתוני התלמידים עצמם אינם נמחקים</strong> — רק הרשימה.
+            </p>
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={() => confirmDeleteView(deletingView)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+              >
+                מחיקה
+              </button>
+              <button
+                onClick={() => setDeletingView(null)}
+                className="text-sm text-slate-500 transition hover:text-slate-800"
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {saveToView && (

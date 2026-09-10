@@ -11,15 +11,10 @@ import {
   buildPivot,
   cellValue,
   PIVOT_PRESETS,
+  type PivotNavState,
   type PivotPreset,
 } from '@/lib/pivot'
 import { downloadWorkbook } from '@/lib/xlsx'
-
-/** הסינון שמגיע ממסך הטבלה דרך ניווט */
-interface PivotNavState {
-  filters?: FilterCondition[]
-  fromLabel?: string
-}
 
 const DEFAULT_FILTERS: FilterCondition[] = [
   {
@@ -53,8 +48,9 @@ export default function Pivot() {
   const [preset, setPreset] = useState<PivotPreset>(PIVOT_PRESETS[0])
   const [rowField, setRowField] = useState(PIVOT_PRESETS[0].rowField)
   const [colField, setColField] = useState(PIVOT_PRESETS[0].colField)
-  // הסינון שהגענו איתו — ניתן להסרה כדי לראות את כל הרשות
-  const [useIncoming, setUseIncoming] = useState(Boolean(navState.filters?.length))
+  /** ההיקף שהגענו איתו — ניתן להסרה כדי לראות את כל הרשות */
+  const incoming = Boolean(navState.ids?.length || navState.filters?.length)
+  const [useIncoming, setUseIncoming] = useState(incoming)
 
   useEffect(() => {
     fetchAuthorities().then(setAuthorities).catch(() => setAuthorities([]))
@@ -82,7 +78,24 @@ export default function Pivot() {
     return source.filter(isConditionReady)
   }, [useIncoming, navState.filters])
 
-  const rows = useMemo(() => applyFilters(students, filters), [students, filters])
+  /**
+   * רשימת הת"ז שהגיעה מהטבלה גוברת על התנאים.
+   *
+   * היא כבר מגלמת את **כל** הצמצומים שהיו על המסך — סינון, טבלה
+   * ייעודית וזיהוי אחים — ולכן הפיבוט מחושב על בדיוק אותן שורות
+   * שהמשתמש ראה, ולא על שחזור מקורב שלהן.
+   */
+  const incomingIds = useMemo(
+    () => (navState.ids?.length ? new Set(navState.ids) : null),
+    [navState.ids],
+  )
+
+  const rows = useMemo(() => {
+    if (useIncoming && incomingIds) {
+      return students.filter((s) => incomingIds.has(String(s['MISPAR_ZEHUT'] ?? '')))
+    }
+    return applyFilters(students, filters)
+  }, [students, filters, useIncoming, incomingIds])
   const pivot = useMemo(() => buildPivot(rows, rowField, colField), [rows, rowField, colField])
 
   function choosePreset(p: PivotPreset) {
@@ -201,18 +214,19 @@ export default function Pivot() {
         </span>
       </div>
 
-      {navState.filters?.length ? (
+      {incoming ? (
         <div className="flex items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
           <span>
             {useIncoming
-              ? `הפיבוט מחושב על הסינון שהגעת איתו מהטבלה (${navState.filters.length} תנאים)`
-              : 'הסינון שהגעת איתו בוטל — הפיבוט מחושב על כל התלמידים המשובצים'}
+              ? `הפיבוט מחושב על מה שהיה על המסך — ${navState.fromLabel ?? 'הסינון שהגעת איתו'}` +
+                (navState.ids ? ` (${navState.ids.length.toLocaleString('he-IL')} תלמידים)` : '')
+              : 'הצמצום שהגעת איתו בוטל — הפיבוט מחושב על כל התלמידים המשובצים'}
           </span>
           <button
             onClick={() => setUseIncoming((v) => !v)}
             className="rounded border border-amber-300 px-2 py-0.5 hover:bg-amber-100"
           >
-            {useIncoming ? 'ביטול הסינון' : 'החזרת הסינון'}
+            {useIncoming ? 'ביטול הצמצום' : 'החזרת הצמצום'}
           </button>
         </div>
       ) : null}

@@ -61,12 +61,13 @@
 student-dashboard/
 ├── src/
 │   ├── config/       fields.ts (כל השדות + תוויות), presets.ts (5 תצורות)
-│   ├── lib/          supabase.ts, students.ts, filters.ts, table.ts, exportExcel.ts
+│   ├── lib/          supabase.ts, students.ts, filters.ts, table.ts, exportExcel.ts,
+│                     extraColumns.ts (עמודות המשתמש), savedViews.ts (טבלאות ייעודיות)
 │   ├── context/      AuthContext.tsx (אימות + פרופיל משתמש)
-│   ├── components/   StudentTable, FilterBar, FieldPicker, StudentCard
-│   ├── pages/        Login.tsx, Dashboard.tsx
+│   ├── components/   StudentTable, StudentsRail, RailTopBar, FilterBar, FieldPicker, StudentCard
+│   ├── pages/        Login.tsx, Dashboard.tsx, SavedViews.tsx, Pivot.tsx, Admin.tsx
 │   ├── App.tsx, main.tsx, index.css
-├── supabase/migrations/   001 (users/authorities/RLS), 002 (students_1400000)
+├── supabase/migrations/   001 (users/authorities/RLS) … 020 (עמודות המשתמש וטבלאות ייעודיות)
 ├── scripts/          run_migrations.py, load_main.py, create_user.py, load_data.py
 └── docs/             התיעוד הזה
 ```

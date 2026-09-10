@@ -21,6 +21,8 @@ interface Props {
    * מאוד חשובה, שבלחיצה אחת אני חוזר לנקודת האפס."
    */
   onReset: () => void
+  /** מוטמע בתוך שורת הפעולות — בלי מסגרת, רקע וריפוד משלו */
+  compact?: boolean
 }
 
 function newId() {
@@ -36,7 +38,13 @@ function isValueless(op: FilterOperator) {
 }
 
 /** סרגל סינון — אפיון §6.3. שילוב מספר סינונים ב-AND. */
-export default function FilterBar({ conditions, onChange, valuesFor, onReset }: Props) {
+export default function FilterBar({
+  conditions,
+  onChange,
+  valuesFor,
+  onReset,
+  compact = false,
+}: Props) {
   // איזה תנאי "אחד מתוך" פתוח כרגע לבחירה, ומאיפה נפתח התפריט
   const [picking, setPicking] = useState<{ id: string; anchor: DOMRect } | null>(null)
 
@@ -80,7 +88,14 @@ export default function FilterBar({ conditions, onChange, valuesFor, onReset }: 
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-gradient-to-b from-slate-50 to-white px-4 py-2.5">
+    <div
+      className={
+        'flex flex-wrap items-center gap-2 ' +
+        (compact
+          ? ''
+          : 'border-b border-slate-200 bg-gradient-to-b from-slate-50 to-white px-4 py-2.5')
+      }
+    >
       {conditions.map((c) => {
         const field = getField(c.field)
         const ops = operatorsForType(field?.type ?? 'text')

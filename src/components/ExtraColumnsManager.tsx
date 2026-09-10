@@ -31,8 +31,6 @@ interface Props {
   onClose: () => void
 }
 
-const MAX_COLUMNS = 50
-
 function he(date: string) {
   return new Date(date).toLocaleDateString('he-IL', { day: 'numeric', month: 'long' })
 }
@@ -372,13 +370,14 @@ export default function ExtraColumnsManager({
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => setAdding(true)}
-                  disabled={columns.length >= MAX_COLUMNS}
-                  className="rounded-lg border border-dashed border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 transition hover:bg-sky-50 disabled:opacity-40"
+                  className="rounded-lg border border-dashed border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 transition hover:bg-sky-50"
                 >
                   + עמודה חדשה
                 </button>
                 <span className="text-xs text-slate-400">
-                  {columns.length} מתוך {MAX_COLUMNS}
+                  {columns.length === 0
+                    ? ''
+                    : `${columns.length.toLocaleString('he-IL')} עמודות`}
                 </span>
               </div>
             ))}

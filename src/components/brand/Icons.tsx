@@ -36,6 +36,26 @@ export function IconFilter(p: IconProps) {
   )
 }
 
+/** נעץ — קיבוע עמודה או שורה */
+export function IconPin(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9.2 3.5h5.6l-.9 5.2 3.1 3.1H6.9l3.2-3.1z" />
+      <path d="M12 11.8v8.7" />
+    </Svg>
+  )
+}
+
+/** זכוכית מגדלת — חיפוש */
+export function IconSearch(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="10.8" cy="10.8" r="6.3" />
+      <path d="M15.4 15.4 20.5 20.5" />
+    </Svg>
+  )
+}
+
 /** כרטיס תלמיד */
 export function IconCard(p: IconProps) {
   return (

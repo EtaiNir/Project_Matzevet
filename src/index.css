@@ -15,12 +15,29 @@ body {
   color: #0f172a;
 }
 
-/* פס גלילה דק לטבלה */
+/* פסי הגלילה של הטבלה — אנכי ואופקי.
+   מסילה נראית ולא רק אגודל צף: בטבלה שנגללת לשני הכיוונים צריך לראות
+   *איפה* אתה בתוך הרוחב, לא רק שאפשר לגרור. */
+.thin-scrollbar {
+  scrollbar-width: thin;                 /* Firefox */
+  scrollbar-color: #b6c2ce #eef2f6;
+}
 .thin-scrollbar::-webkit-scrollbar {
-  height: 10px;
-  width: 10px;
+  height: 13px;
+  width: 13px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: #eef2f6;
+  border-radius: 9999px;
 }
 .thin-scrollbar::-webkit-scrollbar-thumb {
-  background-color: #cbd5e1;
+  background-color: #b6c2ce;
   border-radius: 9999px;
+  border: 3px solid #eef2f6;             /* מרווח פנימי — האגודל נראה דק בתוך מסילה רחבה */
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #8fa0b0;
+}
+.thin-scrollbar::-webkit-scrollbar-corner {
+  background: #eef2f6;
 }

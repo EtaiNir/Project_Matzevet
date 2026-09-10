@@ -10,6 +10,7 @@ import {
 } from '@/lib/savedViews'
 import { fieldLabel } from '@/config/fields'
 import { operatorLabel } from '@/lib/filters'
+import { IconSearch } from '@/components/brand/Icons'
 
 /** תיאור קצר של הסינון שממנו נזרעה הרשימה — תיעוד, לא תנאי פעיל. */
 function describeSeed(view: SavedView): string {
@@ -36,6 +37,7 @@ export default function SavedViews() {
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [confirming, setConfirming] = useState<SavedView | null>(null)
+  const [query, setQuery] = useState('')
 
   const load = useCallback(async () => {
     setViews(await fetchSavedViews(code))
@@ -49,6 +51,10 @@ export default function SavedViews() {
   }, [load])
 
   const authority = authorities.find((a) => a.code === code)
+
+  // חיפוש לפי שם בלבד — זה מה שהמשתמש זוכר מהרשימה בסרגל
+  const needle = query.trim().toLowerCase()
+  const shown = needle ? views.filter((v) => v.name.toLowerCase().includes(needle)) : views
 
   async function rename(id: string) {
     try {
@@ -84,12 +90,37 @@ export default function SavedViews() {
             רשימות תלמידים קבועות, שנבנו מסינון ואפשר להוסיף ולהסיר מהן ידנית
           </p>
         </div>
-        <Link
-          to={`/students/${code}`}
-          className="rounded-lg px-2 py-1 text-sm text-slate-500 transition hover:bg-sky-50 hover:text-sky-700"
-        >
-          → חזרה לטבלה
-        </Link>
+        <div className="flex items-center gap-3">
+          {views.length > 0 && (
+            <label className="flex items-center gap-2 rounded-lg border border-slate-300 px-2 py-1 transition focus-within:border-sky-400">
+              <IconSearch className="h-4 w-4 shrink-0 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setQuery('')
+                }}
+                placeholder="חיפוש טבלה…"
+                className="w-40 bg-transparent text-sm text-slate-700 focus:outline-none"
+              />
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  aria-label="ניקוי החיפוש"
+                  className="shrink-0 text-slate-400 transition hover:text-slate-700"
+                >
+                  ✕
+                </button>
+              )}
+            </label>
+          )}
+          <Link
+            to={`/students/${code}`}
+            className="rounded-lg px-2 py-1 text-sm text-slate-500 transition hover:bg-sky-50 hover:text-sky-700"
+          >
+            → חזרה לטבלה
+          </Link>
+        </div>
       </header>
 
       <main className="p-6">
@@ -108,8 +139,21 @@ export default function SavedViews() {
           </div>
         )}
 
+        {needle && views.length > 0 && (
+          <p className="mb-3 text-sm text-slate-500">
+            {shown.length.toLocaleString('he-IL')} מתוך {views.length.toLocaleString('he-IL')}{' '}
+            טבלאות תואמות ל«{query.trim()}»
+          </p>
+        )}
+
+        {!loading && views.length > 0 && shown.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-12 text-center text-slate-400">
+            אין טבלה שהשם שלה מכיל «{query.trim()}».
+          </div>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {views.map((v) => (
+          {shown.map((v) => (
             <div
               key={v.id}
               className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:border-sky-300 hover:shadow-md"
