@@ -1,7 +1,9 @@
 import {
+  Fragment,
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -34,6 +36,8 @@ interface Props {
   canSaveToView: boolean
   /** מחיקת טבלה ייעודית. האישור עצמו נעשה במסך שמעל. */
   onDeleteView?: (view: SavedView) => void
+  /** מיזוג: התלמידים של `source` מתווספים ל-`target`. האישור עצמו במסך שמעל. */
+  onMergeView?: (source: SavedView, target: SavedView) => void
 
   onCreateFolder?: (name: string, parentId: string | null) => void
   onRenameFolder?: (id: string, name: string) => void
@@ -47,8 +51,24 @@ const OPEN_KEY = 'matzevet:view-folders-open'
 const MIN_WIDTH = 150
 const MAX_WIDTH = 420
 const DEFAULT_WIDTH = 192
-/** הזחה לכל רמה בעץ, בפיקסלים */
-const INDENT = 14
+const ZOOM_KEY = 'matzevet:rail-zoom'
+const MIN_ZOOM = 0.8
+const MAX_ZOOM = 1.5
+const ZOOM_STEP = 0.1
+/**
+ * הזחה לכל רמה בעץ, בפיקסלים. רחבה מספיק כדי שהקו האופקי ייכנס בין
+ * קו העץ של ההורה לתחילת השורה של הילד.
+ */
+const INDENT = 22
+/** חצי גובה שורה בסרגל — הנקודה שבה הקו האופקי פוגש את השורה */
+const ROW_MID = 16
+const MENU_WIDTH = 220
+const MENU_MAX_HEIGHT = 340
+
+/** הריפוד מתחילת השורה לרמה בעומק הזה */
+const padStart = (depth: number) => 8 + depth * INDENT
+/** מרכז החץ של תיקייה בעומק הזה — משם יורד הקו אל ילדיה */
+const lineX = (depth: number) => padStart(depth) + 6
 
 function readWidth(): number {
   try {
@@ -70,6 +90,35 @@ function readOpen(code: string): Set<string> {
   return new Set()
 }
 
+function readZoom(): number {
+  try {
+    const raw = Number(localStorage.getItem(ZOOM_KEY))
+    if (Number.isFinite(raw) && raw >= MIN_ZOOM && raw <= MAX_ZOOM) return raw
+  } catch {
+    /* אחסון חסום — גודל רגיל */
+  }
+  return 1
+}
+
+function saveOpen(code: string, open: Set<string>): void {
+  try {
+    localStorage.setItem(`${OPEN_KEY}:${code}`, JSON.stringify([...open]))
+  } catch {
+    /* אחסון חסום — הפתיחה תחזיק עד לרענון */
+  }
+}
+
+/** התיקייה ואבותיה, מלמטה למעלה. השומר מגן מעץ פגום. */
+function ancestorChain(folderId: string | null, folders: ViewFolder[]): string[] {
+  const chain: string[] = []
+  let cur = folderId
+  for (let guard = 0; cur && guard < 20; guard++) {
+    chain.push(cur)
+    cur = folders.find((f) => f.id === cur)?.parent_id ?? null
+  }
+  return chain
+}
+
 /** מה נגרר כרגע. הקידומת מפרידה בין תיקייה לטבלה באותו dataTransfer. */
 type DragPayload = { kind: 'view' | 'folder'; id: string }
 
@@ -84,6 +133,28 @@ function decodeDrag(raw: string): DragPayload | null {
 }
 
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'he')
+
+/** תפריט הלחיצה הימנית על טבלה ייעודית, והמסך הפנימי שמוצג בו */
+type ViewMenu = {
+  view: SavedView
+  x: number
+  y: number
+  panel: 'actions' | 'move' | 'merge'
+}
+
+/** מיקום תפריט צף ליד נקודת הלחיצה, בלי לחרוג מהחלון */
+function menuPosition(x: number, y: number, height: number): CSSProperties {
+  return {
+    position: 'fixed',
+    top: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
+    left: Math.min(Math.max(8, x), window.innerWidth - MENU_WIDTH - 8),
+    width: MENU_WIDTH,
+  }
+}
+
+const menuItemBase =
+  'flex w-full items-center gap-2 px-3 py-2 text-right text-sm text-slate-700 transition disabled:cursor-default disabled:opacity-40'
+const menuItem = menuItemBase + ' enabled:hover:bg-sky-50 enabled:hover:text-sky-800'
 
 /**
  * סרגל המסכים — יושב בצד ימין, לצד הטבלה.
@@ -100,11 +171,16 @@ const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompar
  *   לחיצה בודדת   בוחרת תיקייה — והיא היעד של כפתור "תיקייה חדשה"
  *   לחיצה כפולה   פותחת וסוגרת
  *   לחיצה על החץ  פותחת וסוגרת
- *   לחיצה ימנית   תפריט: שינוי שם · תיקייה בתוכה · מחיקה
+ *   לחיצה ימנית   על תיקייה: שינוי שם · תיקייה בתוכה · מחיקה
+ *                 על טבלה:   העברה לתיקייה · מיזוג לטבלה אחרת · מחיקה
  *   גרירה         טבלה או תיקייה אל תוך תיקייה, או אל שטח ריק = שורש
  *
  * לכל מחווה יש תפקיד. לחיצה בודדת שאינה עושה דבר הייתה נראית כתקלה,
  * ולחיצה בודדת שפותחת הייתה מבטלת את הלחיצה הכפולה שנתבקשה.
+ *
+ * תיקייה פתוחה מחוברת לתוכן שלה בקווי עץ: קו יורד מהחץ שלה, וקו אופקי
+ * קצר לכל פריט. בלי הקווים, בעומק שתיים כבר לא ברור לאיזו תיקייה שייכת
+ * טבלה — ההזחה לבדה נבלעת כשהשמות באורכים שונים.
  *
  * בחיפוש העץ **מתמוטט לרשימה שטוחה**, עם נתיב התיקייה מתחת לכל שם —
  * כמו שסייר הקבצים מתנהג בחיפוש. מי שמחפש אינו יודע איפה זה יושב; אם
@@ -125,6 +201,7 @@ export default function StudentsRail({
   onSaveToView,
   canSaveToView,
   onDeleteView,
+  onMergeView,
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
@@ -135,6 +212,22 @@ export default function StudentsRail({
   /** הרוחב העדכני, כדי שסיום הגרירה לא יתלה ב-state שנסגר עליו */
   const widthRef = useRef(width)
   widthRef.current = width
+
+  /** גודל התוכן בסרגל. נשמר בדפדפן, כמו הרוחב */
+  const [zoom, setZoom] = useState(readZoom)
+
+  function changeZoom(delta: number) {
+    setZoom((prev) => {
+      // עיגול לעשירית: חיבור שברים חוזר היה נותן 1.2000000000000002
+      const next = Math.round(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev + delta)) * 10) / 10
+      try {
+        localStorage.setItem(ZOOM_KEY, String(next))
+      } catch {
+        /* אחסון חסום — הגודל יחזיק עד לרענון */
+      }
+      return next
+    })
+  }
 
   /** תיבת החיפוש נפתחת בלחיצה על הזכוכית — היא אינה תופסת מקום כשלא צריך אותה */
   const [searching, setSearching] = useState(false)
@@ -147,6 +240,7 @@ export default function StudentsRail({
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [menu, setMenu] = useState<{ folder: ViewFolder; x: number; y: number } | null>(null)
+  const [viewMenu, setViewMenu] = useState<ViewMenu | null>(null)
   /** מה מסומן כיעד נפילה כרגע: מזהה תיקייה, או 'root' */
   const [dropOn, setDropOn] = useState<string | null>(null)
 
@@ -154,11 +248,20 @@ export default function StudentsRail({
     setOpen((prev) => {
       const next = new Set(prev)
       if (!next.delete(id)) next.add(id)
-      try {
-        localStorage.setItem(`${OPEN_KEY}:${authorityCode}`, JSON.stringify([...next]))
-      } catch {
-        /* אחסון חסום — הפתיחה תחזיק עד לרענון */
-      }
+      saveOpen(authorityCode, next)
+      return next
+    })
+  }
+
+  /** פותח את התיקייה ואת כל אבותיה, כדי שמה שבתוכה יהיה גלוי */
+  function reveal(folderId: string | null) {
+    const chain = ancestorChain(folderId, folders)
+    setOpen((prev) => {
+      // החזרת אותו Set מונעת רינדור חוזר אינסופי
+      if (chain.every((id) => prev.has(id))) return prev
+      const next = new Set(prev)
+      for (const id of chain) next.add(id)
+      saveOpen(authorityCode, next)
       return next
     })
   }
@@ -171,24 +274,9 @@ export default function StudentsRail({
   useEffect(() => {
     const v = activeViewId ? views.find((x) => x.id === activeViewId) : undefined
     if (!v?.folder_id) return
-    const chain: string[] = []
-    let cur: string | null = v.folder_id
-    for (let guard = 0; cur && guard < 20; guard++) {
-      chain.push(cur)
-      cur = folders.find((f) => f.id === cur)?.parent_id ?? null
-    }
-    setOpen((prev) => {
-      // החזרת אותו Set מונעת רינדור חוזר אינסופי
-      if (chain.every((id) => prev.has(id))) return prev
-      const next = new Set(prev)
-      for (const id of chain) next.add(id)
-      try {
-        localStorage.setItem(`${OPEN_KEY}:${authorityCode}`, JSON.stringify([...next]))
-      } catch {
-        /* אחסון חסום */
-      }
-      return next
-    })
+    reveal(v.folder_id)
+    // reveal נבנית מחדש בכל רינדור; התלויות האמיתיות הן אלה שלמטה
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeViewId, views, folders, authorityCode])
 
   function startResize(e: ReactMouseEvent) {
@@ -227,21 +315,30 @@ export default function StudentsRail({
 
   /** הנתיב המלא לתיקייה, לתצוגה מתחת לתוצאת חיפוש */
   function pathOf(folderId: string | null): string {
-    const parts: string[] = []
-    let cur = folderId
-    for (let guard = 0; cur && guard < 20; guard++) {
-      const f = folders.find((x) => x.id === cur)
-      if (!f) break
-      parts.unshift(f.name)
-      cur = f.parent_id
-    }
-    return parts.join(' / ')
+    return ancestorChain(folderId, folders)
+      .map((id) => folders.find((f) => f.id === id)?.name ?? '')
+      .reverse()
+      .join(' / ')
   }
 
   const foldersIn = (parent: string | null) =>
     folders.filter((f) => (f.parent_id ?? null) === parent).sort(byName)
   const viewsIn = (parent: string | null) =>
     matching.filter((v) => (v.folder_id ?? null) === parent).sort(byName)
+
+  /** כל התיקיות כרשימה שטוחה לפי סדר העץ, עם העומק — לתפריט ההעברה */
+  function folderOptions(): { folder: ViewFolder; depth: number }[] {
+    const out: { folder: ViewFolder; depth: number }[] = []
+    const walk = (parent: string | null, depth: number) => {
+      if (depth > 20) return
+      for (const f of foldersIn(parent)) {
+        out.push({ folder: f, depth })
+        walk(f.id, depth + 1)
+      }
+    }
+    walk(null, 0)
+    return out
+  }
 
   // ─────────────────────────── גרירה ───────────────────────────
 
@@ -303,7 +400,7 @@ export default function StudentsRail({
   }
 
   function folderRow(f: ViewFolder, depth: number): ReactNode {
-    const pad = { paddingInlineStart: 8 + depth * INDENT }
+    const pad = { paddingInlineStart: padStart(depth) }
 
     if (renaming === f.id) {
       return (
@@ -337,6 +434,7 @@ export default function StudentsRail({
         onContextMenu={(e) => {
           e.preventDefault()
           setSelected(f.id)
+          setViewMenu(null)
           setMenu({ folder: f, x: e.clientX, y: e.clientY })
         }}
         title={f.name}
@@ -367,19 +465,32 @@ export default function StudentsRail({
     )
   }
 
+  function openViewMenu(e: ReactMouseEvent, v: SavedView) {
+    if (!onMoveView && !onMergeView && !onDeleteView) return
+    e.preventDefault()
+    e.stopPropagation()
+    setMenu(null)
+    setViewMenu({ view: v, x: e.clientX, y: e.clientY, panel: 'actions' })
+  }
+
   function viewRow(v: SavedView, depth: number, path?: string): ReactNode {
     const on = activeViewId === v.id
+    const menuOpen = viewMenu?.view.id === v.id
     return (
       <div
         key={`v-${v.id}`}
         draggable
         onDragStart={(e) => onDragStartItem(e, { kind: 'view', id: v.id })}
-        className={'group flex items-center ' + (on ? 'bg-sky-600' : 'transition hover:bg-sky-50')}
+        onContextMenu={(e) => openViewMenu(e, v)}
+        className={
+          'group flex items-center ' +
+          (on ? 'bg-sky-600' : menuOpen ? 'bg-sky-100' : 'transition hover:bg-sky-50')
+        }
       >
         <Link
           to={`/views/${authorityCode}/${v.id}`}
           title={v.description ?? v.name}
-          style={{ paddingInlineStart: 8 + depth * INDENT }}
+          style={{ paddingInlineStart: padStart(depth) }}
           className={
             'flex min-w-0 flex-1 items-center justify-between gap-2 py-1.5 pl-2 text-right text-sm transition ' +
             (on ? 'font-bold text-white' : 'text-slate-600 group-hover:text-sky-800')
@@ -424,7 +535,7 @@ export default function StudentsRail({
     return (
       <div
         key="new-folder"
-        style={{ paddingInlineStart: 8 + depth * INDENT }}
+        style={{ paddingInlineStart: padStart(depth) }}
         className={rowBase}
       >
         <IconFolder className="h-4 w-4 shrink-0 text-emerald-600" />
@@ -440,15 +551,182 @@ export default function StudentsRail({
     )
   }
 
+  /**
+   * פריט בתוך תיקייה, עם קווי העץ שמחברים אותו להורה.
+   *
+   * הקו האנכי יורד מהחץ של ההורה. אצל כל פריט חוץ מהאחרון הוא נמשך לכל
+   * גובה הבלוק — כולל תת-העץ של תיקייה פתוחה — כדי להגיע לאח הבא. אצל
+   * האחרון הוא נעצר בקו האופקי, וכך רואים איפה התיקייה נגמרת.
+   */
+  function guided(node: ReactNode, key: string, depth: number, first: boolean, last: boolean) {
+    if (depth === 0) return <Fragment key={key}>{node}</Fragment>
+    const x = lineX(depth - 1)
+    // הפריט הראשון מושך את הקו מעט למעלה, עד מתחת לחץ של התיקייה
+    const top = first ? -8 : 0
+    return (
+      <div key={key} className="relative">
+        <span
+          aria-hidden
+          className="pointer-events-none absolute w-px bg-slate-300"
+          style={{
+            insetInlineStart: x,
+            top,
+            ...(last ? { height: ROW_MID - top } : { bottom: 0 }),
+          }}
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute h-px bg-slate-300"
+          style={{ insetInlineStart: x, top: ROW_MID, width: padStart(depth) - 3 - x }}
+        />
+        {node}
+      </div>
+    )
+  }
+
   function renderTree(parentId: string | null, depth: number): ReactNode[] {
-    const out: ReactNode[] = []
-    for (const f of foldersIn(parentId)) {
-      out.push(folderRow(f, depth))
-      if (creating && creating.parentId === f.id) out.push(newFolderRow(depth + 1))
-      if (open.has(f.id)) out.push(...renderTree(f.id, depth + 1))
+    const blocks: { key: string; node: ReactNode }[] = []
+    if (creating && creating.parentId === parentId) {
+      blocks.push({ key: 'new-folder', node: newFolderRow(depth) })
     }
-    for (const v of viewsIn(parentId)) out.push(viewRow(v, depth))
-    return out
+    for (const f of foldersIn(parentId)) {
+      blocks.push({
+        key: `f-${f.id}`,
+        node: (
+          <>
+            {folderRow(f, depth)}
+            {open.has(f.id) && renderTree(f.id, depth + 1)}
+          </>
+        ),
+      })
+    }
+    for (const v of viewsIn(parentId)) {
+      blocks.push({ key: `v-${v.id}`, node: viewRow(v, depth) })
+    }
+    return blocks.map((b, i) => guided(b.node, b.key, depth, i === 0, i === blocks.length - 1))
+  }
+
+  // ─────────────────────── תפריט טבלה ייעודית ───────────────────────
+
+  function viewMenuBody(m: ViewMenu): ReactNode {
+    const v = m.view
+    const back = (
+      <button
+        onClick={() => setViewMenu({ ...m, panel: 'actions' })}
+        className="flex w-full items-center gap-1 border-b border-slate-100 px-3 py-1.5 text-right text-xs text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
+      >
+        → חזרה
+      </button>
+    )
+
+    if (m.panel === 'move') {
+      const here = v.folder_id ?? null
+      const moveTo = (folderId: string | null) => {
+        onMoveView?.(v.id, folderId)
+        // שהטבלה תיראה במקומה החדש, ולא תיעלם לתוך תיקייה סגורה
+        if (folderId) reveal(folderId)
+        setViewMenu(null)
+      }
+      return (
+        <>
+          {back}
+          <button disabled={here === null} onClick={() => moveTo(null)} className={menuItem}>
+            <span className="w-4 shrink-0 text-center text-slate-400">⌂</span>
+            <span className="truncate">ללא תיקייה</span>
+            {here === null && <span className="mr-auto shrink-0 text-xs">כאן</span>}
+          </button>
+          {folderOptions().map(({ folder, depth }) => (
+            <button
+              key={folder.id}
+              disabled={here === folder.id}
+              onClick={() => moveTo(folder.id)}
+              style={{ paddingInlineStart: 12 + depth * 14 }}
+              className={menuItem}
+            >
+              <IconFolder className="h-4 w-4 shrink-0 text-emerald-600" />
+              <span className="truncate">{folder.name}</span>
+              {here === folder.id && <span className="mr-auto shrink-0 text-xs">כאן</span>}
+            </button>
+          ))}
+          {folders.length === 0 && (
+            <p className="px-3 py-2 text-xs leading-relaxed text-slate-400">
+              אין עדיין תיקיות. יוצרים אחת בכפתור התיקייה שליד הכותרת.
+            </p>
+          )}
+        </>
+      )
+    }
+
+    if (m.panel === 'merge') {
+      const targets = views.filter((t) => t.id !== v.id).sort(byName)
+      return (
+        <>
+          {back}
+          <p className="px-3 pb-1 pt-2 text-xs leading-relaxed text-slate-500">
+            התלמידים של «{v.name}» יתווספו לטבלה שתבחר:
+          </p>
+          {targets.map((t) => {
+            const path = pathOf(t.folder_id)
+            return (
+              <button
+                key={t.id}
+                onClick={() => {
+                  onMergeView?.(v, t)
+                  setViewMenu(null)
+                }}
+                className={menuItem}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate">{t.name}</span>
+                  {path && <span className="block truncate text-[11px] text-slate-400">{path}</span>}
+                </span>
+                <span className="mr-auto shrink-0 text-xs tabular-nums text-slate-400">
+                  {(t.member_count ?? 0).toLocaleString('he-IL')}
+                </span>
+              </button>
+            )
+          })}
+        </>
+      )
+    }
+
+    return (
+      <>
+        {onMoveView && (
+          <button onClick={() => setViewMenu({ ...m, panel: 'move' })} className={menuItem}>
+            <IconFolder className="h-4 w-4 shrink-0 text-emerald-600" />
+            <span>העברה לתיקייה</span>
+            <span className="mr-auto text-slate-400">‹</span>
+          </button>
+        )}
+        {onMergeView && (
+          <button
+            onClick={() => setViewMenu({ ...m, panel: 'merge' })}
+            disabled={views.length < 2}
+            title={views.length < 2 ? 'אין טבלה נוספת למזג אליה' : undefined}
+            className={menuItem}
+          >
+            <span className="w-4 shrink-0 text-center text-sky-600">⇆</span>
+            <span>מיזוג לטבלה אחרת</span>
+            <span className="mr-auto text-slate-400">‹</span>
+          </button>
+        )}
+        {onDeleteView && (
+          <button
+            onClick={() => {
+              onDeleteView(v)
+              setViewMenu(null)
+            }}
+            className={
+              menuItemBase + ' border-t border-slate-100 hover:bg-red-50 hover:text-red-700'
+            }
+          >
+            <span className="w-4 shrink-0 text-center">🗑</span>
+            <span>מחיקת הטבלה</span>
+          </button>
+        )}
+      </>
+    )
   }
 
   const item =
@@ -463,148 +741,189 @@ export default function StudentsRail({
       onDragLeave={() => setDropOn((d) => (d === 'root' ? null : d))}
       onDrop={(e) => handleDrop(e, null)}
       className={
-        'thin-scrollbar relative shrink-0 overflow-y-scroll border-l border-slate-200 bg-slate-50/70 py-2 ' +
+        'relative flex shrink-0 flex-col border-l border-slate-200 bg-slate-50/70 ' +
         (dropOn === 'root' ? 'ring-2 ring-inset ring-emerald-400' : '')
       }
     >
-      {/* ידית שינוי רוחב — על הגבול שפונה לטבלה */}
+      {/* ידית שינוי רוחב — על הגבול שפונה לטבלה. מחוץ לאזור הגלילה, כדי
+          שתכסה את כל הגובה ולא תיגלל יחד עם התוכן */}
       <div
         onMouseDown={startResize}
         title="גרירה לשינוי רוחב הסרגל"
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize bg-transparent transition hover:bg-sky-400"
       />
 
-      <h2 className="flex items-center gap-2 px-3 pb-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500">
-        <span className="h-3.5 w-1 rounded-full bg-sky-500" aria-hidden />
-        מסכים
-      </h2>
-
-      {presets.map((p) => {
-        const on = !activeViewId && activePreset === p.id
-        return (
+      {/*
+        פס הגלילה בצד ימין, בקצה המסך. בדף RTL הדפדפן מצייר אותו משמאל —
+        בדיוק על הגבול עם הטבלה, צמוד לפס הגלילה שלה ולידית הרוחב. לכן
+        מיכל הגלילה עצמו LTR, והתוכן שבתוכו חוזר ל-RTL.
+      */}
+      <div dir="ltr" className="thin-scrollbar relative min-h-0 flex-1 overflow-y-scroll">
+        {/*
+          הגדלה והקטנה של התוכן. הכפתורים עצמם מחוץ לאזור המוגדל — אחרת
+          הם היו גדלים יחד איתו ובורחים מהפינה. הם יושבים בתוך אזור
+          הגלילה, ולכן נגללים עם הכותרת ולא מכסים את הספירות שמתחתיה.
+        */}
+        <div
+          className="absolute left-2 z-[1] flex items-center gap-0.5"
+          // ממורכז מול כותרת "מסכים", שגובהה משתנה עם ההגדלה
+          style={{ top: Math.round(16 * zoom) - 9 }}
+        >
           <button
-            key={p.id}
-            onClick={() => onPresetChange(p.id)}
-            title={p.description}
-            className={
-              item +
-              (on
-                ? ' bg-sky-600 font-bold text-white'
-                : ' text-slate-600 hover:bg-sky-50 hover:text-sky-800')
-            }
+            onClick={() => changeZoom(-ZOOM_STEP)}
+            disabled={zoom <= MIN_ZOOM}
+            title={`הקטנת התצוגה בסרגל (${Math.round(zoom * 100)}%)`}
+            aria-label="הקטנת התצוגה בסרגל"
+            className="flex h-[18px] w-[18px] items-center justify-center rounded border border-slate-300 bg-white text-sm leading-none text-slate-500 transition enabled:hover:border-sky-400 enabled:hover:text-sky-700 disabled:opacity-40"
           >
-            <span className="truncate">{p.name}</span>
-            {presetCounts[p.id] !== undefined && (
-              <span
+            −
+          </button>
+          <button
+            onClick={() => changeZoom(ZOOM_STEP)}
+            disabled={zoom >= MAX_ZOOM}
+            title={`הגדלת התצוגה בסרגל (${Math.round(zoom * 100)}%)`}
+            aria-label="הגדלת התצוגה בסרגל"
+            className="flex h-[18px] w-[18px] items-center justify-center rounded border border-slate-300 bg-white text-sm leading-none text-slate-500 transition enabled:hover:border-sky-400 enabled:hover:text-sky-700 disabled:opacity-40"
+          >
+            +
+          </button>
+        </div>
+
+        {/* zoom ולא transform: scale — הוא משנה גם את הפריסה, כך שהגלילה
+            והגרירה ממשיכים להתאים לגודל שרואים */}
+        <div dir="rtl" className="py-2" style={{ zoom }}>
+          <h2 className="flex items-center gap-2 px-3 pb-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500">
+            <span className="h-3.5 w-1 rounded-full bg-sky-500" aria-hidden />
+            מסכים
+          </h2>
+
+          {presets.map((p) => {
+            const on = !activeViewId && activePreset === p.id
+            return (
+              <button
+                key={p.id}
+                onClick={() => onPresetChange(p.id)}
+                title={p.description}
                 className={
-                  'shrink-0 text-xs tabular-nums ' + (on ? 'text-sky-100' : 'text-slate-400')
+                  item +
+                  (on
+                    ? ' bg-sky-600 font-bold text-white'
+                    : ' text-slate-600 hover:bg-sky-50 hover:text-sky-800')
                 }
               >
-                {presetCounts[p.id].toLocaleString('he-IL')}
-              </span>
-            )}
-          </button>
-        )
-      })}
+                <span className="truncate">{p.name}</span>
+                {presetCounts[p.id] !== undefined && (
+                  <span
+                    className={
+                      'shrink-0 text-xs tabular-nums ' + (on ? 'text-sky-100' : 'text-slate-400')
+                    }
+                  >
+                    {presetCounts[p.id].toLocaleString('he-IL')}
+                  </span>
+                )}
+              </button>
+            )
+          })}
 
-      {/* הכותרת עצמה היא הקישור לדף הטבלאות — הגלגל שישב כאן הוביל לאותו מקום */}
-      <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-2.5">
-        <h2 className="min-w-0">
-          <Link
-            to={`/views/${authorityCode}`}
-            title="לדף כל הטבלאות הייעודיות"
-            className="flex items-center gap-2 px-3 pb-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500 transition hover:text-emerald-700"
-          >
-            <span className="h-3.5 w-1 rounded-full bg-emerald-500" aria-hidden />
-            <span className="truncate">טבלאות ייעודיות</span>
-          </Link>
-        </h2>
-        <div className="flex shrink-0 items-center gap-1.5 px-3 pb-1.5">
-          {onCreateFolder && (
-            <button
-              onClick={() => {
-                setDraft('')
-                setCreating({ parentId: selected })
-                if (selected && !open.has(selected)) toggleOpen(selected)
-              }}
-              title={
-                selected
-                  ? 'תיקייה חדשה בתוך התיקייה המסומנת'
-                  : 'תיקייה חדשה. לסימון תיקייה — לחיצה עליה, והחדשה תיווצר בתוכה'
-              }
-              aria-label="תיקייה חדשה"
-              className="text-slate-400 transition hover:text-emerald-700"
-            >
-              <IconFolderPlus className="h-4 w-4" />
-            </button>
+          {/* הכותרת עצמה היא הקישור לדף הטבלאות — הגלגל שישב כאן הוביל לאותו מקום */}
+          <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-2.5">
+            <h2 className="min-w-0">
+              <Link
+                to={`/views/${authorityCode}`}
+                title="לדף כל הטבלאות הייעודיות"
+                className="flex items-center gap-2 px-3 pb-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500 transition hover:text-emerald-700"
+              >
+                <span className="h-3.5 w-1 rounded-full bg-emerald-500" aria-hidden />
+                <span className="truncate">טבלאות ייעודיות</span>
+              </Link>
+            </h2>
+            <div className="flex shrink-0 items-center gap-1.5 px-3 pb-1.5">
+              {onCreateFolder && (
+                <button
+                  onClick={() => {
+                    setDraft('')
+                    setCreating({ parentId: selected })
+                    if (selected && !open.has(selected)) toggleOpen(selected)
+                  }}
+                  title={
+                    selected
+                      ? 'תיקייה חדשה בתוך התיקייה המסומנת'
+                      : 'תיקייה חדשה. לסימון תיקייה — לחיצה עליה, והחדשה תיווצר בתוכה'
+                  }
+                  aria-label="תיקייה חדשה"
+                  className="text-slate-400 transition hover:text-emerald-700"
+                >
+                  <IconFolderPlus className="h-4 w-4" />
+                </button>
+              )}
+              {views.length > 0 && (
+                <button
+                  onClick={() => (searching ? closeSearch() : setSearching(true))}
+                  title="חיפוש טבלה לפי שם"
+                  aria-label="חיפוש טבלה לפי שם"
+                  className={
+                    'transition ' +
+                    (searching ? 'text-sky-700' : 'text-slate-400 hover:text-sky-700')
+                  }
+                >
+                  <IconSearch className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {searching && (
+            <div className="px-3 pb-1.5">
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') closeSearch()
+                }}
+                placeholder="חיפוש טבלה…"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 transition focus:border-sky-400 focus:outline-none"
+              />
+            </div>
           )}
-          {views.length > 0 && (
-            <button
-              onClick={() => (searching ? closeSearch() : setSearching(true))}
-              title="חיפוש טבלה לפי שם"
-              aria-label="חיפוש טבלה לפי שם"
-              className={
-                'transition ' + (searching ? 'text-sky-700' : 'text-slate-400 hover:text-sky-700')
-              }
-            >
-              <IconSearch className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
 
-      {searching && (
-        <div className="px-3 pb-1.5">
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') closeSearch()
-            }}
-            placeholder="חיפוש טבלה…"
-            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 transition focus:border-sky-400 focus:outline-none"
-          />
-        </div>
-      )}
-
-      {/* לחיצה על שטח ריק מבטלת את הסימון, כמו בסייר הקבצים */}
-      <div onClick={() => setSelected(null)} className="min-h-[3rem] pb-1">
-        {needle ? (
-          matching.length === 0 ? (
-            <p className="px-3 pb-1 text-xs leading-relaxed text-slate-400">
-              אין טבלה בשם «{query.trim()}».
-            </p>
-          ) : (
-            matching
-              .slice()
-              .sort(byName)
-              .map((v) => viewRow(v, 0, pathOf(v.folder_id)))
-          )
-        ) : (
-          <>
-            {creating && creating.parentId === null && newFolderRow(0)}
-            {folders.length === 0 && views.length === 0 ? (
-              <p className="px-3 pb-1 text-xs leading-relaxed text-slate-400">
-                סנן בטבלה ושמור את התוצאה כרשימה קבועה.
-              </p>
+          {/* לחיצה על שטח ריק מבטלת את הסימון, כמו בסייר הקבצים */}
+          <div onClick={() => setSelected(null)} className="min-h-[3rem] pb-1">
+            {needle ? (
+              matching.length === 0 ? (
+                <p className="px-3 pb-1 text-xs leading-relaxed text-slate-400">
+                  אין טבלה בשם «{query.trim()}».
+                </p>
+              ) : (
+                matching
+                  .slice()
+                  .sort(byName)
+                  .map((v) => viewRow(v, 0, pathOf(v.folder_id)))
+              )
+            ) : folders.length === 0 && views.length === 0 ? (
+              <>
+                {creating?.parentId === null && newFolderRow(0)}
+                <p className="px-3 pb-1 text-xs leading-relaxed text-slate-400">
+                  סנן בטבלה ושמור את התוצאה כרשימה קבועה.
+                </p>
+              </>
             ) : (
               renderTree(null, 0)
             )}
-          </>
-        )}
-      </div>
+          </div>
 
-      {/* הפעולה יושבת מתחת לתוצאותיה — ולא מתחרה בשם עם קישור הניווט */}
-      {canSaveToView && (
-        <button
-          onClick={onSaveToView}
-          title="שמירת מי שסונן כרגע כרשימה קבועה"
-          className="mt-1 w-full px-3 py-1.5 text-right text-sm font-medium text-sky-700 transition hover:bg-sky-50"
-        >
-          + מהסינון הנוכחי
-        </button>
-      )}
+          {/* הפעולה יושבת מתחת לתוצאותיה — ולא מתחרה בשם עם קישור הניווט */}
+          {canSaveToView && (
+            <button
+              onClick={onSaveToView}
+              title="שמירת מי שסונן כרגע כרשימה קבועה"
+              className="mt-1 w-full px-3 py-1.5 text-right text-sm font-medium text-sky-700 transition hover:bg-sky-50"
+            >
+              + מהסינון הנוכחי
+            </button>
+          )}
+        </div>
+      </div>
 
       {menu &&
         createPortal(
@@ -658,6 +977,31 @@ export default function StudentsRail({
                 <span>🗑</span>
                 <span>מחיקת התיקייה</span>
               </button>
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {viewMenu &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-40"
+              onMouseDown={() => setViewMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setViewMenu(null)
+              }}
+            />
+            <div
+              dir="rtl"
+              style={{ ...menuPosition(viewMenu.x, viewMenu.y, MENU_MAX_HEIGHT), maxHeight: MENU_MAX_HEIGHT }}
+              className="thin-scrollbar z-50 overflow-y-auto rounded-xl border border-slate-300 bg-white py-1 shadow-2xl"
+            >
+              <div className="truncate border-b border-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">
+                {viewMenu.view.name}
+              </div>
+              {viewMenuBody(viewMenu)}
             </div>
           </>,
           document.body,

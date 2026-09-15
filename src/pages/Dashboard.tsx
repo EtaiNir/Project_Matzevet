@@ -37,6 +37,7 @@ import {
 } from '@/config/fields'
 import { fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
+  addStudentsToView,
   createViewFolder,
   deleteSavedView,
   deleteViewFolder,
@@ -138,6 +139,14 @@ export default function Dashboard() {
   const [deletingView, setDeletingView] = useState<SavedView | null>(null)
   /** התיקייה שממתינה לאישור מחיקה. הטבלאות שבתוכה אינן נמחקות איתה. */
   const [deletingFolder, setDeletingFolder] = useState<ViewFolder | null>(null)
+  /** מיזוג טבלה ייעודית לאחרת — מאישור ועד לתוצאה, באותו חלון */
+  const [merging, setMerging] = useState<{
+    source: SavedView
+    target: SavedView
+    busy?: boolean
+    error?: string
+    result?: { added: number; total: number }
+  } | null>(null)
   // מצב טבלה ייעודית: הרשימה עצמה, והת"ז שבה
   const [activeView, setActiveView] = useState<SavedView | null>(null)
   const [viewMembers, setViewMembers] = useState<Set<string> | null>(null)
@@ -345,6 +354,31 @@ export default function Dashboard() {
       if (viewId === view.id) navigate(`/students/${authorityCode}`)
     } catch (e) {
       setError((e as Error).message)
+    }
+  }
+
+  /**
+   * מיזוג: כל התלמידים של המקור נוספים ליעד, ומי שכבר שם מדולג.
+   *
+   * **המקור אינו נמחק.** מחיקה אוטומטית הייתה גוררת איתה גם את העמודות
+   * ששייכות רק לו (`on delete cascade` על `view_id`) — בלי סל גריעה.
+   * מי שרוצה להיפטר ממנו מוחק בנפרד, עם האישור הרגיל.
+   */
+  async function confirmMerge() {
+    if (!merging) return
+    const { source, target } = merging
+    setMerging({ ...merging, busy: true, error: undefined })
+    try {
+      const ids = [...(await fetchViewMembers(authorityCode, source.id))]
+      const result = ids.length
+        ? await addStudentsToView(target.id, ids)
+        : { added: 0, total: target.member_count ?? 0 }
+      setMerging({ source, target, result })
+      await loadViews()
+      // היעד פתוח כרגע — מרעננים רק את החברוּת, בלי לאפס תצוגה וסינון
+      if (viewId === target.id) setViewMembers(await fetchViewMembers(authorityCode, target.id))
+    } catch (e) {
+      setMerging({ source, target, error: (e as Error).message })
     }
   }
 
@@ -670,6 +704,7 @@ export default function Dashboard() {
           // מיגרציה 021: המשתמש רואה רק את מה שהוא עצמו יצר, ולכן אין
           // עוד מה לבדוק לפני מחיקה — הכול שלו
           onDeleteView={setDeletingView}
+          onMergeView={(source, target) => setMerging({ source, target })}
           onCreateFolder={(name, parentId) =>
             folderAction(() => createViewFolder(authorityCode, name, parentId))
           }
@@ -775,6 +810,61 @@ export default function Dashboard() {
                 className="text-sm text-slate-500 transition hover:text-slate-800"
               >
                 ביטול
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* מיזוג טבלה ייעודית לאחרת — אישור, ואז התוצאה באותו חלון */}
+      {merging && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div dir="rtl" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="font-bold text-sky-800">
+              מיזוג «{merging.source.name}» לתוך «{merging.target.name}»
+            </h3>
+            {merging.result ? (
+              <p className="mt-3 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                <strong>{merging.result.added.toLocaleString('he-IL')}</strong> תלמידים נוספו
+                ל«{merging.target.name}».
+                <span className="mt-1 block">
+                  סך הכול ברשימה: {merging.result.total.toLocaleString('he-IL')}
+                </span>
+              </p>
+            ) : (
+              <div className="mt-2 space-y-2 text-sm text-slate-700">
+                <p>
+                  {(merging.source.member_count ?? 0).toLocaleString('he-IL')} התלמידים של «
+                  {merging.source.name}» יתווספו ל«{merging.target.name}». מי שכבר נמצא שם לא
+                  ייכפל.
+                </p>
+                <p className="text-slate-500">
+                  «{merging.source.name}» <strong>נשארת כמו שהיא</strong> — אפשר למחוק אותה אחר
+                  כך. עמודות ששייכות רק לה אינן עוברות.
+                </p>
+                {merging.error && (
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-red-700">
+                    המיזוג נכשל — {merging.error}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="mt-4 flex items-center gap-3">
+              {!merging.result && (
+                <button
+                  onClick={confirmMerge}
+                  disabled={merging.busy}
+                  className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:opacity-50"
+                >
+                  {merging.busy ? 'ממזג…' : 'מיזוג'}
+                </button>
+              )}
+              <button
+                onClick={() => setMerging(null)}
+                disabled={merging.busy}
+                className="text-sm text-slate-500 transition hover:text-slate-800"
+              >
+                {merging.result ? 'סגירה' : 'ביטול'}
               </button>
             </div>
           </div>
