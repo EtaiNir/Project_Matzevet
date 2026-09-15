@@ -56,6 +56,18 @@ export function IconSearch(p: IconProps) {
   )
 }
 
+/** שיתוף — שלוש נקודות מחוברות */
+export function IconShare(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="17.5" cy="5.5" r="2.5" />
+      <circle cx="6.5" cy="12" r="2.5" />
+      <circle cx="17.5" cy="18.5" r="2.5" />
+      <path d="M8.8 10.8 15.2 6.7M8.8 13.2l6.4 4.1" />
+    </Svg>
+  )
+}
+
 /** תיקייה */
 export function IconFolder(p: IconProps) {
   return (

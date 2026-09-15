@@ -39,7 +39,27 @@ export interface ViewFolder {
   authority_code: string
   parent_id: string | null
   name: string
+  /** מי יצר אותה. שונה מהמשתמש הנוכחי = הגיעה אליו בשיתוף */
+  created_by: string | null
   created_at: string
+}
+
+/** שורה ברשימת השותפים של פריט — מה שהבעלים רואה */
+export interface ViewShare {
+  id: string
+  email: string
+  display_name: string | null
+  can_edit: boolean
+  created_at: string
+}
+
+/** פריט ששותף **איתי**, ועל ידי מי */
+export interface SharedWithMe {
+  kind: 'view' | 'folder'
+  item_id: string
+  owner_email: string
+  owner_name: string | null
+  can_edit: boolean
 }
 
 function membersTable(authorityCode: string): string {
@@ -58,20 +78,24 @@ export async function fetchSavedViews(authorityCode: string): Promise<SavedView[
   const views = (data ?? []) as SavedView[]
   if (views.length === 0) return views
 
-  // ספירה בשאילתה אחת ולא אחת לכל רשימה
-  const counts = new Map<string, number>()
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const page = await supabase
-      .from(membersTable(authorityCode))
-      .select('view_id')
-      .range(from, from + PAGE_SIZE - 1)
-    if (page.error) break
-    const rows = (page.data ?? []) as { view_id: string }[]
-    for (const r of rows) counts.set(r.view_id, (counts.get(r.view_id) ?? 0) + 1)
-    if (rows.length < PAGE_SIZE) break
-  }
+  // ספירה לכל רשימה **במקביל**, בבקשת `head` שמחזירה מספר בלבד בלי שורות.
+  //
+  // קודם זו הייתה לולאה סדרתית שמשכה את כל טבלת החברוּת דף אחרי דף ומנתה
+  // בזיכרון. מספר הסבבים גדל עם סך החברים בכל הרשימות יחד, וכל העברה של
+  // טבלה לתיקייה המתינה לה לפני שהסרגל התעדכן. כאן מספר הבקשות הוא מספר
+  // הרשימות, והן יוצאות יחד.
+  const table = membersTable(authorityCode)
+  const counts = await Promise.all(
+    views.map(async (v) => {
+      const { count, error } = await supabase
+        .from(table)
+        .select('view_id', { count: 'exact', head: true })
+        .eq('view_id', v.id)
+      return error ? 0 : (count ?? 0)
+    }),
+  )
 
-  return views.map((v) => ({ ...v, member_count: counts.get(v.id) ?? 0 }))
+  return views.map((v, i) => ({ ...v, member_count: counts[i] }))
 }
 
 export async function fetchSavedView(id: string): Promise<SavedView | null> {
@@ -191,7 +215,7 @@ export async function moveViewToFolder(id: string, folderId: string | null): Pro
 export async function fetchViewFolders(authorityCode: string): Promise<ViewFolder[]> {
   const { data, error } = await supabase
     .from('view_folders')
-    .select('id, authority_code, parent_id, name, created_at')
+    .select('id, authority_code, parent_id, name, created_by, created_at')
     .eq('authority_code', authorityCode)
     .order('name')
   if (error) return []
@@ -245,4 +269,62 @@ export async function moveViewFolder(id: string, parentId: string | null): Promi
 export async function deleteViewFolder(id: string): Promise<void> {
   const { error } = await supabase.from('view_folders').delete().eq('id', id)
   if (error) throw new Error(error.message)
+}
+
+// ─────────────────────────── שיתוף ───────────────────────────
+//
+// כל הפעולות עוברות בפונקציות במסד (מיגרציה 022) ולא בכתיבה ישירה,
+// משתי סיבות: `users` סגורה לקריאה — משתמש רואה רק את עצמו, ולכן
+// איתור לפי אימייל חייב `security definer`; והבדיקה שהנמען בכלל שייך
+// לרשות אינה משהו שכדאי לסמוך עליו שהדפדפן יעשה.
+
+/** מי שותף לפריט. רק הבעלים מקבל תשובה. */
+export async function listShares(
+  target: { kind: 'view' | 'folder'; id: string },
+): Promise<ViewShare[]> {
+  const { data, error } = await supabase.rpc('list_shares', {
+    p_view: target.kind === 'view' ? target.id : null,
+    p_folder: target.kind === 'folder' ? target.id : null,
+  })
+  if (error) throw new Error(error.message)
+  return (data ?? []) as ViewShare[]
+}
+
+/**
+ * משתפת פריט עם משתמש לפי אימייל.
+ *
+ * שיתוף חוזר לאותו אדם **מעדכן** את ההרשאה במקום להיכשל — זו הדרך
+ * להעביר מצפייה לעריכה ובחזרה.
+ */
+export async function shareItem(
+  target: { kind: 'view' | 'folder'; id: string },
+  email: string,
+  canEdit: boolean,
+): Promise<{ email: string; display_name: string | null; can_edit: boolean }> {
+  const { data, error } = await supabase.rpc('share_item', {
+    p_email: email.trim(),
+    p_view: target.kind === 'view' ? target.id : null,
+    p_folder: target.kind === 'folder' ? target.id : null,
+    p_can_edit: canEdit,
+  })
+  if (error) throw new Error(error.message)
+  return data as { email: string; display_name: string | null; can_edit: boolean }
+}
+
+export async function unshareItem(shareId: string): Promise<void> {
+  const { error } = await supabase.rpc('unshare_item', { p_share_id: shareId })
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * מה שותף איתי ברשות הזו, ועל ידי מי.
+ *
+ * הסרגל צריך את זה כדי לסמן פריט של מישהו אחר ולהסתיר ממנו את פעולות
+ * הבעלוּת. נכשלת בשקט — אתר מול מסד בלי מיגרציה 022 ימשיך להציג את
+ * הפריטים של המשתמש עצמו.
+ */
+export async function fetchSharedWithMe(authorityCode: string): Promise<SharedWithMe[]> {
+  const { data, error } = await supabase.rpc('shared_with_me', { p_code: authorityCode })
+  if (error) return []
+  return (data ?? []) as SharedWithMe[]
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useAuth } from '@/context/AuthContext'
 import { fetchAuthorities, type Authority } from '@/lib/admin'
 import {
   deleteSavedView,
@@ -29,6 +30,7 @@ function describeSeed(view: SavedView): string {
 
 /** מסך הטבלאות הייעודיות של הרשות. */
 export default function SavedViews() {
+  const { profile } = useAuth()
   const { code = '' } = useParams()
   const [authorities, setAuthorities] = useState<Authority[]>([])
   const [views, setViews] = useState<SavedView[]>([])
@@ -104,7 +106,7 @@ export default function SavedViews() {
           </h1>
           <p className="text-sm text-slate-500">
             רשימות תלמידים קבועות, שנבנו מסינון ואפשר להוסיף ולהסיר מהן ידנית.
-            כל משתמש רואה את הרשימות שהוא עצמו יצר.
+            כל משתמש רואה את הרשימות שהוא יצר, ואת אלה ששותפו איתו.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -216,24 +218,38 @@ export default function SavedViews() {
                   >
                     פתיחה ←
                   </Link>
-                  <button
-                    onClick={() => {
-                      setEditing(v.id)
-                      setDraft(v.name)
-                    }}
-                    title="שינוי שם"
-                    className="rounded-lg px-2 py-1 text-sm text-slate-400 transition hover:bg-sky-50 hover:text-sky-700"
-                  >
-                    ✎
-                  </button>
-                  {/* כל מה שרואים כאן נוצר ע"י המשתמש עצמו (מיגרציה 021) */}
-                  <button
-                    onClick={() => setConfirming(v)}
-                    title="מחיקת הטבלה"
-                    className="mr-auto rounded-lg px-2 py-1 text-sm text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                  >
-                    🗑
-                  </button>
+                  {/*
+                    שינוי שם ומחיקה — ליוצר בלבד. טבלה ששותפה איתך נחסמת
+                    לשתי הפעולות ב-RLS; הכפתורים פשוט אינם מוצעים.
+                  */}
+                  {v.created_by === profile?.id ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          setEditing(v.id)
+                          setDraft(v.name)
+                        }}
+                        title="שינוי שם"
+                        className="rounded-lg px-2 py-1 text-sm text-slate-400 transition hover:bg-sky-50 hover:text-sky-700"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        onClick={() => setConfirming(v)}
+                        title="מחיקת הטבלה"
+                        className="mr-auto rounded-lg px-2 py-1 text-sm text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                      >
+                        🗑
+                      </button>
+                    </>
+                  ) : (
+                    <span
+                      title="הטבלה שותפה איתך. מחיקה ושינוי שם שמורים למי שיצר אותה."
+                      className="mr-auto rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                    >
+                      שותפה איתך
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

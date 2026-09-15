@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
@@ -43,6 +43,7 @@ import {
   deleteViewFolder,
   fetchSavedView,
   fetchSavedViews,
+  fetchSharedWithMe,
   fetchViewFolders,
   fetchViewMembers,
   moveViewFolder,
@@ -50,6 +51,7 @@ import {
   removeStudentFromView,
   renameViewFolder,
   type SavedView,
+  type SharedWithMe,
   type ViewFolder,
 } from '@/lib/savedViews'
 import type { PivotNavState } from '@/lib/pivot'
@@ -63,6 +65,7 @@ import ExtraColumnsManager from '@/components/ExtraColumnsManager'
 import StudentsRail from '@/components/StudentsRail'
 import RailTopBar from '@/components/RailTopBar'
 import SaveToViewDialog from '@/components/SaveToViewDialog'
+import ShareDialog, { type ShareTarget } from '@/components/ShareDialog'
 
 function newId() {
   return Math.random().toString(36).slice(2, 9)
@@ -133,6 +136,10 @@ export default function Dashboard() {
   const [manager, setManager] = useState<{ adding: boolean } | null>(null)
   const [savedViews, setSavedViews] = useState<SavedView[]>([])
   const [viewFolders, setViewFolders] = useState<ViewFolder[]>([])
+  /** מה שותף איתי — כדי שהסרגל יסמן פריט של מישהו אחר ויסתיר ממנו פעולות בעלוּת */
+  const [sharedWithMe, setSharedWithMe] = useState<SharedWithMe[]>([])
+  /** הפריט שחלון השיתוף פתוח עליו */
+  const [sharing, setSharing] = useState<ShareTarget | null>(null)
 
   const [saveToView, setSaveToView] = useState(false)
   /** הטבלה הייעודית שממתינה לאישור מחיקה מהסרגל */
@@ -222,33 +229,76 @@ export default function Dashboard() {
     loadView()
   }, [loadView])
 
+  /** מונה טעינות: רק התשובה של הטעינה **האחרונה** נכתבת ל-state */
+  const loadSeq = useRef(0)
+
   const loadViews = useCallback(async () => {
     if (!authorityCode) return
-    const [views, folders] = await Promise.all([
+    const seq = ++loadSeq.current
+    const [views, folders, shared] = await Promise.all([
       fetchSavedViews(authorityCode),
       fetchViewFolders(authorityCode),
+      fetchSharedWithMe(authorityCode),
     ])
+    // טעינה ישנה שחזרה אחרי חדשה הייתה דורסת אותה בנתונים מלפני השינוי —
+    // וזה בדיוק נראה כמו "צריך רענון כדי לראות".
+    if (seq !== loadSeq.current) return
     setSavedViews(views)
     setViewFolders(folders)
+    setSharedWithMe(shared)
   }, [authorityCode])
 
   /**
-   * כל פעולות התיקיות עוברות דרך אותו מסלול: פעולה במסד, ואז טעינה
-   * מחדש של הרשימה. אין עדכון אופטימי — טריגר במסד יכול לדחות מהלך
-   * (מעגל, תיקייה של משתמש אחר), ומצב מקומי ש"הצליח" בזמן שהמסד סירב
-   * הוא בדיוק סוג השקר שקשה לאתר אחר כך.
+   * כל פעולות התיקיות עוברות דרך אותו מסלול.
+   *
+   * `optimistic` מעדכן את המסך **מיד** — גרירה בסייר קבצים זזה ברגע
+   * שעוזבים את העכבר, לא אחרי סבב מול השרת. אחר כך הפעולה נשלחת, ו**בכל
+   * מקרה** הרשימה נטענת מחדש מהמסד: בהצלחה זה מאשר את מה שכבר מוצג,
+   * ובכישלון זה מחזיר את מה שהעדכון המקומי הקדים.
+   *
+   * זה עונה על החשש שבגללו לא היה כאן עדכון מקומי קודם: טריגר במסד יכול
+   * לדחות מהלך (מעגל, תיקייה של משתמש אחר). כשהוא דוחה — המסך חוזר לאמת
+   * תוך רגע, והשגיאה מוצגת. מה שאסור הוא מצב מקומי ש"הצליח" ונשאר כך.
    */
   const folderAction = useCallback(
-    async (fn: () => Promise<unknown>) => {
+    async (fn: () => Promise<unknown>, optimistic?: () => void) => {
+      optimistic?.()
       try {
         await fn()
-        await loadViews()
       } catch (e) {
         setError((e as Error).message)
+      } finally {
+        await loadViews()
       }
     },
     [loadViews],
   )
+
+  /** האם `candidate` היא `ancestor` עצמה או צאצא שלה — כדי לא לצייר מעגל מקומי */
+  function isSelfOrDescendant(ancestor: string, candidate: string | null): boolean {
+    let cur = candidate
+    for (let guard = 0; cur && guard < 20; guard++) {
+      if (cur === ancestor) return true
+      cur = viewFolders.find((f) => f.id === cur)?.parent_id ?? null
+    }
+    return false
+  }
+
+  /** התיקייה וכל צאצאיה — מה שנעלם מהמסך ברגע שמחקו אותה */
+  function folderSubtree(rootId: string): Set<string> {
+    const out = new Set<string>([rootId])
+    for (let guard = 0; guard < 20; guard++) {
+      let grew = false
+      for (const f of viewFolders) {
+        if (f.parent_id && out.has(f.parent_id) && !out.has(f.id)) {
+          out.add(f.id)
+          grew = true
+        }
+      }
+      if (!grew) break
+    }
+    return out
+  }
 
   useEffect(() => {
     loadViews()
@@ -343,12 +393,22 @@ export default function Dashboard() {
   /** מוחקת תיקייה. תיקיות המשנה נגררות; הטבלאות חוזרות לשורש. */
   async function confirmDeleteFolder(folder: ViewFolder) {
     setDeletingFolder(null)
-    await folderAction(() => deleteViewFolder(folder.id))
+    const gone = folderSubtree(folder.id)
+    await folderAction(async () => {
+      await deleteViewFolder(folder.id)
+      // התיקייה וצאצאיה יורדים מהמסך; הטבלאות שהיו בהם חוזרות לשורש,
+      // בדיוק כמו `on delete set null` שבמסד
+      setViewFolders((fs) => fs.filter((f) => !gone.has(f.id)))
+      setSavedViews((vs) =>
+        vs.map((v) => (v.folder_id && gone.has(v.folder_id) ? { ...v, folder_id: null } : v)),
+      )
+    })
   }
 
   async function confirmDeleteView(view: SavedView) {
     try {
       await deleteSavedView(view.id)
+      setSavedViews((vs) => vs.filter((v) => v.id !== view.id))
       setDeletingView(null)
       await loadViews()
       if (viewId === view.id) navigate(`/students/${authorityCode}`)
@@ -706,14 +766,46 @@ export default function Dashboard() {
           onDeleteView={setDeletingView}
           onMergeView={(source, target) => setMerging({ source, target })}
           onCreateFolder={(name, parentId) =>
-            folderAction(() => createViewFolder(authorityCode, name, parentId))
+            folderAction(async () => {
+              // `createViewFolder` מחזירה את השורה שהמסד יצר. מציגים **אותה**
+              // מיד — זה לא ניחוש אופטימי אלא תשובת השרת — והטעינה שאחריה רק
+              // מאשרת. קודם היצירה הסתמכה על הטעינה בלבד, והתיקייה לא הופיעה.
+              const created = await createViewFolder(authorityCode, name, parentId)
+              setViewFolders((fs) => (fs.some((f) => f.id === created.id) ? fs : [...fs, created]))
+            })
           }
-          onRenameFolder={(id, name) => folderAction(() => renameViewFolder(id, name))}
+          onRenameFolder={(id, name) =>
+            folderAction(
+              () => renameViewFolder(id, name),
+              () => setViewFolders((fs) => fs.map((f) => (f.id === id ? { ...f, name: name.trim() } : f))),
+            )
+          }
           onDeleteFolder={setDeletingFolder}
-          onMoveView={(viewId, folderId) => folderAction(() => moveViewToFolder(viewId, folderId))}
-          onMoveFolder={(folderId, parentId) =>
-            folderAction(() => moveViewFolder(folderId, parentId))
+          onMoveView={(viewId, folderId) =>
+            folderAction(
+              () => moveViewToFolder(viewId, folderId),
+              () =>
+                setSavedViews((vs) =>
+                  vs.map((v) => (v.id === viewId ? { ...v, folder_id: folderId } : v)),
+                ),
+            )
           }
+          onMoveFolder={(folderId, parentId) =>
+            folderAction(
+              () => moveViewFolder(folderId, parentId),
+              // העברה לתוך צאצא נדחית במסד. לא מציירים אותה מקומית גם לרגע —
+              // היא הייתה יוצרת מעגל שמנתק את שתי התיקיות מהעץ עד שהמסד עונה.
+              isSelfOrDescendant(folderId, parentId)
+                ? undefined
+                : () =>
+                    setViewFolders((fs) =>
+                      fs.map((f) => (f.id === folderId ? { ...f, parent_id: parentId } : f)),
+                    ),
+            )
+          }
+          shares={sharedWithMe}
+          currentUserId={profile?.id ?? null}
+          onShare={setSharing}
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* הטבלה */}
@@ -898,6 +990,14 @@ export default function Dashboard() {
         </div>
       )}
 
+      {sharing && (
+        <ShareDialog
+          target={sharing}
+          onClose={() => setSharing(null)}
+          onChanged={() => loadViews()}
+        />
+      )}
+
       {saveToView && (
         <SaveToViewDialog
           code={authorityCode}
@@ -905,6 +1005,14 @@ export default function Dashboard() {
           filters={activeFilters}
           fields={selectedFields}
           basePreset={activePreset}
+          // בלי זה הטבלה החדשה נוצרה במסד אבל לא הופיעה בסרגל עד רענון
+          // הדף: הדיאלוג דיווח על ההצלחה, ואיש לא טען את הרשימה מחדש.
+          onSaved={(view) => {
+            if (view) {
+              setSavedViews((vs) => (vs.some((v) => v.id === view.id) ? vs : [view, ...vs]))
+            }
+            loadViews()
+          }}
           onClose={() => setSaveToView(false)}
         />
       )}

@@ -15,9 +15,11 @@ import {
   IconFolder,
   IconFolderPlus,
   IconSearch,
+  IconShare,
 } from '@/components/brand/Icons'
 import type { Preset } from '@/config/presets'
-import type { SavedView, ViewFolder } from '@/lib/savedViews'
+import type { SavedView, SharedWithMe, ViewFolder } from '@/lib/savedViews'
+import type { ShareTarget } from '@/components/ShareDialog'
 
 interface Props {
   authorityCode: string
@@ -38,6 +40,12 @@ interface Props {
   onDeleteView?: (view: SavedView) => void
   /** מיזוג: התלמידים של `source` מתווספים ל-`target`. האישור עצמו במסך שמעל. */
   onMergeView?: (source: SavedView, target: SavedView) => void
+  /** מה שותף **איתי** ברשות הזו — כדי לסמן פריט של מישהו אחר */
+  shares?: SharedWithMe[]
+  /** המשתמש המחובר. בלעדיו הכול נחשב שלי, כמו לפני השיתוף */
+  currentUserId?: string | null
+  /** פתיחת חלון השיתוף. מוצג רק על פריטים שהמשתמש עצמו יצר. */
+  onShare?: (target: ShareTarget) => void
 
   onCreateFolder?: (name: string, parentId: string | null) => void
   onRenameFolder?: (id: string, name: string) => void
@@ -142,6 +150,26 @@ type ViewMenu = {
   panel: 'actions' | 'move' | 'merge'
 }
 
+/**
+ * סימון דק לפריט שהגיע בשיתוף.
+ *
+ * אייקון ולא תווית: הסרגל צר, ושם של טבלה הוא מה שצריך להיקרא. מי
+ * שיתף ובאיזו הרשאה — ב-tooltip ובתפריט הלחיצה הימנית.
+ */
+function SharedMark({ by }: { by?: SharedWithMe }) {
+  const who = by?.owner_name ?? by?.owner_email ?? 'משתמש אחר'
+  const how = by?.can_edit ? 'עריכה' : 'צפייה'
+  return (
+    <span
+      title={by ? `שותף איתך ע"י ${who} — ${how}` : 'שותף איתך'}
+      aria-label="שותף איתך"
+      className="shrink-0 text-emerald-600"
+    >
+      <IconShare className="h-3 w-3" />
+    </span>
+  )
+}
+
 /** מיקום תפריט צף ליד נקודת הלחיצה, בלי לחרוג מהחלון */
 function menuPosition(x: number, y: number, height: number): CSSProperties {
   return {
@@ -207,6 +235,9 @@ export default function StudentsRail({
   onDeleteFolder,
   onMoveView,
   onMoveFolder,
+  shares,
+  currentUserId,
+  onShare,
 }: Props) {
   const [width, setWidth] = useState(readWidth)
   /** הרוחב העדכני, כדי שסיום הגרירה לא יתלה ב-state שנסגר עליו */
@@ -321,10 +352,41 @@ export default function StudentsRail({
       .join(' / ')
   }
 
+  // ─────────────────────────── בעלוּת ───────────────────────────
+
+  /** פריט שנוצר ע"י מישהו אחר הגיע אליי בשיתוף — ופעולות הבעלוּת עליו חסומות */
+  const mine = (x: { created_by: string | null }) => !currentUserId || x.created_by === currentUserId
+
+  const sharedView = new Map((shares ?? []).filter((s) => s.kind === 'view').map((s) => [s.item_id, s]))
+  const sharedFolder = new Map(
+    (shares ?? []).filter((s) => s.kind === 'folder').map((s) => [s.item_id, s]),
+  )
+
+  /** מי שיתף איתי את הפריט — ישירות, או דרך תיקייה שמעליו */
+  function sharerOf(kind: 'view' | 'folder', id: string, folderId: string | null): SharedWithMe | undefined {
+    const direct = kind === 'view' ? sharedView.get(id) : sharedFolder.get(id)
+    if (direct) return direct
+    for (const ancestor of ancestorChain(folderId, folders)) {
+      const s = sharedFolder.get(ancestor)
+      if (s) return s
+    }
+    return undefined
+  }
+
+  /**
+   * ההורה **הגלוי** של פריט.
+   *
+   * תיקיית משנה ששותפה איתי מגיעה עם `parent_id` של תיקייה שאיני רשאי
+   * לראות. בלי התרגום הזה היא לא הייתה מופיעה בשום מקום בעץ — לא
+   * בשורש, כי ההורה אינו null, ולא תחת ההורה, כי הוא אינו קיים אצלי.
+   */
+  const visibleIds = new Set(folders.map((f) => f.id))
+  const parentOf = (id: string | null) => (id && visibleIds.has(id) ? id : null)
+
   const foldersIn = (parent: string | null) =>
-    folders.filter((f) => (f.parent_id ?? null) === parent).sort(byName)
+    folders.filter((f) => parentOf(f.parent_id) === parent).sort(byName)
   const viewsIn = (parent: string | null) =>
-    matching.filter((v) => (v.folder_id ?? null) === parent).sort(byName)
+    matching.filter((v) => parentOf(v.folder_id) === parent).sort(byName)
 
   /** כל התיקיות כרשימה שטוחה לפי סדר העץ, עם העומק — לתפריט ההעברה */
   function folderOptions(): { folder: ViewFolder; depth: number }[] {
@@ -421,11 +483,16 @@ export default function StudentsRail({
     return (
       <div
         key={`f-${f.id}`}
-        draggable
+        draggable={mine(f)}
         onDragStart={(e) => onDragStartItem(e, { kind: 'folder', id: f.id })}
-        onDragOver={(e) => allowDrop(e, f.id)}
+        // תיקייה משותפת אינה יעד: עוצרים את הבעבוע, אחרת הסרגל מסמן
+        // "שורש" ונפילה עליה הייתה מעבירה את הפריט לשורש בלי כוונה
+        onDragOver={(e) => (mine(f) ? allowDrop(e, f.id) : e.stopPropagation())}
         onDragLeave={() => setDropOn((d) => (d === f.id ? null : d))}
-        onDrop={(e) => handleDrop(e, f.id)}
+        onDrop={(e) => {
+          if (mine(f)) handleDrop(e, f.id)
+          else e.stopPropagation()
+        }}
         onClick={(e) => {
           e.stopPropagation()
           setSelected(isSelected ? null : f.id)
@@ -461,6 +528,7 @@ export default function StudentsRail({
         </button>
         <IconFolder className="h-4 w-4 shrink-0 text-emerald-600" />
         <span className="truncate">{f.name}</span>
+        {!mine(f) && <SharedMark by={sharerOf('folder', f.id, f.parent_id)} />}
       </div>
     )
   }
@@ -479,7 +547,7 @@ export default function StudentsRail({
     return (
       <div
         key={`v-${v.id}`}
-        draggable
+        draggable={mine(v)}
         onDragStart={(e) => onDragStartItem(e, { kind: 'view', id: v.id })}
         onContextMenu={(e) => openViewMenu(e, v)}
         className={
@@ -497,7 +565,10 @@ export default function StudentsRail({
           }
         >
           <span className="min-w-0">
-            <span className="block truncate">{v.name}</span>
+            <span className="flex items-center gap-1">
+              <span className="truncate">{v.name}</span>
+              {!mine(v) && <SharedMark by={sharerOf('view', v.id, v.folder_id)} />}
+            </span>
             {path && (
               <span
                 className={'block truncate text-[11px] ' + (on ? 'text-sky-100' : 'text-slate-400')}
@@ -690,6 +761,20 @@ export default function StudentsRail({
       )
     }
 
+    // טבלה ששותפה איתי אינה שלי: העברה, מיזוג, מחיקה ושיתוף־משנה
+    // כולם חסומים ב-RLS, ואין טעם להציע אותם.
+    if (!mine(v)) {
+      const by = sharerOf('view', v.id, v.folder_id)
+      return (
+        <p className="px-3 py-2 text-xs leading-relaxed text-slate-400">
+          הטבלה שותפה איתך ע"י{' '}
+          <span className="text-emerald-700">{by?.owner_name ?? by?.owner_email ?? 'משתמש אחר'}</span>
+          {by?.can_edit ? ' להרשאת עריכה' : ' לצפייה בלבד'}. מחיקה, שינוי שם ושיתוף שמורים
+          למי שיצר אותה.
+        </p>
+      )
+    }
+
     return (
       <>
         {onMoveView && (
@@ -709,6 +794,18 @@ export default function StudentsRail({
             <span className="w-4 shrink-0 text-center text-sky-600">⇆</span>
             <span>מיזוג לטבלה אחרת</span>
             <span className="mr-auto text-slate-400">‹</span>
+          </button>
+        )}
+        {onShare && (
+          <button
+            onClick={() => {
+              onShare({ kind: 'view', id: v.id, name: v.name })
+              setViewMenu(null)
+            }}
+            className={menuItem}
+          >
+            <IconShare className="h-4 w-4 shrink-0 text-sky-600" />
+            <span>שיתוף…</span>
           </button>
         )}
         {onDeleteView && (
@@ -940,43 +1037,76 @@ export default function StudentsRail({
               }}
               className="z-50 overflow-hidden rounded-xl border border-slate-300 bg-white py-1 shadow-2xl"
             >
-              <div className="truncate border-b border-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">
-                {menu.folder.name}
+              <div className="border-b border-slate-100 px-3 py-1.5">
+                <div className="truncate text-xs font-bold text-slate-500">{menu.folder.name}</div>
+                {!mine(menu.folder) && (
+                  <div className="truncate text-[11px] text-emerald-700">
+                    שותפה איתך ע"י{' '}
+                    {sharerOf('folder', menu.folder.id, menu.folder.parent_id)?.owner_name ??
+                      sharerOf('folder', menu.folder.id, menu.folder.parent_id)?.owner_email ??
+                      'משתמש אחר'}
+                  </div>
+                )}
               </div>
-              <button
-                onClick={() => {
-                  setDraft(menu.folder.name)
-                  setRenaming(menu.folder.id)
-                  setMenu(null)
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-sky-50 hover:text-sky-800"
-              >
-                <span>✎</span>
-                <span>שינוי שם</span>
-              </button>
-              <button
-                onClick={() => {
-                  setDraft('')
-                  setCreating({ parentId: menu.folder.id })
-                  if (!open.has(menu.folder.id)) toggleOpen(menu.folder.id)
-                  setMenu(null)
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-sky-50 hover:text-sky-800"
-              >
-                <IconFolderPlus className="h-4 w-4" />
-                <span>תיקייה בתוכה</span>
-              </button>
-              <button
-                onClick={() => {
-                  onDeleteFolder?.(menu.folder)
-                  setMenu(null)
-                }}
-                title="הטבלאות שבתוכה יחזרו לשורש ולא יימחקו"
-                className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-red-50 hover:text-red-700"
-              >
-                <span>🗑</span>
-                <span>מחיקת התיקייה</span>
-              </button>
+
+              {/* פעולות הבעלוּת מוצגות רק למי שיצר — הן חסומות ב-RLS ממילא */}
+              {mine(menu.folder) ? (
+                <>
+                  <button
+                    onClick={() => {
+                      setDraft(menu.folder.name)
+                      setRenaming(menu.folder.id)
+                      setMenu(null)
+                    }}
+                    className={menuItem}
+                  >
+                    <span className="w-4 shrink-0 text-center">✎</span>
+                    <span>שינוי שם</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDraft('')
+                      setCreating({ parentId: menu.folder.id })
+                      if (!open.has(menu.folder.id)) toggleOpen(menu.folder.id)
+                      setMenu(null)
+                    }}
+                    className={menuItem}
+                  >
+                    <IconFolderPlus className="h-4 w-4 shrink-0" />
+                    <span>תיקייה בתוכה</span>
+                  </button>
+                  {onShare && (
+                    <button
+                      onClick={() => {
+                        onShare({ kind: 'folder', id: menu.folder.id, name: menu.folder.name })
+                        setMenu(null)
+                      }}
+                      title="השיתוף חל גם על תיקיות המשנה ועל הטבלאות שבתוכן"
+                      className={menuItem}
+                    >
+                      <IconShare className="h-4 w-4 shrink-0 text-sky-600" />
+                      <span>שיתוף…</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      onDeleteFolder?.(menu.folder)
+                      setMenu(null)
+                    }}
+                    title="הטבלאות שבתוכה יחזרו לשורש ולא יימחקו"
+                    className={
+                      menuItemBase + ' border-t border-slate-100 hover:bg-red-50 hover:text-red-700'
+                    }
+                  >
+                    <span className="w-4 shrink-0 text-center">🗑</span>
+                    <span>מחיקת התיקייה</span>
+                  </button>
+                </>
+              ) : (
+                <p className="px-3 py-2 text-xs leading-relaxed text-slate-400">
+                  התיקייה אינה שלך. שינוי שם, מחיקה ושיתוף שמורים למי שיצר אותה.
+                </p>
+              )}
             </div>
           </>,
           document.body,
