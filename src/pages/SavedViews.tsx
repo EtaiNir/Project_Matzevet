@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useAuth } from '@/context/AuthContext'
 import { fetchAuthorities, type Authority } from '@/lib/admin'
 import {
   deleteSavedView,
   fetchSavedViews,
+  fetchViewFolders,
   renameSavedView,
   type SavedView,
+  type ViewFolder,
 } from '@/lib/savedViews'
 import { fieldLabel } from '@/config/fields'
 import { operatorLabel } from '@/lib/filters'
@@ -28,10 +29,10 @@ function describeSeed(view: SavedView): string {
 
 /** מסך הטבלאות הייעודיות של הרשות. */
 export default function SavedViews() {
-  const { profile } = useAuth()
   const { code = '' } = useParams()
   const [authorities, setAuthorities] = useState<Authority[]>([])
   const [views, setViews] = useState<SavedView[]>([])
+  const [folders, setFolders] = useState<ViewFolder[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
@@ -40,7 +41,9 @@ export default function SavedViews() {
   const [query, setQuery] = useState('')
 
   const load = useCallback(async () => {
-    setViews(await fetchSavedViews(code))
+    const [v, f] = await Promise.all([fetchSavedViews(code), fetchViewFolders(code)])
+    setViews(v)
+    setFolders(f)
   }, [code])
 
   useEffect(() => {
@@ -55,6 +58,19 @@ export default function SavedViews() {
   // חיפוש לפי שם בלבד — זה מה שהמשתמש זוכר מהרשימה בסרגל
   const needle = query.trim().toLowerCase()
   const shown = needle ? views.filter((v) => v.name.toLowerCase().includes(needle)) : views
+
+  /** הנתיב המלא לתיקייה, כדי שהכרטיס יגיד איפה הטבלה יושבת בסרגל */
+  function pathOf(folderId: string | null): string {
+    const parts: string[] = []
+    let cur = folderId
+    for (let guard = 0; cur && guard < 20; guard++) {
+      const f = folders.find((x) => x.id === cur)
+      if (!f) break
+      parts.unshift(f.name)
+      cur = f.parent_id
+    }
+    return parts.join(' / ')
+  }
 
   async function rename(id: string) {
     try {
@@ -87,7 +103,8 @@ export default function SavedViews() {
             </span>
           </h1>
           <p className="text-sm text-slate-500">
-            רשימות תלמידים קבועות, שנבנו מסינון ואפשר להוסיף ולהסיר מהן ידנית
+            רשימות תלמידים קבועות, שנבנו מסינון ואפשר להוסיף ולהסיר מהן ידנית.
+            כל משתמש רואה את הרשימות שהוא עצמו יצר.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -189,7 +206,7 @@ export default function SavedViews() {
 
                 <p className="mt-3 text-xs text-slate-400">
                   נוצרה {new Date(v.created_at).toLocaleDateString('he-IL')}
-                  {v.visibility === 'authority' ? ' · משותפת לרשות' : ' · פרטית'}
+                  {v.folder_id ? ` · 📁 ${pathOf(v.folder_id)}` : ''}
                 </p>
 
                 <div className="mt-auto flex items-center gap-2 pt-4">
@@ -209,15 +226,14 @@ export default function SavedViews() {
                   >
                     ✎
                   </button>
-                  {(v.created_by === profile?.id || profile?.role !== 'viewer') && (
-                    <button
-                      onClick={() => setConfirming(v)}
-                      title="מחיקת הטבלה"
-                      className="mr-auto rounded-lg px-2 py-1 text-sm text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                    >
-                      🗑
-                    </button>
-                  )}
+                  {/* כל מה שרואים כאן נוצר ע"י המשתמש עצמו (מיגרציה 021) */}
+                  <button
+                    onClick={() => setConfirming(v)}
+                    title="מחיקת הטבלה"
+                    className="mr-auto rounded-lg px-2 py-1 text-sm text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                  >
+                    🗑
+                  </button>
                 </div>
               </div>
             </div>

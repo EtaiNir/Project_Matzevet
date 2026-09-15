@@ -6,6 +6,10 @@
 // עד שיוסר. זו הדרישה — "את מי שסיננת להוסיף לאחת הטבלאות".
 //
 // `filters` נשמר כתיעוד של הסינון שממנו נבנתה הרשימה, ואינו מורץ מחדש.
+//
+// מיגרציה 021: טבלה ייעודית ותיקייה הן **אישיות** — כל משתמש רואה רק
+// את מה שהוא עצמו יצר. הסינון הזה אינו כאן אלא ב-RLS, ולכן גם קריאה
+// ישירה ל-API לא תחזיר את הרשימות של מישהו אחר.
 
 import { supabase } from './supabase'
 import type { FilterCondition } from './filters'
@@ -21,11 +25,21 @@ export interface SavedView {
   /** הסינון שממנו נזרעה הרשימה — תיעוד בלבד */
   filters: FilterCondition[]
   fields: string[]
-  visibility: 'private' | 'authority'
+  /** התיקייה שבה היא יושבת בסרגל. null = בשורש */
+  folder_id: string | null
   created_by: string | null
   created_at: string
   /** מספר התלמידים ברשימה — נשלף בנפרד */
   member_count?: number
+}
+
+/** תיקייה בעץ הסרגל. `parent_id` ריק = תיקייה בשורש. */
+export interface ViewFolder {
+  id: string
+  authority_code: string
+  parent_id: string | null
+  name: string
+  created_at: string
 }
 
 function membersTable(authorityCode: string): string {
@@ -151,5 +165,84 @@ export async function renameSavedView(id: string, name: string): Promise<void> {
 /** מוחקת את הרשימה. החברוּת נגררת ב-on delete cascade. */
 export async function deleteSavedView(id: string): Promise<void> {
   const { error } = await supabase.from('saved_views').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** מעבירה טבלה לתיקייה. `null` מחזיר אותה לשורש. */
+export async function moveViewToFolder(id: string, folderId: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('saved_views')
+    .update({ folder_id: folderId, updated_at: new Date().toISOString() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+// ─────────────────────────── תיקיות ───────────────────────────
+
+/**
+ * כל התיקיות של המשתמש ברשות.
+ *
+ * נשלפות שטוחות והעץ נבנה בזיכרון: מספר התיקיות של משתמש בודד נמדד
+ * בעשרות, ושאילתה רקורסיבית כאן הייתה עלות בלי תמורה.
+ *
+ * נכשלת בשקט ומחזירה רשימה ריקה — אתר שרץ מול מסד בלי מיגרציה 021
+ * ימשיך להציג את הטבלאות בשורש, בדיוק כמו קודם.
+ */
+export async function fetchViewFolders(authorityCode: string): Promise<ViewFolder[]> {
+  const { data, error } = await supabase
+    .from('view_folders')
+    .select('id, authority_code, parent_id, name, created_at')
+    .eq('authority_code', authorityCode)
+    .order('name')
+  if (error) return []
+  return (data ?? []) as ViewFolder[]
+}
+
+export async function createViewFolder(
+  authorityCode: string,
+  name: string,
+  parentId: string | null = null,
+): Promise<ViewFolder> {
+  const { data: session } = await supabase.auth.getUser()
+  const { data, error } = await supabase
+    .from('view_folders')
+    .insert({
+      authority_code: authorityCode,
+      name: name.trim(),
+      parent_id: parentId,
+      created_by: session.user?.id ?? null,
+    })
+    .select()
+    .single()
+  if (error) throw new Error(error.message)
+  return data as ViewFolder
+}
+
+export async function renameViewFolder(id: string, name: string): Promise<void> {
+  const { error } = await supabase
+    .from('view_folders')
+    .update({ name: name.trim() })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/** מעבירה תיקייה תחת תיקייה אחרת. המסד חוסם מעגלים. */
+export async function moveViewFolder(id: string, parentId: string | null): Promise<void> {
+  const { error } = await supabase
+    .from('view_folders')
+    .update({ parent_id: parentId })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * מוחקת תיקייה.
+ *
+ * תיקיות המשנה נגררות איתה, אבל **הטבלאות שבתוכה אינן נמחקות** — הן
+ * חוזרות לשורש (`on delete set null`). תיקייה היא סידור; טבלה ייעודית
+ * מחזיקה רשימת תלמידים שמישהו בנה ידנית.
+ */
+export async function deleteViewFolder(id: string): Promise<void> {
+  const { error } = await supabase.from('view_folders').delete().eq('id', id)
   if (error) throw new Error(error.message)
 }

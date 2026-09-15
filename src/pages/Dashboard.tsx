@@ -37,12 +37,19 @@ import {
 } from '@/config/fields'
 import { fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
+  createViewFolder,
   deleteSavedView,
+  deleteViewFolder,
   fetchSavedView,
   fetchSavedViews,
+  fetchViewFolders,
   fetchViewMembers,
+  moveViewFolder,
+  moveViewToFolder,
   removeStudentFromView,
+  renameViewFolder,
   type SavedView,
+  type ViewFolder,
 } from '@/lib/savedViews'
 import type { PivotNavState } from '@/lib/pivot'
 import FilterBar from '@/components/FilterBar'
@@ -124,10 +131,13 @@ export default function Dashboard() {
   // null = סגור. adding = להיפתח ישר על טופס ההוספה (כפתור ה-+ שבכותרת)
   const [manager, setManager] = useState<{ adding: boolean } | null>(null)
   const [savedViews, setSavedViews] = useState<SavedView[]>([])
+  const [viewFolders, setViewFolders] = useState<ViewFolder[]>([])
 
   const [saveToView, setSaveToView] = useState(false)
   /** הטבלה הייעודית שממתינה לאישור מחיקה מהסרגל */
   const [deletingView, setDeletingView] = useState<SavedView | null>(null)
+  /** התיקייה שממתינה לאישור מחיקה. הטבלאות שבתוכה אינן נמחקות איתה. */
+  const [deletingFolder, setDeletingFolder] = useState<ViewFolder | null>(null)
   // מצב טבלה ייעודית: הרשימה עצמה, והת"ז שבה
   const [activeView, setActiveView] = useState<SavedView | null>(null)
   const [viewMembers, setViewMembers] = useState<Set<string> | null>(null)
@@ -205,8 +215,31 @@ export default function Dashboard() {
 
   const loadViews = useCallback(async () => {
     if (!authorityCode) return
-    setSavedViews(await fetchSavedViews(authorityCode))
+    const [views, folders] = await Promise.all([
+      fetchSavedViews(authorityCode),
+      fetchViewFolders(authorityCode),
+    ])
+    setSavedViews(views)
+    setViewFolders(folders)
   }, [authorityCode])
+
+  /**
+   * כל פעולות התיקיות עוברות דרך אותו מסלול: פעולה במסד, ואז טעינה
+   * מחדש של הרשימה. אין עדכון אופטימי — טריגר במסד יכול לדחות מהלך
+   * (מעגל, תיקייה של משתמש אחר), ומצב מקומי ש"הצליח" בזמן שהמסד סירב
+   * הוא בדיוק סוג השקר שקשה לאתר אחר כך.
+   */
+  const folderAction = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      try {
+        await fn()
+        await loadViews()
+      } catch (e) {
+        setError((e as Error).message)
+      }
+    },
+    [loadViews],
+  )
 
   useEffect(() => {
     loadViews()
@@ -298,6 +331,12 @@ export default function Dashboard() {
    * אם מחקנו את זו שפתוחה כרגע חוזרים לטבלה הראשית — אחרת המסך היה
    * ממשיך להציג רשימה שכבר אינה קיימת.
    */
+  /** מוחקת תיקייה. תיקיות המשנה נגררות; הטבלאות חוזרות לשורש. */
+  async function confirmDeleteFolder(folder: ViewFolder) {
+    setDeletingFolder(null)
+    await folderAction(() => deleteViewFolder(folder.id))
+  }
+
   async function confirmDeleteView(view: SavedView) {
     try {
       await deleteSavedView(view.id)
@@ -627,9 +666,19 @@ export default function Dashboard() {
           activeViewId={viewId ?? null}
           onSaveToView={() => setSaveToView(true)}
           canSaveToView={!activeView && results.length > 0}
+          folders={viewFolders}
+          // מיגרציה 021: המשתמש רואה רק את מה שהוא עצמו יצר, ולכן אין
+          // עוד מה לבדוק לפני מחיקה — הכול שלו
           onDeleteView={setDeletingView}
-          // צופה מוחק רק את מה שהוא עצמו יצר — אותו כלל כמו במסך הטבלאות
-          canDeleteView={(v) => v.created_by === profile?.id || profile?.role !== 'viewer'}
+          onCreateFolder={(name, parentId) =>
+            folderAction(() => createViewFolder(authorityCode, name, parentId))
+          }
+          onRenameFolder={(id, name) => folderAction(() => renameViewFolder(id, name))}
+          onDeleteFolder={setDeletingFolder}
+          onMoveView={(viewId, folderId) => folderAction(() => moveViewToFolder(viewId, folderId))}
+          onMoveFolder={(folderId, parentId) =>
+            folderAction(() => moveViewFolder(folderId, parentId))
+          }
         />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* הטבלה */}
@@ -703,6 +752,33 @@ export default function Dashboard() {
           anchor={columnMenu.anchor}
           onClose={() => setColumnMenu(null)}
         />
+      )}
+
+      {/* מחיקת תיקייה — האישור מסביר מה **לא** נמחק, כי זו השאלה */}
+      {deletingFolder && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div dir="rtl" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="font-bold text-red-800">מחיקת התיקייה «{deletingFolder.name}»</h3>
+            <p className="mt-2 text-sm text-slate-700">
+              התיקיות שבתוכה יימחקו גם הן.{' '}
+              <strong>הטבלאות הייעודיות אינן נמחקות</strong> — הן יחזרו לרשימה הראשית.
+            </p>
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={() => confirmDeleteFolder(deletingFolder)}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+              >
+                מחיקה
+              </button>
+              <button
+                onClick={() => setDeletingFolder(null)}
+                className="text-sm text-slate-500 transition hover:text-slate-800"
+              >
+                ביטול
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* מחיקת טבלה ייעודית מהסרגל — אישור מפורש, כי אין ממנה חזרה */}

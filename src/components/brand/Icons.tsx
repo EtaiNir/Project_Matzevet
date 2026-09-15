@@ -56,6 +56,34 @@ export function IconSearch(p: IconProps) {
   )
 }
 
+/** תיקייה */
+export function IconFolder(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h3.8l2 2.3H19a1.5 1.5 0 0 1 1.5 1.5v8.2a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z" />
+    </Svg>
+  )
+}
+
+/** תיקייה חדשה */
+export function IconFolderPlus(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h3.8l2 2.3H19a1.5 1.5 0 0 1 1.5 1.5v8.2a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z" />
+      <path d="M12 11.3v5M9.5 13.8h5" />
+    </Svg>
+  )
+}
+
+/** חץ פתיחה — פונה שמאלה כשסגור, ומסובב כלפי מטה כשפתוח */
+export function IconChevron(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M14.5 6 9 12l5.5 6" />
+    </Svg>
+  )
+}
+
 /** כרטיס תלמיד */
 export function IconCard(p: IconProps) {
   return (
