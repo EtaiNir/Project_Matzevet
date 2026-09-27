@@ -88,7 +88,10 @@ function presetFilters(preset: Preset): FilterCondition[] {
     id: `preset-${preset.id}-${i}`,
     ...f,
   }))
-  return [base, ...extra]
+  // תצורה שמדלגת על סינון מצב הרישום. נדרש למסך הכפילויות: הרשומה
+  // של הגן מסומנת "מועמד", ולכן הסינון הרגיל היה מסתיר בדיוק את אחת
+  // משתי השורות שהמסך כולו בא להציג זו מול זו.
+  return preset.skipActiveFilter ? extra : [base, ...extra]
 }
 
 export default function Dashboard() {

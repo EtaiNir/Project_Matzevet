@@ -25,6 +25,14 @@ export interface Preset {
    * מוצג בסרגל הסינון וניתן להסרה, כמו סינון מצב הרישום.
    */
   defaultFilters?: PresetFilter[]
+  /**
+   * לדלג על סינון ברירת המחדל «מצב רישום = משובץ».
+   *
+   * נדרש למסכים של דרג ב': ילד גן בלי שיבוץ מסומן «מועמד», ובמסך
+   * הכפילויות הרשומה של הגן היא **תמיד** כזו — הסינון הרגיל היה מסתיר
+   * בדיוק אחת משתי השורות שהמסך בא להציג זו מול זו.
+   */
+  skipActiveFilter?: boolean
 }
 
 // שם רשות המוסד ושם רשות מגורים התלמיד — סבא ביקש (הערה 9) שיופיעו
@@ -155,6 +163,84 @@ export const PRESETS: Preset[] = [
     defaultFilters: [
       { field: 'SHICHVA', operator: 'one_of', values: ['י', 'יא', 'יב'] },
     ],
+  },
+  {
+    id: 'ganim',
+    name: 'גנים',
+    description: 'ילדי הגנים שנקלטו מקובץ הרשות',
+    defaultFields: [
+      'MISPAR_ZEHUT',
+      'SHEM_MISHPACHA',
+      'SHEM_PRATI',
+      'CODE_MIN',
+      'TAARICH_LEDA',
+      'SEMEL_MOSAD',
+      'SHEM_MOSAD',
+      'TEUR_YISHUV1',
+      'SHEM_RECHOV1',
+      'MISPAR_BAYIT1',
+      'GOREM_KESHER_1_FULL_NAME',
+      'NAYAD_1_parent1',
+      'GOREM_KESHER_2_FULL_NAME',
+      'NAYAD_1_parent2',
+      'MATZAV_RISHUM_TEUR',
+      'source_group',
+    ],
+    defaultFilters: [
+      { field: 'source_group', operator: 'equals', value: 'גנים' },
+    ],
+    // בלי סינון «משובץ»: ילדי הגן שאין להם עדיין שיבוץ מסומנים «מועמד»,
+    // והם דווקא אלה שמעניינים תפעולית. הסינון זמין בסרגל למי שרוצה.
+    skipActiveFilter: true,
+  },
+  {
+    id: 'tier_b',
+    name: 'דרג ב׳',
+    description: 'כל האוכלוסיות שהרשות מאתרת בעצמה — גנים, לידה עד 3, קידום נוער וחינוך ביתי',
+    defaultFields: [
+      'MISPAR_ZEHUT',
+      'SHEM_MISHPACHA',
+      'SHEM_PRATI',
+      'CODE_MIN',
+      'TAARICH_LEDA',
+      'source_group',
+      'SHLAV_HINUCH_TEUR',
+      'SEMEL_MOSAD',
+      'SHEM_MOSAD',
+      'TEUR_YISHUV1',
+      'GOREM_KESHER_1_FULL_NAME',
+      'NAYAD_1_parent1',
+      'MATZAV_RISHUM_TEUR',
+    ],
+    defaultFilters: [
+      { field: 'source_group', operator: 'not_empty' },
+    ],
+    skipActiveFilter: true,
+  },
+  {
+    // המזהה נשאר `gan_duplicates` כדי שטבלאות ייעודיות שנשמרו ממנו
+    // ימשיכו להצביע על תצורה קיימת. השם והתוכן הוכללו.
+    id: 'gan_duplicates',
+    name: 'כפילויות',
+    description: 'ילדים שמופיעים ביותר ממקור אחד — מצב״ת ודרג ב׳, או שתי קבוצות של דרג ב׳',
+    defaultFields: [
+      'MISPAR_ZEHUT',
+      'SHEM_MISHPACHA',
+      'SHEM_PRATI',
+      'TAARICH_LEDA',
+      'KFILUT_DRAG_B',
+      'source_group',
+      'SHEM_MOSAD',
+      'SHLAV_HINUCH_TEUR',
+      'MATZAV_RISHUM_TEUR',
+      'TEUR_YISHUV1',
+    ],
+    defaultFilters: [
+      { field: 'KFILUT_DRAG_B', operator: 'not_empty' },
+    ],
+    // חובה כאן: רשומת הגן מסומנת «מועמד», והסינון הרגיל היה מציג
+    // שורה אחת מתוך שתיים — כלומר מסתיר בדיוק את הכפילות.
+    skipActiveFilter: true,
   },
 ]
 

@@ -124,6 +124,71 @@ export function authorityStatus(row: StudentRow, moeCode: string): string {
   return ''
 }
 
+// ─────────────────── כפילות בין דרג ב' למצב"ת ───────────────────
+//
+// ילד יכול להופיע פעמיים ובצדק: הוא היה בקובץ הגנים ובינתיים שובץ
+// לכיתה א', ולכן יש לו רשומה בטבלה הראשית וגם בדרג ב'. לפי
+// tier-b-template.md שתי הרשומות נשמרות — "עדיף להשאיר תלמיד במערכת
+// מאשר למחוק אותו" — אבל צריך **לראות** אותן, אחרת זו סתירה שקטה בין
+// שני מקורות.
+//
+// השדה מקבל את שם הקבוצה שאיתה יש התנגשות ("גנים"), ולא "כן": כשיהיו
+// ארבע קבוצות, השאלה הראשונה תהיה *עם מי* הכפילות.
+
+export const DUPLICATE_FIELD = 'KFILUT_DRAG_B'
+
+/** שם המקור לשורה שהגיעה ממשרד החינוך (אין לה `source_group`). */
+const MOE_SOURCE = 'מצב״ת'
+
+/**
+ * ממפה ת"ז → **כל המקורות** שבהם הילד מופיע, כשיש יותר מאחד.
+ *
+ * מאז [מיגרציה 025](../../supabase/migrations/025_tier_b_composite_key.sql)
+ * ילד יכול להימצא בשתי קבוצות של דרג ב' (בן 3 שנמצא גם ב«לידה עד 3»
+ * וגם ב«גנים»), ולא רק במצב"ת ובדרג ב'. לכן הבדיקה אינה "מצב"ת מול דרג
+ * ב'" אלא ספירה של כל המקורות לאותה ת"ז.
+ *
+ * הערך הוא **רשימת המקורות** ולא "כן", כי השאלה הראשונה על כפילות היא
+ * תמיד *עם מי*: «מצב״ת + גנים» הוא ילד שעבר לכיתה א', ו«גנים + לידה עד 3»
+ * הוא ילד בגבול הגיל — שני מצבים שונים לגמרי.
+ */
+function duplicateSources(rows: StudentRow[]): Map<string, string> {
+  const sources = new Map<string, Set<string>>()
+
+  for (const row of rows) {
+    const id = row['MISPAR_ZEHUT']
+    if (id === null || id === undefined || id === '') continue
+    const key = String(id)
+    const group = row['source_group']
+    const source = group ? String(group) : MOE_SOURCE
+    const set = sources.get(key)
+    if (set) set.add(source)
+    else sources.set(key, new Set([source]))
+  }
+
+  const duplicates = new Map<string, string>()
+  for (const [id, set] of sources) {
+    if (set.size < 2) continue
+    // מצב"ת ראשון אם הוא שם — הוא המקור שהמשתמש מכיר; השאר לפי א"ב
+    const list = [...set].sort((a, b) =>
+      a === MOE_SOURCE ? -1 : b === MOE_SOURCE ? 1 : a.localeCompare(b, 'he'))
+    duplicates.set(id, list.join(' + '))
+  }
+  return duplicates
+}
+
+/**
+ * השדות ש-`withComputedFields` כותב. כל ערך שנטען אליהם נדרס בתצוגה,
+ * ולכן אסור להציע אותם כיעד בקליטת קובץ — מיפוי אליהם נראה כאילו הצליח
+ * ופשוט נעלם. מקור אמת אחד, כדי שהרשימה כאן ובמסך הקליטה לא יתפצלו.
+ */
+export const BROWSER_COMPUTED_FIELDS: readonly string[] = [
+  'STATUS_CHINUCH_MEYUCHAD',
+  'STATUS_TALMID_BARASHUT',
+  'SEMEL_MASLUL',
+  DUPLICATE_FIELD,
+]
+
 // ─────────────────── החלה על כל השורות ───────────────────
 
 /**
@@ -137,10 +202,18 @@ export function withComputedFields(
   rows: StudentRow[],
   moeCode: string,
 ): StudentRow[] {
-  return rows.map((row) => ({
-    ...row,
-    STATUS_CHINUCH_MEYUCHAD: specialEdStatus(row),
-    STATUS_TALMID_BARASHUT: authorityStatus(row, moeCode),
-    SEMEL_MASLUL: maslulCode(row),
-  }))
+  // מעבר מקדים: הכפילות אינה תכונה של שורה בודדת אלא של הצלבה בין כל
+  // המקורות, ולכן היא מחושבת פעם אחת על המערך כולו ולא בתוך ה-map.
+  const duplicates = duplicateSources(rows)
+
+  return rows.map((row) => {
+    const id = String(row['MISPAR_ZEHUT'] ?? '')
+    return {
+      ...row,
+      STATUS_CHINUCH_MEYUCHAD: specialEdStatus(row),
+      STATUS_TALMID_BARASHUT: authorityStatus(row, moeCode),
+      SEMEL_MASLUL: maslulCode(row),
+      [DUPLICATE_FIELD]: duplicates.get(id) ?? '',
+    }
+  })
 }

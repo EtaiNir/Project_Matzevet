@@ -169,6 +169,15 @@ export default function RailTopBar({
             ⬆ מצב״ת
           </Link>
         )}
+        {canUpdateMoe && authorityCode && (
+          <Link
+            to={`/upload-ganim/${authorityCode}`}
+            title="קליטת קובץ גנים או אוכלוסייה משלימה — אינה נוגעת בנתוני משרד החינוך"
+            className={btn}
+          >
+            ⬆ גנים
+          </Link>
+        )}
         <button
           onClick={onRefresh}
           disabled={refreshing}

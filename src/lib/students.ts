@@ -3,6 +3,17 @@ import { supabase, studentsTable } from './supabase'
 
 export type StudentRow = Record<string, unknown>
 
+/**
+ * דרג ב' — גנים, לידה עד 3, קידום נוער וחינוך ביתי.
+ *
+ * הם יושבים בטבלה נפרדת (`students_{code}_tier_b`) ולא בראשית, כי
+ * הראשית נדרסת ב-TRUNCATE בכל עדכון מצב"ת חודשי וילדי הגן היו נמחקים
+ * איתה. אותן עמודות בדיוק בשתי הטבלאות, ולכן המיזוג כאן הוא שרשור —
+ * וכל שדה בבורר השדות, בסינון, בייצוא ובפיבוטים עובד על שתי הקבוצות
+ * בלי שום קוד מיוחד.
+ */
+const TIER_B_SUFFIX = '_tier_b'
+
 const PAGE_SIZE = 1000 // Supabase מגביל ל-1000 שורות לבקשה
 const MAX_PARALLEL = 4 // כמה עמודים לבקש במקביל
 
@@ -59,9 +70,7 @@ async function fetchPage(table: string, from: number): Promise<StudentRow[]> {
  * מראש מאפשרת לדעת כמה עמודים יש במקום לגשש עמוד-אחר-עמוד. עם 9 עמודים,
  * זה ההבדל בין 9 סבבים סדרתיים לשלושה גלים.
  */
-async function loadAll(authorityCode: string): Promise<StudentRow[]> {
-  const table = studentsTable(authorityCode)
-
+async function loadTable(table: string): Promise<StudentRow[]> {
   // ספירה בלבד (head) — זולה, ומאפשרת לתכנן את הבקשות מראש
   const { count, error: countError } = await supabase
     .from(table)
@@ -85,6 +94,30 @@ async function loadAll(authorityCode: string): Promise<StudentRow[]> {
   }
 
   return all
+}
+
+/**
+ * ילדי דרג ב' של הרשות — אם יש כאלה.
+ *
+ * **כישלון כאן אינו שגיאה.** הטבלה נוצרת בעצלתיים: רשות שאיש לא העלה
+ * לה קובץ גנים פשוט אין לה טבלה, וכך גם לפני שמיגרציה 023 רצה. בשני
+ * המקרים התשובה הנכונה היא "אין ילדי דרג ב'", ולא מסך שבור — האתר
+ * חייב להמשיך להציג את תלמידי משרד החינוך כרגיל.
+ */
+async function loadTierB(authorityCode: string): Promise<StudentRow[]> {
+  try {
+    return await loadTable(studentsTable(authorityCode) + TIER_B_SUFFIX)
+  } catch {
+    return []
+  }
+}
+
+async function loadAll(authorityCode: string): Promise<StudentRow[]> {
+  const [main, tierB] = await Promise.all([
+    loadTable(studentsTable(authorityCode)),
+    loadTierB(authorityCode),
+  ])
+  return tierB.length > 0 ? [...main, ...tierB] : main
 }
 
 export async function fetchAllStudents(

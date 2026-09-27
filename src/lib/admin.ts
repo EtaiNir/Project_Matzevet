@@ -568,6 +568,142 @@ async function step<T>(label: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
+// ─────────────────────── קליטת דרג ב' (גנים) ───────────────────────
+//
+// אוכלוסיות שמשרד החינוך אינו שולח כלל, והרשות מאתרת בעצמה. הן נטענות
+// לטבלה נפרדת שאינה נדרסת בעדכון החודשי (מיגרציה 023).
+//
+// ⚠️ **אין כאן מסלול אוטומטי.** קובץ גנים נקלט אך ורק דרך הכפתור הזה:
+// סורק התיקייה של הסוכן קורא רק `.csv`, דורש את ששת קידומות המצב"ת,
+// ומדלג על מנה חלקית — ולכן קובץ גנים אינו נראה לו כלל.
+
+/** הקבוצות המוכרות. זהה ל-tier_b_groups() במסד. */
+export const TIER_B_GROUPS = ['גנים', 'לידה עד 3', 'קידום נוער', 'חינוך ביתי'] as const
+
+/**
+ * ערך מיוחד במיפוי: "צור עמודה תוספתית חדשה בשם הכותרת".
+ *
+ * קובץ של קידום נוער יביא «גורם מטפל», ושל לידה עד 3 «שם מטפלת» — שדות
+ * שאינם קיימים בסכימת משרד החינוך. במקום לאבד אותם, הם נכנסים למנגנון
+ * של "עמודות שהמשתמש מוסיף", שיושב בטבלה נפרדת שהעדכון החודשי אינו
+ * נוגע בה.
+ *
+ * ⚠️ חייב להיות זהה ל-NEW_COLUMN ב-scripts/load_tier_b.py.
+ */
+export const NEW_COLUMN = '__new__'
+export type TierBGroup = (typeof TIER_B_GROUPS)[number]
+
+export interface TierBUpload {
+  id: string
+  authority_code: string
+  source_group: string
+  status: 'pending' | 'mapping' | 'awaiting_approval' | 'processing' | 'done' | 'failed'
+  storage_path: string
+  file_name: string | null
+  /** מה שהוצע — ע"י AI או מתוך מיפוי שנשמר לרשות */
+  proposed_mapping: Record<string, string | null> | null
+  approved_mapping: Record<string, string | null> | null
+  mapping_source: 'ai' | 'saved' | 'manual' | null
+  /**
+   * לכל כותרת: באיזו שכבה נמצא השדה ומה רמת הביטחון של ה-AI (מיגרציה 024).
+   * ריק למיפוי שמור או ידני — שם אין הערכה, יש החלטה של אדם.
+   */
+  mapping_meta: Record<string, { tier: 'core' | 'extended'; confidence: 'high' | 'low' }> | null
+  uploaded_at: string
+  processed_at: string | null
+  rows_loaded: number | null
+  rows_rejected: number | null
+  error_message: string | null
+}
+
+export async function fetchTierBUploads(code: string): Promise<TierBUpload[]> {
+  const { data, error } = await supabase
+    .from('tier_b_uploads')
+    .select('*')
+    .eq('authority_code', code)
+    .order('uploaded_at', { ascending: false })
+    .limit(20)
+  if (error) throw error
+  return (data ?? []) as TierBUpload[]
+}
+
+/**
+ * מעלה קובץ דרג ב' ורושם אותו בתור.
+ *
+ * הקובץ יושב בבאקט `moe-uploads` תחת `{code}/tier-b/...` ולא בבאקט
+ * חדש: מדיניות הכתיבה שם כבר בודקת `may_update_moe` על החלק הראשון
+ * בנתיב (מיגרציה 012), וזו בדיוק ההרשאה הנדרשת — מנהל רשות או
+ * מנהל־על. באקט נוסף היה מכפיל מדיניות בלי להוסיף הגנה.
+ */
+/**
+ * שם קובץ בטוח למפתח ב-Storage.
+ *
+ * Supabase פוסלת מפתח שאינו בתו־סט המצומצם שלה, ושם קובץ **בעברית**
+ * נכשל בו — `Invalid key`. קובצי המצב"ת מגיעים בשמות אנגליים מהמשרד
+ * ולכן זה מעולם לא צץ שם, אבל קובץ גנים מגיע מהרשות ויהיה בעברית
+ * כמעט תמיד.
+ *
+ * הסיומת נשמרת כי **היא** קובעת איך הקובץ ייקרא בצד השני
+ * (`read_table` מפצל בין `.xls` ל-`.xlsx` לפיה). השם המקורי נשמר
+ * בעמודה `file_name` ומוצג למשתמש — רק המפתח באחסון מעוקר.
+ *
+ * ⚠️ לא להחיל את זה על `uploadMoeFiles`: שם ה-pipeline והסוכן בוחרים
+ * קבצים **לפי הקידומת בשם**, ועיקור היה שובר את הזיהוי.
+ */
+function storageSafeName(name: string): string {
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 ? name.slice(dot).toLowerCase().replace(/[^a-z0-9.]/g, '') : ''
+  const base = (dot > 0 ? name.slice(0, dot) : name)
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+  return (base || 'upload') + (ext || '')
+}
+
+export async function uploadTierBFile(
+  code: string,
+  file: File,
+  group: TierBGroup = 'גנים',
+) {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const path = `${code}/tier-b/${stamp}/${storageSafeName(file.name)}`
+  const where = `העלאת הקובץ (${file.name}, ${(file.size / 1e6).toFixed(1)}MB)`
+
+  const { error: uploadError } = await step(where, async () =>
+    await supabase.storage.from(UPLOADS_BUCKET).upload(path, file))
+  if (uploadError) throw new Error(`${where} — ${uploadError.message}`)
+
+  const { error } = await step('רישום הקליטה', async () =>
+    await supabase.from('tier_b_uploads').insert({
+      authority_code: code,
+      source_group: group,
+      storage_path: path,
+      file_name: file.name,
+      status: 'pending',
+    }))
+  if (error) throw new Error(`רישום הקליטה — ${error.message}`)
+  return path
+}
+
+/**
+ * מאשר את המיפוי ומשחרר את הקליטה לטעינה.
+ *
+ * זה השלב שבו אדם מאשר מה שה-AI הציע. בלעדיו קליטה נשארת ב-
+ * `awaiting_approval` ולא נוגעת בנתונים — מיפוי שגוי בשקט על אלפי
+ * קטינים הוא בדיוק מה שאסור שיקרה מעצמו.
+ */
+export async function approveTierBMapping(
+  id: string,
+  mapping: Record<string, string | null>,
+) {
+  const { error } = await step('אישור המיפוי', async () =>
+    await supabase
+      .from('tier_b_uploads')
+      .update({ approved_mapping: mapping, status: 'pending' })
+      .eq('id', id))
+  if (error) throw new Error(`אישור המיפוי — ${error.message}`)
+}
+
 export async function uploadMoeFiles(code: string, files: File[]) {
   const prefix = `${code}/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`
 

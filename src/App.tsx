@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Pivot from './pages/Pivot'
 import SavedViews from './pages/SavedViews'
 import UpdateData from './pages/UpdateData'
+import UpdateGanim from './pages/UpdateGanim'
 import Admin from './pages/Admin'
 import ClientDetail from './pages/ClientDetail'
 
@@ -59,6 +60,8 @@ export default function App() {
       <Route path="/views/:code/:viewId" element={<Dashboard />} />
       {/* עדכון מצב"ת — מנהל רשות וגם מנהל־על; ההרשאה נאכפת ב-RLS */}
       <Route path="/upload/:code" element={<UpdateData />} />
+      {/* קליטת דרג ב' (גנים) — אותה הרשאה, טבלה אחרת לגמרי */}
+      <Route path="/upload-ganim/:code" element={<UpdateGanim />} />
 
       <Route
         path="/admin"

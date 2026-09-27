@@ -39,11 +39,22 @@ import urllib3
 # יירוט SSL ברשתות מסוימות (נטספארק וכד') — החיבור עדיין ל-Supabase
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# הלוג לקונסולה חייב להיות UTF-8. בברירת המחדל של Windows (cp1255) כל
+# שורה עם ═ / → / ✓ זרקה UnicodeEncodeError, ו-logging הדפיס עליה traceback
+# שלם — לוג של 189 שורות שרובן רעש, בדיוק כשהיה צריך לקרוא אותו. תחת
+# pythonw (המשימה המתוזמנת) אין stdout כלל, ולכן השגיאה נבלעת.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 AGENT_DIR = Path(__file__).resolve().parent
 DASHBOARD_DIR = AGENT_DIR.parent
 PROJECT_ROOT = DASHBOARD_DIR.parent            # ...\ממשק אינטרנטי
 PIPELINE_DIR = PROJECT_ROOT / "Itay_Modules" / "python_modules"
 LOAD_SCRIPT = DASHBOARD_DIR / "scripts" / "load_main.py"
+TIER_B_SCRIPT = DASHBOARD_DIR / "scripts" / "load_tier_b.py"
 
 BACKUP_DIR = AGENT_DIR / "backups"
 BACKUP_KEEP = 12           # תקרת גיבויים לרשות, מגן מפני עדכונים תכופים
@@ -158,6 +169,152 @@ def finish_upload(conn, upload_id, status, rows=None, error=None):
                    error_message = %s
              where id = %s
         """, (status, rows, (error or "")[:500] or None, upload_id))
+
+
+# ═══════════════ קליטת דרג ב' (גנים) ═══════════════
+#
+# מסלול נפרד לגמרי מהמצב"ת, ובכוונה:
+#   • הנתונים נכתבים ל-students_{code}_tier_b ואינם נוגעים בטבלה הראשית.
+#   • **אין כאן מקור אוטומטי.** רק מה שהועלה דרך הכפתור באתר. סורק
+#     התיקייה אינו יכול להגיע לכאן — הוא קורא .csv בלבד ודורש את ששת
+#     קידומות המצב"ת.
+#   • שני שלבים, עם אדם באמצע: קודם זיהוי השדות, ואז — אחרי אישור
+#     במסך — הטעינה עצמה.
+
+
+def claim_next_tier_b(conn):
+    """
+    תופס קליטת דרג ב' ממתינה. אותו `for update skip locked` כמו במצב"ת:
+    בלעדיו שני סוכנים היו מעבדים את אותה שורה.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            update public.tier_b_uploads
+               set status = 'processing'
+             where id = (
+                   select id from public.tier_b_uploads
+                    where status = 'pending'
+                    order by uploaded_at
+                    limit 1
+                    for update skip locked)
+            returning id, authority_code, source_group, storage_path,
+                      file_name, approved_mapping
+        """)
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "code": row[1], "group": row[2], "path": row[3],
+            "file": row[4], "approved": row[5]}
+
+
+def finish_tier_b(conn, upload_id, status, mapping=None, source=None,
+                  rows=None, rejected=None, error=None, meta=None):
+    with conn.cursor() as cur:
+        cur.execute("""
+            update public.tier_b_uploads
+               set status           = %s,
+                   proposed_mapping = coalesce(%s::jsonb, proposed_mapping),
+                   mapping_meta     = coalesce(%s::jsonb, mapping_meta),
+                   mapping_source   = coalesce(%s, mapping_source),
+                   rows_loaded      = coalesce(%s, rows_loaded),
+                   rows_rejected    = coalesce(%s, rows_rejected),
+                   error_message    = %s,
+                   processed_at     = case when %s in ('done','failed')
+                                           then now() else processed_at end
+             where id = %s
+        """, (status,
+              json.dumps(mapping, ensure_ascii=False) if mapping else None,
+              json.dumps(meta, ensure_ascii=False) if meta else None,
+              source, rows, rejected, (error or "")[:500] or None,
+              status, upload_id))
+
+
+def download_one(storage_path: str, target: Path) -> Path:
+    """מוריד קובץ בודד מהבאקט. הנתיב כולל את קוד הרשות כחלק ראשון."""
+    url = require("SUPABASE_URL").rstrip("/")
+    resp = requests.get(f"{url}/storage/v1/object/{UPLOADS_BUCKET}/{storage_path}",
+                        headers=storage_headers(), verify=False, timeout=300)
+    resp.raise_for_status()
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / Path(storage_path).name
+    path.write_bytes(resp.content)
+    log.info("   הורד %s (%.1fMB)", path.name, len(resp.content) / 1024 / 1024)
+    return path
+
+
+def run_tier_b(args_list: list) -> str:
+    proc = subprocess.run(
+        [sys.executable, str(TIER_B_SCRIPT), *args_list],
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "")[-800:]
+        raise RuntimeError(f"קליטת דרג ב' נכשלה (קוד {proc.returncode}):\n{tail}")
+    log.debug("פלט דרג ב':\n%s", (proc.stderr or "")[-1200:])
+    return proc.stdout
+
+
+def process_tier_b(conn, job) -> None:
+    """
+    שני שלבים, לפי מה שכבר אושר:
+
+      אין approved_mapping  →  מזהה שדות, שומר הצעה, ועוצר ב-awaiting_approval.
+      יש approved_mapping   →  טוען בפועל.
+
+    ההפרדה הזו היא הגנה ולא נוחות: מיפוי שגוי בשקט על אלפי קטינים הוא
+    בדיוק סוג התקלה שאין דרך לגלות בדיעבד.
+    """
+    code = job["code"]
+    log.info("═" * 60)
+    log.info("קליטת דרג ב' — רשות %s · %s · %s", code, job["group"], job["file"])
+
+    work_dir = Path(tempfile.mkdtemp(prefix=f"tierb-{code}-"))
+    try:
+        log.info("1/3 מוריד את הקובץ…")
+        local = download_one(job["path"], work_dir)
+
+        # `is None` ולא `not`: מיפוי ריק `{}` הוא ערך שאושר, לא היעדר אישור.
+        # עם `not` הוא נקרא כ"טרם אושר", והסוכן זיהה שדות מחדש בלולאה
+        # אחרי כל לחיצה על אישור. מיפוי ריק שאושר צריך להיכשל ברעש בטעינה
+        # (load_tier_b מסרב) — לא להסתובב בשקט.
+        if job["approved"] is None:
+            log.info("2/3 מזהה שדות…")
+            out = run_tier_b(["--file", str(local), "--code", code,
+                              "--group", job["group"], "--emit-mapping"])
+            result = json.loads(out)
+            finish_tier_b(conn, job["id"], "awaiting_approval",
+                          mapping=result["mapping"], source=result["source"],
+                          meta=result.get("meta"))
+            log.info("✓ זוהו %s עמודות (%s) — ממתין לאישור באתר",
+                     sum(1 for v in result["mapping"].values() if v), result["source"])
+            return
+
+        log.info("2/3 טוען לפי המיפוי שאושר…")
+        mapping_file = work_dir / "mapping.json"
+        mapping_file.write_text(json.dumps(job["approved"], ensure_ascii=False),
+                                encoding="utf-8")
+        run_tier_b(["--file", str(local), "--code", code, "--group", job["group"],
+                    "--mapping", str(mapping_file), "--save-mapping"])
+
+        log.info("3/3 סופר…")
+        with conn.cursor() as cur:
+            cur.execute(
+                f'select count(*) from public.students_{code}_tier_b '
+                'where source_group = %s', (job["group"],))
+            rows = cur.fetchone()[0]
+        finish_tier_b(conn, job["id"], "done", rows=rows)
+        log.info("✓ הושלם — %s שורות בקבוצה '%s'", f"{rows:,}", job["group"])
+
+    except Exception as exc:
+        log.error("✗ נכשל: %s", exc)
+        log.debug(traceback.format_exc())
+        try:
+            finish_tier_b(conn, job["id"], "failed", error=str(exc))
+        except Exception:
+            log.exception("לא הצלחתי לעדכן את סטטוס הכישלון")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def ensure_table(conn, code: str) -> bool:
@@ -729,6 +886,14 @@ def main() -> None:
                     help='תיקיית קובצי מצב"ת מקומית (ברירת מחדל: MATZEVET_WATCH_FOLDER)')
     ap.add_argument("--no-watch", action="store_true",
                     help="לא לסרוק את התיקייה המקומית")
+    ap.add_argument("--tier-b-only", action="store_true",
+                    help="לטפל רק בקליטות דרג ב', ולא לגעת בתור המצב\"ת. "
+                         "נדרש כשמריצים סוכן שני לצד זה שבייצור: שניהם "
+                         "מתשאלים את אותו moe_uploads, ו-`for update skip "
+                         "locked` נותן את העבודה למי שהגיע ראשון — כלומר "
+                         "סוכן פיתוח היה עלול לחטוף עדכון מצב\"ת אמיתי, "
+                         "להריץ אותו על המחשב הלא נכון, ולכתוב את גיבוי "
+                         "הבטיחות לדיסק שאיש לא יחפש בו.")
     ap.add_argument("--process-existing", action="store_true",
                     help="לעבד עכשיו את מה שכבר בתיקייה (ברירת המחדל: לדלג "
                          "על הקיים ולעקוב רק אחרי מה שמתעדכן מכאן)")
@@ -789,15 +954,25 @@ def main() -> None:
             if args.once:
                 if watch_folder:
                     scan_watch_folder(conn, watch_folder, args.process_existing)
-                job = claim_next_upload(conn)
+                job = None if args.tier_b_only else claim_next_upload(conn)
                 if job:
                     process(conn, job)
-                else:
+                elif not args.tier_b_only:
                     log.info("אין העלאות ממתינות באתר")
+                tier_b = claim_next_tier_b(conn)
+                if tier_b:
+                    process_tier_b(conn, tier_b)
+                else:
+                    log.info("אין קליטות דרג ב' ממתינות")
                 log.info("סבב בדיקה הסתיים")
                 break
 
-            job = claim_next_upload(conn)
+            tier_b = claim_next_tier_b(conn)
+            if tier_b:
+                idle_logged = False
+                process_tier_b(conn, tier_b)
+
+            job = None if args.tier_b_only else claim_next_upload(conn)
             if job:
                 idle_logged = False
                 process(conn, job)
