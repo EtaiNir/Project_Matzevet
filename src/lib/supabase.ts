@@ -17,7 +17,7 @@ export const supabase = createClient(url ?? '', anonKey ?? '', {
   },
 })
 
-/** שם הטבלה הראשית של רשות לפי הקוד שלה, למשל students_14000 (אפיון §3). */
+/** שם הטבלה הראשית של רשות לפי הקוד שלה, למשל students_1400000 (אפיון §3). */
 export function studentsTable(authorityCode: string): string {
   return `students_${authorityCode}`
 }
