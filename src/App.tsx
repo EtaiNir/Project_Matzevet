@@ -11,6 +11,12 @@ import UpdateData from './pages/UpdateData'
 import UpdateGanim from './pages/UpdateGanim'
 import Admin from './pages/Admin'
 import ClientDetail from './pages/ClientDetail'
+import BagrutShell from './pages/bagrut/BagrutShell'
+import BagrutHome from './pages/bagrut/BagrutHome'
+import BagrutStudents from './pages/bagrut/BagrutStudents'
+import BagrutSubject from './pages/bagrut/BagrutSubject'
+import BagrutStudent from './pages/bagrut/BagrutStudent'
+import BagrutProgram from './pages/bagrut/BagrutProgram'
 
 export default function App() {
   const { session, profile, loading } = useAuth()
@@ -62,6 +68,16 @@ export default function App() {
       <Route path="/upload/:code" element={<UpdateData />} />
       {/* קליטת דרג ב' (גנים) — אותה הרשאה, טבלה אחרת לגמרי */}
       <Route path="/upload-ganim/:code" element={<UpdateGanim />} />
+
+      {/* מודול זכאות לבגרות — המעטפת טוענת את הסבב פעם אחת לכל המסכים */}
+      <Route path="/bagrut" element={<BagrutShell />} />
+      <Route path="/bagrut/:code" element={<BagrutShell />}>
+        <Route index element={<BagrutHome />} />
+        <Route path="students" element={<BagrutStudents />} />
+        <Route path="subject/:key" element={<BagrutSubject />} />
+        <Route path="student/:id" element={<BagrutStudent />} />
+        <Route path="program" element={<BagrutProgram />} />
+      </Route>
 
       <Route
         path="/admin"
