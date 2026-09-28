@@ -95,6 +95,7 @@ git remote -v      # חייבות להופיע שתי שורות (push) תחת o
 
 ```
 src/                         — הפרונטאנד (React)            ← src/CLAUDE.md
+src/pages/bagrut/            — מודול זכאות לבגרות (decisions/014)
 supabase/                    — מיגרציות ו-Edge Functions     ← supabase/CLAUDE.md
 scripts/                     — טעינה ל-Supabase, עדכון חודשי ← scripts/CLAUDE.md
 agent/                       — סוכן העיבוד שרץ אצל סבא       ← agent/CLAUDE.md

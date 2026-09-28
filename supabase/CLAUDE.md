@@ -31,6 +31,14 @@
 
 **כל פעולת ניהול נרשמת ב-`admin_audit`** ואי אפשר לערוך אותו. מיגרציה 014.
 
+## מודול הבגרות — כללים משלו
+
+טבלאות `bagrut_*` **משותפות** לכל הרשויות (עם `authority_code`), לא טבלה
+לכל רשות — ראה [decisions/014](../docs/decisions/014-bagrut-module.md).
+ההרשאה בעמודות `bagrut_role` + `bagrut_schools/grades/classes/tracks`,
+**נפרדת** מ-`scope_level` של המצבת. מערך היקף ריק = **כלום**, לא הכול.
+`bagrut_tracking` לעולם אינה נמחקת בקליטה.
+
 ## מבנה מסד הנתונים
 
 ```
