@@ -2,7 +2,7 @@
 קליטת סבב בגרות: T1 + T2 + המצפן → טבלאות bagrut_* ב-Supabase
 (bagrut_students כולל עמודות T2, bagrut_grades, bagrut_subjects, bagrut_tracking).
 
-    python scripts/load_bagrut.py --accdb <קובץ אקסס> --compass <קובץ אקסל> \
+    python scripts/load_bagrut.py (--accdb <קובץ אקסס> | --xlsx-dir <תיקייה>) [--compass <מצפן>] \
         --authority 800037 --school 800037 --season קיץ --year תשפ"ו [--index] [--dry-run]
 
 --dry-run   מפרק ומדפיס סיכום (ספירות בלבד — בלי שמות, ת"ז או ציונים), לא נוגע במסד.
@@ -122,7 +122,14 @@ def read_compass(path):
     """גיליון2: שורה לכל מקצוע — סוג (I), קוד (J), שם (K), זוגות שאלון/משקל
     בעמודות X..AK, הערות (AL). שורות בלי שם מקצוע (סיכומים) — מדלגים."""
     wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb["גיליון2"]
+    # הגיליון מזוהה לפי הכותרות שלו (K2 = "שם המקצוע", X2 = "שאלון 1"), לא לפי
+    # השם: באבו רביע זה "גיליון2", ברמות זבולון "גיליון4" — ושם "גיליון2" הוא
+    # פיבוט ספירות. מיקום העמודות I/J/K ו-X..AK זהה בשני הקבצים.
+    ws = next((s for s in wb.worksheets
+               if str(s.cell(2, 11).value or "").strip() == "שם המקצוע"
+               and str(s.cell(2, 24).value or "").strip() == "שאלון 1"), None)
+    if ws is None:
+        sys.exit("לא נמצא במצפן גיליון עם 'שם המקצוע' ב-K2 ו'שאלון 1' ב-X2")
     rows = []
     for r in range(4, ws.max_row + 1):
         name = txt(ws.cell(r, 11).value)          # K
@@ -232,8 +239,182 @@ def name_blocks(blocks, compass, index):
         if best and codes & {c for c, _ in best["pairs"]}:
             b["name"], b["compass"] = best["name"], best
             continue
-        names = collections.Counter(index[c]["subject_name"] for c in codes if c in index)
-        b["name"], b["compass"] = (names.most_common(1)[0][0] if names else b["key"]), None
+        names = collections.Counter(index[c]["subject_name"] for c in codes if c in index and index[c]["subject_name"])
+        name = names.most_common(1)[0][0] if names else b["key"]
+        # באינדקס "אנגלית" אחת לכל הרמות; הרמה יושבת בקידומת (Anglit3)
+        lvl = re.search(r"(\d)$", b["key"])
+        if lvl and not re.search(r"\d", name):
+            name = f"{name} {lvl.group(1)}"
+        b["name"], b["compass"] = name, None
+
+
+# ─────────────────────────────── מקורות ───────────────────────────────
+#
+# אותם נתונים מגיעים בשתי צורות: קובץ האקסס של סבא (אבו רביע), או ייצוא
+# של טבלאות האקסס לקובצי אקסל (רמות זבולון). שני המקורות מחזירים את אותן
+# שורות — כך כל הפירוק שאחריהם אחד.
+
+# בייצוא לאקסל, טבלה 1 יצאה עם כותרות בעברית. השמות כאן → השמות באקסס.
+DETAIL_ALIASES = {
+    "זהות תלמיד": "MisparZehutChinuch", "סמל מוסד": "SemelMosad", "שם המוסד": "SchoolName",
+    "פרטי ומשפחה תלמיד": "ShemTalmidChinuch", "שם פרטי": "Prati", "שם משפחה": "Mishpacha",
+    "שכבה": "Shichva", "כיתה ושכבה": "KitatEmChinuch", "סטטוס חוסרים": "HaImChaserChinuch",
+    "חשד": "Hashad", "עיכוב": "Ikuv", "מאתגר במיוד": "MaatgerimBemyuhad",
+    "סיכוי אפסי לזכאות": "ZeroChanceZakaut", "הערות קצר": "HearotTalmidShort",
+    "הערות ארוך": "HearotTalmidLong", "שנת לימודים": "ShnatLimud",
+}
+
+DETAIL_COLS = ["MisparZehutChinuch", "SemelMosad", "SchoolName", "ShemTalmidChinuch",
+               "Prati", "Mishpacha", "Shichva", "KitatEmChinuch", "HaImChaserChinuch",
+               "Hashad", "Ikuv", "MaatgerimBemyuhad", "ZeroChanceZakaut",
+               "HearotTalmidShort", "HearotTalmidLong"]
+
+
+def to_bool(v):
+    """אקסס נותן True/False; אקסל מחזיר גם 'TRUE', 'FALSE', 0, -1. bool('FALSE') הוא True."""
+    if v is None:
+        return False
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    return str(v).strip().lower() in ("true", "כן", "yes", "1", "-1", "x", "v")
+
+
+def resolve(path):
+    return glob.glob(path)[0] if any(ch in path for ch in "*?") else path
+
+
+def parse_index(rows):
+    index = {}
+    for r in rows:
+        code = num(r.get("סמל שאלון מערכת 1"))
+        if code is None:
+            continue
+        code = int(code)
+        index[code] = {
+            "code": code,
+            "subject_name": txt(r.get("שם מקצוע מערכת 2")),
+            "block": txt(r.get("בלוק 3")),
+            "subject_type": txt(r.get("סוג מקצוע 4")),
+            "subject_group": txt(r.get("קבוצת המקצוע 5")),
+            "exam_form": txt(r.get("צורת היבחנות שאלון 6")),
+            "exam_kind": txt(r.get("סוג היבחנות שאלון 7")),
+            "units": int(num(r["יחידות מקצוע 13"])) if num(r.get("יחידות מקצוע 13")) is not None else None,
+            "weight": num(r.get("משקל יחסי של השאלון 14")),
+            "in_final_grade": r.get("משתתף בציון הסופי של המקצוע 15"),
+            "required_count": int(num(r["מספר שאלונים נידרש במקצוע 18"])) if num(r.get("מספר שאלונים נידרש במקצוע 18")) is not None else None,
+            "relation": txt(r.get("שאלון ראשי או ראשי ותת  תנאי לראשי 19")),
+            "notes": txt(r.get("הערות לשאלון")),
+        }
+    return index
+
+
+class AccessSource:
+    def __init__(self, path):
+        self.name = os.path.basename(path)
+        self.con = pyodbc.connect(r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ="
+                                  + path + ";ReadOnly=1")
+        self.cur = self.con.cursor()
+
+    def index(self):
+        return parse_index(read_table(self.cur, T_INDEX)[1])
+
+    def details(self):
+        # בלי עמודת הקבצים המצורפים (Attachment) — pyodbc אינו קורא אותה
+        return read_table(self.cur, T_DETAILS, DETAIL_COLS)[1]
+
+    def t1_tables(self):
+        for table, group in T1_TABLES:
+            names, rows = read_table(self.cur, table)
+            yield names, rows, group
+
+    def t2_rows(self):
+        return read_table(self.cur, T_T2)[1]
+
+    def close(self):
+        self.con.close()
+
+
+class XlsxSource:
+    """תיקייה עם ייצוא האקסל של טבלאות האקסס. מזהה כל קובץ לפי תחילת שמו
+    ("זכאות 11 …"), כי סיומת השם משתנה ("אבו רביע" נשאר בשם גם בבית ספר אחר)."""
+
+    T1_PREFIXES = [("זכאות 11", "חובה"), ("זכאות 12", "אנגלית ומתמטיקה"), ("זכאות 13", "מורחב")]
+
+    def __init__(self, folder):
+        self.dir = folder
+        self.name = os.path.basename(os.path.normpath(folder))
+        self.files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".xlsx"))
+
+    def _find(self, prefix, many=False):
+        # "זכאות 1 " עם רווח — אחרת היא תופסת גם את 11, 12, 13, 14
+        hits = [f for f in self.files if f.startswith(prefix)]
+        if many:
+            return hits
+        return hits[0] if hits else None
+
+    def _read(self, fname):
+        ws = openpyxl.load_workbook(os.path.join(self.dir, fname), read_only=True, data_only=True).worksheets[0]
+        it = ws.iter_rows(values_only=True)
+        names = [str(h) if h is not None else "" for h in next(it)]
+        return names, [dict(zip(names, row)) for row in it if any(v is not None for v in row)]
+
+    def index(self):
+        f = self._find("זכאות 3 ")
+        return parse_index(self._read(f)[1]) if f else {}
+
+    def details(self):
+        f = self._find("זכאות 1 ")
+        if not f:
+            sys.exit("חסר קובץ פרטי תלמידים (זכאות 1)")
+        _, rows = self._read(f)
+        return [{DETAIL_ALIASES.get(k, k): v for k, v in r.items()} for r in rows]
+
+    def t1_tables(self):
+        for prefix, group in self.T1_PREFIXES:
+            files = self._find(prefix, many=True)
+            if not files:
+                print(f"⚠ אין קובץ {prefix} — המקצועות שלו לא ייקלטו")
+            for f in files:                       # 13 יכול להגיע בכמה חלקים
+                names, rows = self._read(f)
+                yield names, rows, group
+
+    def t2_rows(self):
+        f = self._find("זכאות 14")
+        return self._read(f)[1] if f else []
+
+    def close(self):
+        pass
+
+
+def make_source(a):
+    if bool(a.accdb) == bool(a.xlsx_dir):
+        sys.exit("יש לבחור מקור אחד: --accdb או --xlsx-dir")
+    return AccessSource(resolve(a.accdb)) if a.accdb else XlsxSource(a.xlsx_dir)
+
+
+def pg_connect():
+    import psycopg2
+    load_env_db()
+    return psycopg2.connect(host=os.environ["PGHOST"], port=int(os.environ.get("PGPORT", "5432")),
+                            dbname=os.environ.get("PGDATABASE", "postgres"),
+                            user=os.environ["PGUSER"], password=os.environ["PGPASSWORD"],
+                            sslmode="require", connect_timeout=20)
+
+
+def index_from_db():
+    """האינדקס הארצי כבר במסד (נטען עם אבו רביע). קריאה בלבד."""
+    pg = pg_connect()
+    try:
+        with pg.cursor() as c:
+            c.execute("select code, subject_name, block, subject_type, subject_group, exam_form, "
+                      "exam_kind, units, weight, in_final_grade, required_count, relation, notes "
+                      "from public.bagrut_questionnaires")
+            cols = [d[0] for d in c.description]
+            return {r[0]: dict(zip(cols, r)) for r in c.fetchall()}
+    finally:
+        pg.close()
 
 
 # ─────────────────────────────── ראשי ───────────────────────────────
@@ -250,8 +431,9 @@ def load_env_db():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--accdb", required=True)
-    ap.add_argument("--compass", required=True)
+    ap.add_argument("--accdb", help="קובץ האקסס של סבא (T1 + T2 + אינדקס)")
+    ap.add_argument("--xlsx-dir", help="תיקייה עם ייצוא האקסל של טבלאות האקסס")
+    ap.add_argument("--compass", help="קובץ המצפן. בלעדיו המשקלים נגזרים מ-T1")
     ap.add_argument("--authority", required=True)
     ap.add_argument("--school", required=True)
     ap.add_argument("--season", required=True, choices=["קיץ", "חורף"])
@@ -260,67 +442,41 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
 
-    accdb = glob.glob(a.accdb)[0] if any(ch in a.accdb for ch in "*?") else a.accdb
-    compass_path = glob.glob(a.compass)[0] if any(ch in a.compass for ch in "*?") else a.compass
+    src = make_source(a)
 
-    con = pyodbc.connect(r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ="
-                         + accdb + ";ReadOnly=1")
-    cur = con.cursor()
+    # אינדקס ארצי: מהמקור אם יש בו (אקסס של סבא), אחרת מהמסד — שם הוא
+    # כבר נטען. משמש לשמות מקצועות כשאין מצפן; נטען למסד רק עם --index.
+    index = src.index()
+    index_from_source = bool(index)
+    if not index:
+        index = index_from_db()
 
-    # אינדקס ארצי — תמיד נקרא (לשמות גיבוי), נטען רק עם --index.
-    _, idx_rows = read_table(cur, T_INDEX)
-    index = {}
-    for r in idx_rows:
-        code = r.get("סמל שאלון מערכת 1")
-        if code is None:
-            continue
-        index[int(code)] = {
-            "code": int(code),
-            "subject_name": txt(r.get("שם מקצוע מערכת 2")),
-            "block": txt(r.get("בלוק 3")),
-            "subject_type": txt(r.get("סוג מקצוע 4")),
-            "subject_group": txt(r.get("קבוצת המקצוע 5")),
-            "exam_form": txt(r.get("צורת היבחנות שאלון 6")),
-            "exam_kind": txt(r.get("סוג היבחנות שאלון 7")),
-            "units": int(r["יחידות מקצוע 13"]) if r.get("יחידות מקצוע 13") is not None else None,
-            "weight": num(r.get("משקל יחסי של השאלון 14")),
-            "in_final_grade": r.get("משתתף בציון הסופי של המקצוע 15"),
-            "required_count": int(r["מספר שאלונים נידרש במקצוע 18"]) if r.get("מספר שאלונים נידרש במקצוע 18") is not None else None,
-            "relation": txt(r.get("שאלון ראשי או ראשי ותת  תנאי לראשי 19")),
-            "notes": txt(r.get("הערות לשאלון")),
-        }
+    compass_path = resolve(a.compass) if a.compass else None
+    compass = read_compass(compass_path) if compass_path else []
 
-    compass = read_compass(compass_path)
-
-    # פרטי תלמיד — בלי עמודת הקבצים המצורפים (Attachment, pyodbc לא קורא).
-    detail_cols = ["MisparZehutChinuch", "SemelMosad", "SchoolName", "ShemTalmidChinuch",
-                   "Prati", "Mishpacha", "Shichva", "KitatEmChinuch", "HaImChaserChinuch",
-                   "Hashad", "Ikuv", "MaatgerimBemyuhad", "ZeroChanceZakaut",
-                   "HearotTalmidShort", "HearotTalmidLong"]
-    _, detail_rows = read_table(cur, T_DETAILS, detail_cols)
     students, tracking = [], []
     school_name = None
-    for r in detail_rows:
-        s = sid(r["MisparZehutChinuch"])
+    for r in src.details():
+        s = sid(r.get("MisparZehutChinuch"))
         if not s:
             continue
-        school_name = school_name or txt(r["SchoolName"])
+        school_name = school_name or txt(r.get("SchoolName"))
         students.append({
             "student_id": s, "school_code": a.school,
-            "first_name": txt(r["Prati"]), "last_name": txt(r["Mishpacha"]),
-            "full_name": txt(r["ShemTalmidChinuch"]),
-            "grade": txt(r["Shichva"]), "class_name": txt(r["KitatEmChinuch"]),
-            "track": None, "missing_status": txt(r["HaImChaserChinuch"]),
+            "first_name": txt(r.get("Prati")), "last_name": txt(r.get("Mishpacha")),
+            "full_name": txt(r.get("ShemTalmidChinuch")),
+            "grade": txt(r.get("Shichva")), "class_name": txt(r.get("KitatEmChinuch")),
+            "track": None, "missing_status": txt(r.get("HaImChaserChinuch")),
         })
-        flags = dict(suspected=bool(r["Hashad"]), has_blocker=bool(r["Ikuv"]),
-                     fighting=bool(r["MaatgerimBemyuhad"]), zero_chance=bool(r["ZeroChanceZakaut"]),
-                     note_short=txt(r["HearotTalmidShort"]), note_long=txt(r["HearotTalmidLong"]))
+        flags = dict(suspected=to_bool(r.get("Hashad")), has_blocker=to_bool(r.get("Ikuv")),
+                     fighting=to_bool(r.get("MaatgerimBemyuhad")),
+                     zero_chance=to_bool(r.get("ZeroChanceZakaut")),
+                     note_short=txt(r.get("HearotTalmidShort")), note_long=txt(r.get("HearotTalmidLong")))
         if any(flags.values()):
             tracking.append({"school_code": a.school, "student_id": s, **flags})
 
     all_blocks, grades, subjects = [], [], []
-    for table, group in T1_TABLES:
-        names, rows = read_table(cur, table)
+    for names, rows, group in src.t1_tables():
         b, g, sb = parse_t1_table(names, rows, group)
         all_blocks += b
         grades += g
@@ -333,19 +489,20 @@ def main():
     if dup:
         sys.exit(f"מקצוע מופיע ביותר מבלוק אחד: {dup}")
 
-    _, t2_rows = read_table(cur, T_T2)
     eligibility = []
-    for r in t2_rows:
+    for r in src.t2_rows():
         s = sid(r.get("MsparZehutTalmid"))
         if not s:
             continue
         rec = {"student_id": s}
-        for src, dst in T2_FIELDS.items():
-            v = r.get(src)
-            rec[dst] = (int(v) if v is not None else None) if dst == "negatives_count" else \
-                       (num(v) if dst == "core_units" else txt(v))
+        for src_col, dst in T2_FIELDS.items():
+            v = r.get(src_col)
+            rec[dst] = (int(num(v)) if num(v) is not None else None) if dst == "negatives_count" else                        (num(v) if dst == "core_units" else txt(v))
+        # שורה בלי סטטוס = תלמיד שלא נותח (בייצוא מאקסל מגיעות גם שורות י"ב ריקות)
+        if rec["status"] is None:
+            continue
         eligibility.append(rec)
-    con.close()
+    src.close()
 
     # ── המצפן → מקצועות הסבב ותוכנית. מקצוע במצפן שאין לו בלוק ב-T1
     # (למשל הפנימיים) נכנס עם מפתח משלו, כדי שהתוכנית תהיה שלמה.
@@ -359,6 +516,19 @@ def main():
                                "subject_group": b["group"],
                                "units": int(lvl.group(1)) if lvl else (units[0][0] if units else None),
                                "sort": i})
+    if not compass:
+        # אין מצפן: המשקל של כל שאלון נגזר מ-T1 עצמו — לכל ציון מצורף
+        # המשקל שלו. הערך השכיח לכל (מקצוע, שאלון) נכנס לתוכנית, ומסומן.
+        for b in all_blocks:
+            for k, (code, _) in enumerate(b["trios"]):
+                ws = collections.Counter(round(g["weight"], 4) for g in grades
+                                         if g["subject_key"] == b["key"] and g["questionnaire_code"] == code
+                                         and g["weight"] is not None)
+                if not ws and not any(g["questionnaire_code"] == code and g["subject_key"] == b["key"] for g in grades):
+                    continue        # שאלון שאיש לא ניגש אליו — אין ממה לגזור
+                program.append({"subject_key": b["key"], "questionnaire_code": code,
+                                "weight": ws.most_common(1)[0][0] if ws else None, "sort": k,
+                                "notes": "נגזר מ-T1 — אין מצפן לסבב" if k == 0 else None})
     for j, s in enumerate(compass):
         b = by_compass_row.get(id(s))
         key = b["key"] if b else f"P{s['row']}"
@@ -392,10 +562,10 @@ def main():
     print(f"בדיקת שלשות: ציון×משקל=משוקלל ב-{consistent}/{checkable}")
     print(f"ציון מעל 100: {bad_grades}")
     print(f"T2: {len(eligibility)} · מתוכם בלי פרטי תלמיד: {sum(1 for e in eligibility if e['student_id'] not in known_ids)}")
-    print(f"מצפן: {len(compass)} מקצועות, {len(program)} שאלונים")
+    print(f"מצפן: {len(compass)} מקצועות, {len(program)} שאלונים" + ("" if compass else " — נגזר מ-T1, אין קובץ מצפן"))
     print(f"   שאלונים ב-T1 שאינם במצפן: {len(t1_codes - prog_codes)} · במצפן ואין להם ציון: {len(prog_codes - t1_codes)}")
     print(f"מעקב — תלמידים עם דגל או הערה: {len(tracking)}")
-    print(f"אינדקס ארצי: {len(index)} שאלונים")
+    print(f"אינדקס ארצי: {len(index)} שאלונים ({'מהמקור' if index_from_source else 'מהמסד'})")
 
     if a.dry_run:
         print("\n(--dry-run — המסד לא נגע)")
@@ -419,7 +589,7 @@ def main():
             c.execute("select 1 from public.authorities where code = %s", (code,))
             if not c.fetchone():
                 sys.exit(f"הרשות {code} אינה קיימת — יש ליצור אותה במסך הניהול קודם")
-            if a.index:
+            if a.index and index_from_source:
                 cols = list(next(iter(index.values())).keys())
                 execute_values(c, f"""
                     insert into public.bagrut_questionnaires ({', '.join(cols)}) values %s
@@ -432,7 +602,8 @@ def main():
             c.execute("""delete from public.bagrut_rounds
                          where authority_code=%s and school_code=%s and season=%s and school_year=%s""",
                       (code, a.school, a.season, a.year))
-            stats = {"students": len(students), "grades": len(grades), "subjects": len(subjects),
+            stats = {"program_source": "compass" if compass else "derived_from_t1",
+                     "students": len(students), "grades": len(grades), "subjects": len(subjects),
                      "eligibility": len(eligibility), "program": len(program),
                      "orphans_t1": len(t1_codes - prog_codes), "grades_over_100": bad_grades}
             c.execute("""insert into public.bagrut_rounds
@@ -440,7 +611,7 @@ def main():
                             graduating_grade, source, stats)
                          values (%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
                       (code, a.school, school_name, a.season, a.year, graduating,
-                       os.path.basename(accdb), Json(stats)))
+                       src.name, Json(stats)))
             rid = c.fetchone()[0]
 
             def put(table, rows, cols):

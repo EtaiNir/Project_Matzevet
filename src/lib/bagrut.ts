@@ -200,7 +200,9 @@ export function parseBlockers(text: string | null): Blocker[] {
         return {
           kind: 'missing_required',
           text: p,
-          subjects: list.split(',').map((x) => x.trim()).filter(Boolean),
+          // "מתמטיקה - יש לה חסם ציון 3 במתמטיקה" (רמות זבולון): ההסבר שאחרי
+          // המקף אינו חלק משם המקצוע — אחרת הוא הופך ל"מקצוע" נפרד בספירה.
+          subjects: list.split(',').map((x) => x.split(' - ')[0].trim()).filter(Boolean),
         }
       }
       if (/יח"ל מלל/.test(p)) return { kind: 'core_units', text: p }
