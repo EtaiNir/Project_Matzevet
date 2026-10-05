@@ -71,6 +71,10 @@ python scripts/load_main.py --file "<path-to-main.xlsx>" --code 1400000
 
 ## קליטת סבב בגרות — `scripts/load_bagrut.py`
 
+**הדרך הרגילה היא דרך האתר:** מודול הבגרות → «קליטת סבב» → הסוכן מריץ את
+הסקריפט הזה בעצמו ([agent/README.md](../agent/README.md)). ההרצה הידנית
+למטה — לבדיקה ולמקרים חריגים.
+
 סבב = בית ספר × מועד × שנה. הקלט: T1 ו-T2 מקובץ האקסס של סבא, והמצפן
 מקובץ האקסל. [החלטה 014](decisions/014-bagrut-module.md).
 

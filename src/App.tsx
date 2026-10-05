@@ -17,6 +17,7 @@ import BagrutStudents from './pages/bagrut/BagrutStudents'
 import BagrutSubject from './pages/bagrut/BagrutSubject'
 import BagrutStudent from './pages/bagrut/BagrutStudent'
 import BagrutProgram from './pages/bagrut/BagrutProgram'
+import BagrutUpload from './pages/bagrut/BagrutUpload'
 
 export default function App() {
   const { session, profile, loading } = useAuth()
@@ -77,6 +78,7 @@ export default function App() {
         <Route path="subject/:key" element={<BagrutSubject />} />
         <Route path="student/:id" element={<BagrutStudent />} />
         <Route path="program" element={<BagrutProgram />} />
+        <Route path="upload" element={<BagrutUpload />} />
       </Route>
 
       <Route

@@ -374,6 +374,118 @@ export async function saveTracking(
   return data as Tracking
 }
 
+// ─────────────────────────────── קליטת סבב ───────────────────────────────
+//
+// בדפוס של העלאת המצב"ת (lib/admin.ts → uploadMoeFiles): קבצים לבאקט,
+// רשומה ב-bagrut_uploads בסטטוס pending, והסוכן לוקח משם. המבנה קבוע —
+// אין מיפוי ואין אישור. ראה מיגרציה 027.
+
+export type BagrutRole = 'details' | 't1_11' | 't1_12' | 't1_13' | 't2' | 'compass' | 'accdb'
+
+export const BAGRUT_ROLE_LABELS: Record<BagrutRole, string> = {
+  details: 'פרטי תלמידים (זכאות 1)',
+  t1_11: 'T1 — מקצועות המלל (זכאות 11)',
+  t1_12: 'T1 — אנגלית ומתמטיקה (זכאות 12)',
+  t1_13: 'T1 — מקצועות הרחבה (זכאות 13)',
+  t2: 'T2 — ניתוח זכאות (זכאות 14)',
+  compass: 'המצפן — מפת השאלונים',
+  accdb: 'קובץ אקסס (במקום ייצוא האקסל)',
+}
+
+/** תפקיד הקובץ לפי שמו — אותם כללים שהסוכן ו-load_bagrut משתמשים בהם. */
+export function detectBagrutRole(name: string): BagrutRole | null {
+  const n = name.trim()
+  if (/\.accdb$/i.test(n)) return 'accdb'
+  if (!/\.xlsx$/i.test(n)) return null
+  // "זכאות 1 " עם רווח — אחרת היא תופסת גם את 11–14
+  if (/^זכאות 1\s/.test(n)) return 'details'
+  if (/^זכאות 11/.test(n)) return 't1_11'
+  if (/^זכאות 12/.test(n)) return 't1_12'
+  if (/^זכאות 13/.test(n)) return 't1_13'
+  if (/^זכאות 14/.test(n)) return 't2'
+  if (/שאלונים|מצפן/.test(n)) return 'compass'
+  return null
+}
+
+/** מה חסר כדי שהסבב יהיה שלם. ריק = אפשר להעלות. */
+export function missingBagrutRoles(roles: BagrutRole[]): BagrutRole[] {
+  const has = (r: BagrutRole) => roles.includes(r)
+  const need: BagrutRole[] = has('accdb') ? ['compass'] : ['details', 't1_11', 't1_12', 't1_13', 't2', 'compass']
+  return need.filter((r) => !has(r))
+}
+
+export interface BagrutUploadReport {
+  school_name?: string
+  counts?: { students?: number; t2?: number; grades?: number; subjects?: number; program?: number; tracking?: number; by_grade?: Record<string, number> }
+  warnings?: { kind: string; text: string }[]
+  errors?: string[]
+  round_id?: string
+  program_source?: string
+}
+
+export interface BagrutUpload {
+  id: string
+  school_code: string
+  season: string
+  school_year: string
+  status: 'pending' | 'processing' | 'done' | 'failed'
+  file_count: number | null
+  files: Record<string, string>
+  uploaded_at: string
+  processed_at: string | null
+  round_id: string | null
+  rows_loaded: number | null
+  report: BagrutUploadReport | null
+  error_message: string | null
+}
+
+export async function fetchBagrutUploads(authorityCode: string): Promise<BagrutUpload[]> {
+  const { data, error } = await supabase
+    .from('bagrut_uploads')
+    .select('id, school_code, season, school_year, status, file_count, files, uploaded_at, processed_at, round_id, rows_loaded, report, error_message')
+    .eq('authority_code', authorityCode)
+    .order('uploaded_at', { ascending: false })
+    .limit(30)
+  if (error) throw new Error(`טעינת היסטוריית הקליטות נכשלה: ${error.message}`)
+  return (data ?? []) as BagrutUpload[]
+}
+
+/**
+ * מעלה את קובצי הסבב ורושם אותו בתור. בבאקט כל קובץ נקרא לפי התפקיד שלו
+ * (details.xlsx, t1_13_2.xlsx…) — Storage פוסל עברית (מלכודת 31). השם
+ * המקורי נשמר ב-files, והסוכן מחזיר את השם העברי לפני הטעינה.
+ */
+export async function uploadBagrutRound(
+  authorityCode: string,
+  meta: { school: string; season: 'קיץ' | 'חורף'; year: string },
+  files: { file: File; role: BagrutRole }[],
+): Promise<void> {
+  const prefix = `${authorityCode}/bagrut/${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`
+  const names: Record<string, string> = {}
+  let part = 0
+  let i = 0
+  for (const { file, role } of files) {
+    i += 1
+    const key = role === 't1_13' ? `t1_13_${++part}` : role
+    const ext = role === 'accdb' ? 'accdb' : 'xlsx'
+    const where = `העלאת קובץ ${i}/${files.length} (${file.name}, ${(file.size / 1e6).toFixed(1)}MB)`
+    const { error } = await supabase.storage.from('moe-uploads').upload(`${prefix}/${key}.${ext}`, file)
+    if (error) throw new Error(`${where} — ${error.message}`)
+    names[key] = file.name
+  }
+  const { error } = await supabase.from('bagrut_uploads').insert({
+    authority_code: authorityCode,
+    school_code: meta.school,
+    season: meta.season,
+    school_year: meta.year,
+    storage_prefix: prefix,
+    file_count: files.length,
+    files: names,
+    status: 'pending',
+  })
+  if (error) throw new Error(`רישום הקליטה — ${error.message}`)
+}
+
 // ─────────────────────────────── עזרי תצוגה ───────────────────────────────
 
 /** אינדקסים שכל המסכים צריכים — נבנים פעם אחת לסבב. */

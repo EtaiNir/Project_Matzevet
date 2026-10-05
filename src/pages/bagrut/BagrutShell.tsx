@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import ModuleSwitch from '@/components/ModuleSwitch'
@@ -38,6 +38,9 @@ export default function BagrutShell() {
   const { code: codeFromUrl } = useParams()
   const navigate = useNavigate()
   const isSuperAdmin = profile?.role === 'super_admin'
+  // מסך הקליטה עומד בפני עצמו: לרשות חדשה עוד אין סבב, ובלי זה לא היה
+  // אפשר להגיע אליו כדי לקלוט את הראשון.
+  const isUpload = Boolean(useMatch('/bagrut/:code/upload'))
 
   const [allAuthorities, setAllAuthorities] = useState<Authority[]>([])
   useEffect(() => {
@@ -189,13 +192,20 @@ export default function BagrutShell() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {ctx && <Rail ctx={ctx} />}
+        {ctx && <Rail ctx={ctx} isSuperAdmin={isSuperAdmin} />}
         <main className="thin-scrollbar flex min-w-0 flex-1 flex-col overflow-auto">
-          {error ? (
+          {isUpload ? (
+            <Outlet />
+          ) : error ? (
             <ErrorBox message={error} />
           ) : rounds && rounds.length === 0 ? (
             <Empty title="אין עדיין נתוני בגרות לרשות הזו">
               סבב נטען לכל בית ספר אחרי כל מועד (קיץ / חורף): T1, T2 והמצפן של בית הספר.
+              {isSuperAdmin && (
+                <Link to={`/bagrut/${authorityCode}/upload`} className="mt-3 block font-semibold text-sky-700 hover:underline">
+                  ⬆ קליטת הסבב הראשון
+                </Link>
+              )}
             </Empty>
           ) : ctx ? (
             <BagrutContext.Provider value={ctx}>
@@ -211,7 +221,7 @@ export default function BagrutShell() {
 }
 
 /** סרגל ימני: המסכים, התצורות המוכנות עם ספירות, והמקצועות לפי קבוצה. */
-function Rail({ ctx }: { ctx: BagrutContextValue }) {
+function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: boolean }) {
   const { data, index, base } = ctx
   const location = useLocation()
   const counts = useMemo(() => {
@@ -251,6 +261,11 @@ function Rail({ ctx }: { ctx: BagrutContextValue }) {
         <NavLink to={`${base}/program`} className={link}>
           <span aria-hidden>▤</span> תוכנית בית הספר
         </NavLink>
+        {isSuperAdmin && (
+          <NavLink to={`${base}/upload`} className={link}>
+            <span aria-hidden>⬆</span> קליטת סבב
+          </NavLink>
+        )}
       </div>
 
       <div>

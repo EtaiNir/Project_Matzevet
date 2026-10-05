@@ -28,12 +28,12 @@ import argparse
 import collections
 import glob
 import io
+import json
 import os
 import re
 import sys
 
 import openpyxl
-import pyodbc
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
@@ -312,6 +312,7 @@ def parse_index(rows):
 
 class AccessSource:
     def __init__(self, path):
+        import pyodbc          # רק למקור אקסס — בשרת בלי Access Driver קולטים מאקסל
         self.name = os.path.basename(path)
         self.con = pyodbc.connect(r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ="
                                   + path + ";ReadOnly=1")
@@ -346,6 +347,7 @@ class XlsxSource:
         self.dir = folder
         self.name = os.path.basename(os.path.normpath(folder))
         self.files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".xlsx"))
+        self.missing = []
 
     def _find(self, prefix, many=False):
         # "זכאות 1 " עם רווח — אחרת היא תופסת גם את 11, 12, 13, 14
@@ -375,7 +377,7 @@ class XlsxSource:
         for prefix, group in self.T1_PREFIXES:
             files = self._find(prefix, many=True)
             if not files:
-                print(f"⚠ אין קובץ {prefix} — המקצועות שלו לא ייקלטו")
+                self.missing.append(prefix)      # שגיאה בדוח — לא נטען סבב חלקי בשקט
             for f in files:                       # 13 יכול להגיע בכמה חלקים
                 names, rows = self._read(f)
                 yield names, rows, group
@@ -417,6 +419,97 @@ def index_from_db():
         pg.close()
 
 
+# ─────────────────────────────── דוח הבדיקה ───────────────────────────────
+#
+# המבנה של סבב בגרות קבוע, ולכן אין כאן אישור אדם באמצע (כמו בגנים).
+# במקומו — דוח: **שגיאות** עוצרות לפני כל שינוי במסד (נתונים שגויים היו
+# נטענים), **אזהרות** נשמרות ומוצגות בהיסטוריה אבל אינן עוצרות (המצפן
+# כפי שבית הספר מסר אותו, עם הטעויות שבו — וזה בדיוק מה שהרכז צריך לראות).
+
+def build_report(a, school_name, file_schools, students, grades, subjects, eligibility,
+                 blocks, compass, program, tracking, t1_codes, prog_codes,
+                 bad_grades, known_ids, src):
+    errors, warnings = [], []
+
+    def warn(kind, text, **detail):
+        warnings.append({"kind": kind, "text": text, **detail})
+
+    # ── שגיאות: נתונים שגויים היו נכנסים
+    if file_schools and file_schools != {str(a.school)}:
+        errors.append(f"סמל המוסד בקובץ ({', '.join(sorted(file_schools))}) "
+                      f"שונה מהסבב שנבחר ({a.school})")
+    if not students:
+        errors.append("אין תלמידים בקובץ פרטי התלמידים")
+    if not grades or not subjects:
+        errors.append("אין ציונים ב-T1")
+    for prefix in getattr(src, "missing", []):
+        errors.append(f"חסר קובץ {prefix}")
+
+    # ── אזהרות: נטען, ומסומן
+    if not compass:
+        warn("no_compass", "אין מצפן — המשקלים נגזרו מ-T1")
+    for b in blocks:
+        pairs = b["compass"]["pairs"] if b.get("compass") else []
+        if not pairs:
+            continue
+        total = sum(w or 0 for _, w in pairs)
+        if abs(total - 1) >= 0.005:
+            warn("weight_sum", f"{b['name']}: סכום המשקלים במצפן {round(total * 100)}%",
+                 subject=b["name"], percent=round(total * 100))
+        # משקל שונה בין המצפן ל-T1 לאותו שאלון
+        cw = dict(pairs)
+        seen = collections.defaultdict(set)
+        for g in grades:
+            if g["subject_key"] == b["key"] and g["weight"] is not None:
+                seen[g["questionnaire_code"]].add(round(g["weight"], 4))
+        for code, ws in seen.items():
+            if code in cw and (len(ws) > 1 or abs(next(iter(ws)) - (cw[code] or 0)) >= 0.005):
+                warn("weight_mismatch",
+                     f"{b['name']}, שאלון {code}: משקל {cw[code]} במצפן מול {sorted(ws)} ב-T1",
+                     subject=b["name"], code=code)
+    orphans = sorted(t1_codes - prog_codes) if compass else []
+    if orphans:
+        warn("orphans", f"{len(orphans)} שאלונים עם ציונים שאינם במצפן: "
+             + ", ".join(map(str, orphans)), codes=orphans)
+    unused = sorted(prog_codes - t1_codes) if compass else []
+    if unused:
+        warn("unused", f"{len(unused)} שאלונים במצפן בלי אף ציון: "
+             + ", ".join(map(str, unused)), codes=unused)
+    if bad_grades:
+        warn("over_100", f"{bad_grades} ציונים מעל 100")
+    unmatched = sum(1 for e in eligibility if e["student_id"] not in known_ids)
+    if unmatched:
+        warn("t2_unmatched", f"{unmatched} שורות T2 בלי תלמיד בקובץ הפרטים")
+    if not eligibility:
+        warn("no_t2", "אין ניתוח זכאות (T2) — הסבב ייטען עם T1 בלבד")
+
+    checkable = [g for g in grades if None not in (g["grade"], g["weight"], g["weighted"])]
+    consistent = sum(1 for g in checkable if abs(g["grade"] * g["weight"] - g["weighted"]) <= 0.51)
+    if consistent != len(checkable):
+        warn("trio", f"ציון×משקל≠משוקלל ב-{len(checkable) - consistent} שאלונים")
+
+    by_grade = collections.Counter(s["grade"] for s in students)
+    return {
+        "school_name": school_name,
+        "counts": {
+            "students": len(students), "by_grade": dict(by_grade), "t2": len(eligibility),
+            "grades": len(grades), "subjects": len(blocks), "program": len(program),
+            "tracking": len(tracking),
+        },
+        "subjects": [{"key": b["key"], "name": b["name"], "group": b["group"],
+                      "questionnaires": len(b["trios"])} for b in blocks],
+        "program_source": "compass" if compass else "derived_from_t1",
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
+def write_report(path, report):
+    if path:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(report, fh, ensure_ascii=False, indent=1)
+
+
 # ─────────────────────────────── ראשי ───────────────────────────────
 
 def load_env_db():
@@ -440,6 +533,7 @@ def main():
     ap.add_argument("--year", required=True)
     ap.add_argument("--index", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--report-json", help="נתיב לכתיבת דוח הבדיקה (לסוכן ולמסך ההיסטוריה)")
     a = ap.parse_args()
 
     src = make_source(a)
@@ -456,11 +550,15 @@ def main():
 
     students, tracking = [], []
     school_name = None
+    file_schools = set()
     for r in src.details():
         s = sid(r.get("MisparZehutChinuch"))
         if not s:
             continue
         school_name = school_name or txt(r.get("SchoolName"))
+        sm = num(r.get("SemelMosad"))
+        if sm:
+            file_schools.add(str(int(sm)))
         students.append({
             "student_id": s, "school_code": a.school,
             "first_name": txt(r.get("Prati")), "last_name": txt(r.get("Mishpacha")),
@@ -567,6 +665,17 @@ def main():
     print(f"מעקב — תלמידים עם דגל או הערה: {len(tracking)}")
     print(f"אינדקס ארצי: {len(index)} שאלונים ({'מהמקור' if index_from_source else 'מהמסד'})")
 
+    report = build_report(a, school_name, file_schools, students, grades, subjects, eligibility,
+                          all_blocks, compass, program, tracking, t1_codes, prog_codes,
+                          bad_grades, known_ids, src)
+    for w in report["warnings"]:
+        print(f"⚠ {w['text']}")
+    for e in report["errors"]:
+        print(f"✗ {e}")
+    write_report(a.report_json, report)
+    if report["errors"]:
+        sys.exit("הקליטה נעצרה לפני כל שינוי במסד: " + " · ".join(report["errors"]))
+
     if a.dry_run:
         print("\n(--dry-run — המסד לא נגע)")
         return
@@ -649,6 +758,8 @@ def main():
                                       do nothing""",
                                [tuple({**t, "authority_code": code}[k] for k in tcols) for t in tracking])
         pg.commit()
+        report["round_id"] = str(rid)
+        write_report(a.report_json, report)
         print(f"\n✓ נטען. סבב {rid}")
     except Exception:
         pg.rollback()

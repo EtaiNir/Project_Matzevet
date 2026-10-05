@@ -342,6 +342,7 @@ grade, class, track)` על `bagrut_students`. ציונים ומדדים גלוי
 | 024 | `tier_b_mapping_meta` | רמת הביטחון של כל הצעת מיפוי — לסימון הצהוב במסך האישור |
 | 025 | `tier_b_composite_key` | מפתח `(ת"ז, קבוצה)` — ילד יכול להימצא בשתי קבוצות של דרג ב' |
 | 026 | `bagrut` | מודול זכאות לבגרות: 8 טבלאות משותפות, חמישה תפקידים (`bagrut_role` + היקפים), `in_bagrut_scope` ([014](decisions/014-bagrut-module.md)) |
+| 027 | `bagrut_uploads` | תור קליטת סבבי בגרות — בדפוס `moe_uploads`, בלי שלב אישור; אזהרות ב-`report` |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.

@@ -10,6 +10,12 @@
      קובצי משרד החינוך של כל המועצות, מקבץ אותם לפי קוד הרשות, ומעבד כל
      מועצה שהקבצים שלה השתנו. נדרש MATZEVET_WATCH_FOLDER ב-.env.agent.
 
+ועוד שני תורים מהאתר, באותה לולאה:
+
+  ג. דרג ב' (גנים) — tier_b_uploads: זיהוי שדות, אישור באתר, טעינה.
+  ד. סבב בגרות — bagrut_uploads: T1 + T2 + מצפן, בדיקה וטעינה בריצה
+     אחת (מבנה קבוע — בלי שלב אישור). ראה process_bagrut.
+
 בשני המקרים אותה ליבה: pipeline -> גיבוי הטבלה הקיימת -> טעינה ל-Supabase,
 והסטטוס מתועד ב-moe_uploads כך שנראה גם באתר.
 
@@ -314,6 +320,140 @@ def process_tier_b(conn, job) -> None:
         except Exception:
             log.exception("לא הצלחתי לעדכן את סטטוס הכישלון")
     finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ═══════════════════════════ סבב בגרות ═══════════════════════════
+#
+# בדפוס של המצב"ת ולא של דרג ב': המבנה קבוע וידוע מראש (T1, T2, מצפן),
+# ולכן אין מיפוי ואין אישור אדם באמצע. pending → processing → done/failed.
+#
+# הבדיקה והטעינה הן ריצה אחת של load_bagrut.py. שגיאות (סמל מוסד שאינו
+# תואם, קובץ חסר, קלט ריק) עוצרות *לפני* כל שינוי במסד; אזהרות (משקלים
+# שאינם 100%, שאלונים יתומים) נשמרות ב-report ומוצגות בהיסטוריה באתר.
+#
+# שמות הקבצים בבאקט הם לפי תפקיד (Storage פוסל עברית — מלכודת 31), אבל
+# load_bagrut מזהה את הקבצים לפי תחילת השם העברי ("זכאות 11 …"). לכן
+# לפני ההרצה כל קובץ מקבל שוב שם עברי לפי התפקיד שלו.
+
+BAGRUT_SCRIPT = DASHBOARD_DIR / "scripts" / "load_bagrut.py"
+
+# תפקיד בבאקט → השם שתחתיו load_bagrut מחפש אותו
+BAGRUT_ROLE_NAMES = {
+    "details": "זכאות 1 - פרטי תלמידים.xlsx",
+    "t1_11": "זכאות 11 - מקצועות המלל.xlsx",
+    "t1_12": "זכאות 12 - אנגלית ומתמטיקה.xlsx",
+    "t2": "זכאות 14 - ניתוח זכאות.xlsx",
+}
+# t1_13_1, t1_13_2 … → "זכאות 13 - חלק N.xlsx"  ·  compass → נפרד  ·  accdb → נפרד
+
+
+def claim_next_bagrut(conn):
+    with conn.cursor() as cur:
+        cur.execute("""
+            update public.bagrut_uploads
+               set status = 'processing'
+             where id = (
+                   select id from public.bagrut_uploads
+                    where status = 'pending'
+                    order by uploaded_at
+                    limit 1
+                    for update skip locked)
+            returning id, authority_code, school_code, season, school_year,
+                      storage_prefix, files
+        """)
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "code": row[1], "school": row[2], "season": row[3],
+            "year": row[4], "prefix": row[5], "files": row[6] or {}}
+
+
+def finish_bagrut(conn, upload_id, status, report=None, error=None):
+    report = report or {}
+    with conn.cursor() as cur:
+        cur.execute("""
+            update public.bagrut_uploads
+               set status        = %s,
+                   report        = %s::jsonb,
+                   round_id      = %s,
+                   rows_loaded   = %s,
+                   error_message = %s,
+                   processed_at  = now()
+             where id = %s
+        """, (status, json.dumps(report, ensure_ascii=False) if report else None,
+              report.get("round_id"),
+              # בכישלון הדוח עדיין סופר תלמידים בקובץ — אבל אף אחד לא נטען
+              (report.get("counts") or {}).get("students") if status == "done" else None,
+              (error or "")[:800] or None, upload_id))
+
+
+def process_bagrut(conn, job) -> None:
+    code = job["code"]
+    log.info("═" * 60)
+    log.info("סבב בגרות — רשות %s · מוסד %s · %s %s", code, job["school"], job["season"], job["year"])
+
+    work_dir = Path(tempfile.mkdtemp(prefix=f"bagrut-{code}-"))
+    raw, src = work_dir / "raw", work_dir / "src"
+    src.mkdir(parents=True)
+    report_path = work_dir / "report.json"
+    try:
+        log.info("1/3 מוריד את הקבצים…")
+        names = download_files(job["prefix"], raw)
+
+        compass = accdb = None
+        for name in names:
+            role = Path(name).stem
+            path = raw / name
+            if role == "compass":
+                compass = path
+            elif role == "accdb":
+                accdb = path
+            elif role in BAGRUT_ROLE_NAMES:
+                shutil.move(path, src / BAGRUT_ROLE_NAMES[role])
+            elif role.startswith("t1_13"):
+                part = role.rsplit("_", 1)[-1]
+                shutil.move(path, src / f"זכאות 13 - מקצועות הרחבה - חלק {part}.xlsx")
+            else:
+                log.warning("   קובץ בתפקיד לא מוכר — מדלג: %s", name)
+
+        args = (["--accdb", str(accdb), "--index"] if accdb else ["--xlsx-dir", str(src)])
+        if compass:
+            args += ["--compass", str(compass)]
+        args += ["--authority", code, "--school", job["school"], "--season", job["season"],
+                 "--year", job["year"], "--report-json", str(report_path)]
+
+        log.info("2/3 בודק וטוען…")
+        proc = subprocess.run(
+            [sys.executable, str(BAGRUT_SCRIPT), *args],
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+        for w in report.get("warnings", []):
+            log.warning("   ⚠ %s", w.get("text"))
+
+        if proc.returncode != 0:
+            # שגיאה שהבדיקה זיהתה — הודעה קריאה; אחרת קריסה — זנב הפלט (מלכודת 15)
+            msg = " · ".join(report.get("errors") or []) or (proc.stderr or proc.stdout or "")[-800:]
+            raise RuntimeError(msg)
+
+        log.info("3/3 מעדכן סטטוס…")
+        finish_bagrut(conn, job["id"], "done", report=report)
+        counts = report.get("counts", {})
+        log.info("✓ הושלם — %s תלמידים, %s ציונים, %s אזהרות",
+                 counts.get("students"), counts.get("grades"), len(report.get("warnings", [])))
+
+    except Exception as exc:
+        log.error("✗ סבב הבגרות נכשל: %s", exc)
+        log.debug(traceback.format_exc())
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
+            finish_bagrut(conn, job["id"], "failed", report=report, error=str(exc))
+        except Exception:
+            log.exception("לא הצלחתי לעדכן את סטטוס הכישלון")
+    finally:
+        # הקבצים מכילים ת"ז וציונים של תלמידים — לא נשארים בדיסק
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
@@ -964,6 +1104,11 @@ def main() -> None:
                     process_tier_b(conn, tier_b)
                 else:
                     log.info("אין קליטות דרג ב' ממתינות")
+                bagrut = claim_next_bagrut(conn)
+                if bagrut:
+                    process_bagrut(conn, bagrut)
+                else:
+                    log.info("אין סבבי בגרות ממתינים")
                 log.info("סבב בדיקה הסתיים")
                 break
 
@@ -971,6 +1116,13 @@ def main() -> None:
             if tier_b:
                 idle_logged = False
                 process_tier_b(conn, tier_b)
+
+            # סבב בגרות — תור נפרד; רץ גם ב---tier-b-only, שמשמעותו "לא לגעת
+            # בתור המצב"ת", לא "רק גנים".
+            bagrut = claim_next_bagrut(conn)
+            if bagrut:
+                idle_logged = False
+                process_bagrut(conn, bagrut)
 
             job = None if args.tier_b_only else claim_next_upload(conn)
             if job:
