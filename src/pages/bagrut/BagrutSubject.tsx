@@ -111,7 +111,10 @@ export default function BagrutSubject() {
   ]
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 p-5">
+    // הדף גדל עם התוכן וגולל כולו (סרגל הגלילה בצד השמאלי של המסך). לטבלה
+    // גובה משלה וגלילה משלה — כשהיא "מילאה את מה שנשאר", המבט-על והגרף
+    // דחקו אותה לכמה שורות בלבד.
+    <div className="flex flex-col gap-4 p-5">
       {/* ── מבט-על ── */}
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -177,17 +180,21 @@ export default function BagrutSubject() {
         </Card>
       </div>
 
-      <BagrutTable
-        rows={rows}
-        columns={columns}
-        rowKey={(r) => r.s.student_id}
-        exportName={`בגרות_${round.school_name ?? ''}_${subject.subject_name}`}
-        initialSort={{ key: 'cum', dir: 'asc' }}
-        onRowClick={(r, _i, sorted) => {
-          const state: CardNavState = { ids: sorted.map((x) => x.s.student_id), fromLabel: subject.subject_name, backTo: location.pathname }
-          navigate(`${base}/student/${r.s.student_id}`, { state })
-        }}
-      />
+      <div className="flex h-[80vh] min-h-[420px] shrink-0 flex-col">
+        <BagrutTable
+          rows={rows}
+          columns={columns}
+          rowKey={(r) => r.s.student_id}
+          exportName={`בגרות_${round.school_name ?? ''}_${subject.subject_name}`}
+          initialSort={{ key: 'cum', dir: 'asc' }}
+          countLabel="תלמידים"
+          rowTitle={(r) => displayName(r.s)}
+          onRowClick={(r, _i, sorted) => {
+            const state: CardNavState = { ids: sorted.map((x) => x.s.student_id), fromLabel: subject.subject_name, backTo: location.pathname }
+            navigate(`${base}/student/${r.s.student_id}`, { state })
+          }}
+        />
+      </div>
     </div>
   )
 }

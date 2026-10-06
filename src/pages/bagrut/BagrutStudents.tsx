@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useBagrut, type CardNavState } from './context'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import { StatusBadge } from '@/components/bagrut/ui'
+import { fmtDate, isFollowupDue, relDays } from '@/lib/bagrutCycle'
 import {
   BLOCKER_LABELS,
   classSortKey,
@@ -77,6 +78,7 @@ export default function BagrutStudents() {
       const kind = eligibilityKind(s)
       if (f.view === 'graduating' && !s.in_t2) return false
       if (f.view === 'edge' && !isOnTheEdge(s)) return false
+      if (f.view === 'followup' && !isFollowupDue(data.tracking.get(s.student_id)?.next_followup)) return false
       if (f.kind === 'eligible_any' && !isEligible(kind)) return false
       if (f.kind && f.kind !== 'eligible_any' && kind !== f.kind) return false
       if (f.grade && s.grade !== f.grade) return false
@@ -110,7 +112,7 @@ export default function BagrutStudents() {
   const t1 = (s: BagrutStudent) => summaries.get(s.student_id)!
   const t1Columns: Column<BagrutStudent>[] = [
     {
-      key: 't1done', group: 't1', groupTitle: 'התקדמות במקצועות (T1)', header: '✔ הושלמו', exportHeader: 'מקצועות שהושלמו', width: 70, align: 'center',
+      key: 't1done', group: 't1', groupTitle: 'התקדמות במקצועות', header: '✔ הושלמו', exportHeader: 'מקצועות שהושלמו', width: 70, align: 'center',
       render: (s) => <span className="font-semibold tabular-nums text-emerald-700">{t1(s).done || ''}</span>,
       sortValue: (s) => t1(s).done,
     },
@@ -130,7 +132,7 @@ export default function BagrutStudents() {
         const x = t1(s)
         return x.weakGrades ? (
           <span
-            className="rounded-md bg-amber-100 px-1.5 font-bold tabular-nums text-amber-800"
+            className="rounded-md bg-rose-100 px-1.5 font-bold tabular-nums text-rose-800"
             title={x.weakSubjects.map((k) => index.subjectByKey.get(k)?.subject_name).join(', ')}
           >
             {x.weakGrades}
@@ -151,9 +153,9 @@ export default function BagrutStudents() {
     { key: 'id', header: 'ת"ז', width: 100, render: (s) => <span className="tabular-nums text-slate-500">{s.student_id}</span>, sortValue: (s) => s.student_id },
     ...t1Columns,
     {
-      key: 'status', group: 't2', groupTitle: 'ניתוח זכאות (T2)', header: 'סטטוס זכאות', width: 118,
+      key: 'status', group: 't2', groupTitle: 'ניתוח זכאות', header: 'סטטוס זכאות', width: 118,
       render: (s) => (s.in_t2 ? <StatusBadge kind={eligibilityKind(s)} /> : <span className="text-xs text-slate-300">—</span>),
-      sortValue: (s) => ['not_eligible', 'one_negative', 'eligible_internal', 'eligible', 'not_graduating'].indexOf(eligibilityKind(s)),
+      sortValue: (s) => ['not_eligible', 'one_negative', 'eligible', 'not_graduating'].indexOf(eligibilityKind(s)),
       exportValue: (s) => (s.in_t2 ? ELIGIBILITY_META[eligibilityKind(s)].label : ''),
     },
     {
@@ -179,6 +181,8 @@ export default function BagrutStudents() {
       ),
       sortValue: (s) => parseBlockers(s.blockers).length || null,
       exportValue: (s) => s.blockers,
+      // סינון לפי סוג החסם, לא לפי הטקסט המלא — "כל מי שאין לו מוגבר"
+      filterValues: (s) => [...new Set(parseBlockers(s.blockers).map((b) => BLOCKER_LABELS[b.kind]))],
     },
     {
       key: 'intervention', group: 't2', header: 'התערבות מומלצת', width: 280,
@@ -220,10 +224,38 @@ export default function BagrutStudents() {
       render: (s) => <span className="truncate text-xs text-slate-600">{data.tracking.get(s.student_id)?.note_short}</span>,
       sortValue: (s) => data.tracking.get(s.student_id)?.note_short,
     },
+    {
+      key: 'plan', group: 'track', header: 'תוכנית', exportHeader: 'תוכנית התערבות', width: 80, align: 'center',
+      render: (s) => {
+        const c = data.actionCounts.get(s.student_id)
+        if (!c || !(c.active + c.done)) return null
+        return <span className="text-xs tabular-nums text-slate-600" title={`${c.active} בביצוע · ${c.done} הושלמו`}>{c.done}/{c.active + c.done}</span>
+      },
+      sortValue: (s) => data.actionCounts.get(s.student_id)?.active ?? null,
+      exportValue: (s) => {
+        const c = data.actionCounts.get(s.student_id)
+        return c && c.active + c.done ? `${c.done}/${c.active + c.done} הושלמו` : ''
+      },
+      filterValues: (s) => {
+        const c = data.actionCounts.get(s.student_id)
+        return !c || !(c.active + c.done) ? 'אין תוכנית' : c.active ? 'בביצוע' : 'הושלמה'
+      },
+    },
+    {
+      key: 'followup', group: 'track', header: 'מעקב הבא', width: 96, align: 'center',
+      render: (s) => {
+        const d = data.tracking.get(s.student_id)?.next_followup
+        if (!d) return null
+        const r = relDays(d)
+        return <span className={`text-xs tabular-nums ${r.tone === 'red' ? 'font-bold text-rose-700' : r.tone === 'amber' ? 'font-semibold text-amber-700' : 'text-slate-600'}`} title={r.text}>{fmtDate(d)}</span>
+      },
+      sortValue: (s) => data.tracking.get(s.student_id)?.next_followup ?? null,
+      exportValue: (s) => fmtDate(data.tracking.get(s.student_id)?.next_followup),
+    },
   ]
 
   const label = [
-    f.view === 'edge' ? 'על הסף' : f.view === 'graduating' ? 'השכבה המסיימת' : '',
+    f.view === 'edge' ? 'על הסף' : f.view === 'graduating' ? 'השכבה המסיימת' : f.view === 'followup' ? 'מעקב השבוע' : '',
     f.grade ? `שכבה ${f.grade}` : '',
     f.weak ? 'ציון מתחת ל-55' : '',
     f.nogrades ? 'בלי ציונים' : '',
@@ -260,7 +292,7 @@ export default function BagrutStudents() {
         <select value={f.kind} onChange={(e) => set('kind', e.target.value)} className={select}>
           <option value="">כל הסטטוסים</option>
           <option value="eligible_any">זכאים (כולם)</option>
-          {(['eligible_internal', 'one_negative', 'not_eligible'] as EligibilityKind[]).map((k) => (
+          {(['eligible', 'one_negative', 'not_eligible'] as EligibilityKind[]).map((k) => (
             <option key={k} value={k}>{ELIGIBILITY_META[k].label}</option>
           ))}
         </select>
@@ -289,6 +321,8 @@ export default function BagrutStudents() {
         rowKey={(s) => s.student_id}
         exportName={`בגרות_${round.school_name ?? round.school_code}_${label || 'תלמידים'}`}
         initialSort={{ key: 'class', dir: 'asc' }}
+        countLabel="תלמידים"
+        rowTitle={displayName}
         onRowClick={(s, _i, sorted) => {
           const state: CardNavState = {
             ids: sorted.map((x) => x.student_id),

@@ -72,6 +72,53 @@ UNITS_AFFIX = re.compile(r"(?i)yechidot$|^יחידות ")
 FINAL_AFFIX = re.compile(r"(?i)t?ziunsofi$|^ציון סופי ")
 
 
+def alt_groups(pairs):
+    """שאלונים שקולים ("או/או") במקצוע: {סמל שאלון: מספר קבוצה}.
+
+    בפגישת 5.10: 150% של זוג שקול אינו טעות — את החלק אפשר להשלים בשאלון
+    זה *או* בזה, והתוכנית עצמה תמיד 100%. קבוצה = שאלונים בעלי אותו משקל,
+    שספירתם פעם אחת מביאה את המקצוע ל-100% **בדיוק**. בלי התאמה מדויקת —
+    לא מסמנים כלום, והאזהרה נשארת (חסר 14% בעברית מורחב הוא בעיה אמיתית).
+    """
+    import itertools
+    weighted = [(c, round(w, 4)) for c, w in pairs if w]
+    total = sum(w for _, w in weighted)
+    if not weighted or abs(total - 1) < 0.005:
+        return {}
+    by_w = collections.defaultdict(list)
+    for c, w in weighted:
+        by_w[w].append(c)
+    dups = [w for w, cs in by_w.items() if len(cs) > 1]
+    for n in range(1, len(dups) + 1):                  # הקבוצה הקטנה ביותר שמספיקה
+        for chosen in itertools.combinations(dups, n):
+            collapsed = total - sum(w * (len(by_w[w]) - 1) for w in chosen)
+            if abs(collapsed - 1) < 0.005:
+                return {c: g for g, w in enumerate(chosen, 1) for c in by_w[w]}
+    return {}
+
+
+def collapsed_weight(pairs):
+    """סכום המשקלים כשכל קבוצת שאלונים שקולים נספרת פעם אחת."""
+    groups = alt_groups(pairs)
+    seen, total = set(), 0.0
+    for c, w in pairs:
+        g = groups.get(c)
+        if g is not None:
+            if g in seen:
+                continue
+            seen.add(g)
+        total += w or 0
+    return total
+
+
+# סדר השכבות — לזיהוי השכבה המסיימת (הגבוהה ביותר שיש לה ניתוח זכאות)
+GRADE_ORDER = {"ט": 9, "י": 10, "יא": 11, "יב": 12, "יג": 13, "יד": 14}
+
+
+def grade_rank(g):
+    return GRADE_ORDER.get(re.sub(r"[\"'״׳\s]", "", g or ""), -1)
+
+
 def key_level(key):
     """רמת היחידות מתוך מפתח המקצוע: "Anglit3" או 'אנגלית 3 יח"ל'."""
     m = re.search(r"(\d)$", key) or re.search(r"(\d)\s*יח", key)
@@ -324,6 +371,13 @@ def to_bool(v):
     return str(v).strip().lower() in ("true", "כן", "yes", "1", "-1", "x", "v")
 
 
+def list_xlsx(folder):
+    """קובצי האקסל בתיקייה — בלי קובצי הנעילה של אקסל ("~$שם.xlsx"), שנוצרים
+    כשהקובץ פתוח ונראים כמו הקובץ עצמו לכל זיהוי לפי שם."""
+    return sorted(f for f in os.listdir(folder)
+                  if f.lower().endswith(".xlsx") and not f.startswith("~$"))
+
+
 def resolve(path):
     return glob.glob(path)[0] if any(ch in path for ch in "*?") else path
 
@@ -389,7 +443,7 @@ class XlsxSource:
     def __init__(self, folder):
         self.dir = folder
         self.name = os.path.basename(os.path.normpath(folder))
-        self.files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".xlsx"))
+        self.files = list_xlsx(folder)
         self.missing = []
 
     def _find(self, prefix, many=False):
@@ -471,7 +525,7 @@ class UnifiedSource:
     @staticmethod
     def detect(folder):
         """(t1, t2) אם התיקייה במבנה המאוחד, אחרת None."""
-        files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".xlsx"))
+        files = list_xlsx(folder)
         if any(f.startswith("זכאות 11") for f in files):
             return None
         t1 = [f for f in files if re.search(r"(?<![A-Za-z0-9])T1(?![0-9])", f)]
@@ -551,7 +605,7 @@ def index_from_db():
 
 def build_report(a, school_name, file_schools, students, grades, subjects, eligibility,
                  blocks, compass, program, tracking, t1_codes, prog_codes,
-                 bad_grades, known_ids, src):
+                 bad_grades, known_ids, src, t2_dropped=None):
     errors, warnings = [], []
 
     def warn(kind, text, **detail):
@@ -575,8 +629,9 @@ def build_report(a, school_name, file_schools, students, grades, subjects, eligi
         pairs = b["compass"]["pairs"] if b.get("compass") else []
         if not pairs:
             continue
-        total = sum(w or 0 for _, w in pairs)
-        if abs(total - 1) >= 0.005:
+        # שקולים נספרים פעם אחת; מקצוע שכולו 0% (בחינות פנימיות) — לא אזהרה
+        total = collapsed_weight(pairs)
+        if total and abs(total - 1) >= 0.005:
             warn("weight_sum", f"{b['name']}: סכום המשקלים במצפן {round(total * 100)}%",
                  subject=b["name"], percent=round(total * 100))
         # משקל שונה בין המצפן ל-T1 לאותו שאלון
@@ -603,6 +658,10 @@ def build_report(a, school_name, file_schools, students, grades, subjects, eligi
     unmatched = sum(1 for e in eligibility if e["student_id"] not in known_ids)
     if unmatched:
         warn("t2_unmatched", f"{unmatched} שורות T2 בלי תלמיד בקובץ הפרטים")
+    for g, n in sorted((t2_dropped or {}).items()):
+        warn("t2_other_grade", f"ניתוח הזכאות כלל גם {n} תלמידי {g} — לא הוצמד להם "
+             "(ניתוח הזכאות לשכבה המסיימת בלבד); הם מוצגים לפי התקדמות המקצועות",
+             grade=g, count=n)
     if not eligibility:
         warn("no_t2", "אין ניתוח זכאות (T2) — הסבב ייטען עם T1 בלבד")
 
@@ -739,6 +798,24 @@ def main():
     school_name = school_name or getattr(src, "school_name", None)
     src.close()
 
+    # ── ניתוח הזכאות — לשכבה המסיימת בלבד (פגישת 5.10: "הפרדה גמורה בין
+    # י"ב ל-י"ג"). המסכים מזהים את השכבה המסיימת לפי מי שיש לו T2; קובץ T2
+    # שכולל גם את י"ב (אגיאל) היה מערבב את שתי השכבות במסך י"ג. התלמידים
+    # עצמם נשארים — רק ניתוח הזכאות אינו מוצמד לשכבה שאינה מסיימת.
+    grade_of = {s["student_id"]: s["grade"] for s in students}
+    t2_grades = {grade_of[e["student_id"]] for e in eligibility if grade_of.get(e["student_id"])}
+    t2_dropped = collections.Counter()
+    if len(t2_grades) > 1:
+        top = max(t2_grades, key=grade_rank)
+        kept = []
+        for e in eligibility:
+            g = grade_of.get(e["student_id"])
+            if g and g != top:
+                t2_dropped[g] += 1
+            else:
+                kept.append(e)
+        eligibility = kept
+
     # ── המצפן → מקצועות הסבב ותוכנית. מקצוע במצפן שאין לו בלוק ב-T1
     # (למשל הפנימיים) נכנס עם מפתח משלו, כדי שהתוכנית תהיה שלמה.
     by_compass_row = {id(b["compass"]): b for b in all_blocks if b["compass"]}
@@ -766,7 +843,8 @@ def main():
                     continue        # שאלון שאיש לא ניגש אליו — אין ממה לגזור
                 program.append({"subject_key": b["key"], "questionnaire_code": code,
                                 "weight": ws.most_common(1)[0][0] if ws else None, "sort": k,
-                                "notes": "נגזר מ-T1 — אין מצפן לסבב" if k == 0 else None})
+                                "notes": "נגזר מ-T1 — אין מצפן לסבב" if k == 0 else None,
+                                "alt_group": None})
     for j, s in enumerate(compass):
         b = by_compass_row.get(id(s))
         key = b["key"] if b else f"P{s['row']}"
@@ -774,9 +852,11 @@ def main():
             round_subjects.append({"subject_key": key, "subject_name": s["name"],
                                    "subject_group": "פנימי" if s["internal"] else "מורחב",
                                    "units": None, "sort": 1000 + j})
+        groups = alt_groups(s["pairs"])
         for k, (code, weight) in enumerate(s["pairs"]):
             program.append({"subject_key": key, "questionnaire_code": code, "weight": weight,
-                            "sort": k, "notes": s["notes"] if k == 0 else None})
+                            "sort": k, "notes": s["notes"] if k == 0 else None,
+                            "alt_group": groups.get(code)})
 
     # ── סיכום (ספירות בלבד)
     grade_by = collections.Counter(s["grade"] for s in students)
@@ -807,7 +887,7 @@ def main():
 
     report = build_report(a, school_name, file_schools, students, grades, subjects, eligibility,
                           all_blocks, compass, program, tracking, t1_codes, prog_codes,
-                          bad_grades, known_ids, src)
+                          bad_grades, known_ids, src, t2_dropped)
     for w in report["warnings"]:
         print(f"⚠ {w['text']}")
     for e in report["errors"]:
@@ -870,7 +950,7 @@ def main():
             put("bagrut_round_subjects", round_subjects,
                 ["subject_key", "subject_name", "subject_group", "units", "sort"])
             put("bagrut_program", program,
-                ["subject_key", "questionnaire_code", "weight", "sort", "notes"])
+                ["subject_key", "questionnaire_code", "weight", "sort", "notes", "alt_group"])
             # T2 נכנס לשורת התלמיד. תלמיד בלי T2 מקבל עמודות ריקות ו-in_t2=false.
             t2_by_id = {e["student_id"]: e for e in eligibility}
             t2_cols = list(T2_FIELDS.values())

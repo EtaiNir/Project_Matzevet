@@ -9,7 +9,8 @@ interface Props {
   /** הערך בתא, לתצוגה בכותרת התפריט */
   cellValue: string
   anchor: DOMRect
-  onOpenCard: () => void
+  /** בלי — אין שורת "כרטיס תלמיד" (טבלה ששורותיה אינן תלמידים) */
+  onOpenCard?: () => void
   onOpenFilter: () => void
   /** הסרת העמודה מהתצוגה. אינה מוחקת דבר — רק מורידה אותה מהטבלה. */
   onHideColumn?: () => void
@@ -93,13 +94,15 @@ export default function CellActionMenu({
         </button>
       </div>
 
-      <button
-        onClick={onOpenCard}
-        className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-sky-50 hover:text-sky-800"
-      >
-        <span>🗂</span>
-        <span>כרטיס תלמיד</span>
-      </button>
+      {onOpenCard && (
+        <button
+          onClick={onOpenCard}
+          className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-sky-50 hover:text-sky-800"
+        >
+          <span>🗂</span>
+          <span>כרטיס תלמיד</span>
+        </button>
+      )}
 
       <button
         onClick={onOpenFilter}

@@ -10,16 +10,15 @@ import {
   gradeTone,
   parseBlockers,
   questionnaireLabel,
-  saveTracking,
   SUBJECT_GROUPS,
   TRACKING_FLAGS,
   type GradeRow,
   type RoundSubject,
   type SubjectRow,
-  type TrackingFlag,
 } from '@/lib/bagrut'
-import { Card, CompletionMark, ContributionBar, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
+import { Card, CompletionMark, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
+import CycleTab from './BagrutCycle'
 
 type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
 
@@ -145,7 +144,7 @@ export default function BagrutStudent() {
         </div>
       )}
       {tab === 'all' && <AllQuestionnaires sid={id} />}
-      {tab === 'tracking' && <TrackingPanel sid={id} />}
+      {tab === 'tracking' && <CycleTab sid={id} />}
 
       <div className="text-center text-xs text-slate-400">
         {round.school_name} · {round.season} {round.school_year} · ← → לדפדוף
@@ -190,7 +189,7 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
     return (
       <Card title="בדרך לזכאות">
         <p className="text-sm text-slate-600">
-          ניתוח הזכאות (T2) נעשה לשכבה המסיימת בלבד. לתלמיד בשכבה {s.grade} מוצגת כאן התקדמות המקצועות.
+          ניתוח הזכאות נעשה לשכבה המסיימת בלבד. לתלמיד בשכבה {s.grade} מוצגת כאן התקדמות המקצועות.
         </p>
         <div className="mt-3 flex gap-4 text-sm">
           <span className="text-emerald-700">✔ {progress.done} הושלמו</span>
@@ -218,12 +217,15 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
             detail={s.negatives_count ? `${s.negatives_count} שליליים · ${s.one_negative_option ?? ''}` : 'אין ציון שלילי'}
           />
           <Check ok={s.mother_tongue_status ? !s.mother_tongue_status.includes('חסר') : null} label="שפת אם" detail={s.mother_tongue_status ?? '—'} />
-          <Check ok={null} label="דרישות פנימיות" detail="חנ״ג, מעורבות חברתית, השכלה כללית — לא נבדקו בניתוח (בכפוף לבית הספר)" />
-          <Check
-            ok={s.compensation_eligible ? !s.compensation_eligible.includes('לא') : null}
-            label="כלל השיפוי"
-            detail={s.compensation_eligible ?? 'לא נבדק בניתוח'}
-          />
+          {/* רשימת התיוג משקפת את ניתוח הזכאות בלבד (פגישת 5.10): בלי בדיקות
+              חוקה משלנו. השיפוי מוצג רק כשהניתוח עצמו אומר עליו משהו. */}
+          {(s.compensation_eligible || s.compensation_pair) && (
+            <Check
+              ok={s.compensation_eligible ? !s.compensation_eligible.includes('לא') : null}
+              label="קומפנסציה"
+              detail={[s.compensation_pair, s.compensation_eligible].filter(Boolean).join(' · ')}
+            />
+          )}
         </div>
 
         <div className="mt-4">
@@ -263,7 +265,7 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
           <p className="text-sm leading-relaxed text-slate-700">{s.grades_summary}</p>
           {s.done_summary && <p className="mt-2 text-xs text-slate-500">מה כבר בוצע: {s.done_summary}</p>}
           {s.reason && <p className="mt-2 text-xs text-slate-500">סיבת הסטטוס: {s.reason}</p>}
-          <p className="mt-3 text-[11px] text-slate-400">מקור: ניתוח T2 · {data.round.season} {data.round.school_year}</p>
+          <p className="mt-3 text-[11px] text-slate-400">מקור: ניתוח הזכאות ·{data.round.season} {data.round.school_year}</p>
         </Card>
       )}
     </div>
@@ -276,65 +278,63 @@ function SubjectTile({ sub, grades, m }: { sub: RoundSubject; grades: GradeRow[]
   const { index, data } = useBagrut()
   const comp = completion(m?.completion_status)
   const passed = comp === 'done' && gradeTone(m?.final_grade) === 'pass'
-  const [open, setOpen] = useState(!passed)
 
   const order = index.questionnairesBySubject.get(sub.subject_key) ?? []
-  const program = new Map((index.programBySubject.get(sub.subject_key) ?? []).map((p) => [p.questionnaire_code, p]))
   const rows = [...grades].sort((a, b) => order.indexOf(a.questionnaire_code) - order.indexOf(b.questionnaire_code))
   const tone = gradeTone(m?.final_grade ?? m?.cumulative_grade)
-  const border = !passed && (tone === 'fail' || tone === 'borderline') ? 'border-rose-200' : comp === 'progress' ? 'border-amber-200' : 'border-slate-200'
+  const border = !passed && tone === 'fail' ? 'border-rose-200' : !passed && tone === 'blocked' ? 'border-orange-300' : comp === 'progress' ? 'border-amber-200' : 'border-slate-200'
 
   return (
     <div className={`rounded-2xl border bg-white shadow-sm ${border}`}>
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-3 p-4 text-right">
+      {/* האריח תמיד פתוח — בלי חץ לקיפול (אייל, 6.10) */}
+      <div className="flex w-full items-center gap-3 p-4 text-right">
         <CompletionMark value={comp} />
         <div className="min-w-0 flex-1">
           <div className="truncate font-bold text-slate-800">{sub.subject_name}</div>
           <div className="text-xs text-slate-500">{m?.questionnaires ? `${m.questionnaires} שאלונים` : ''}{m?.units ? ` · ${m.units} יח״ל` : ''}</div>
         </div>
         <div className="text-left">
-          <Grade value={m?.final_grade ?? null} strong />
-          {m?.final_grade == null && m?.cumulative_grade != null && (
-            <div className="mt-0.5 text-[11px] text-slate-400">מצטבר {fmt(m.cumulative_grade)}</div>
+          {m?.final_grade == null && m?.cumulative_grade != null ? (
+            // אין עדיין ציון סופי — הציון המשוקלל המצטבר הוא המספר הבולט
+            <>
+              <div className="text-xl font-extrabold tabular-nums text-slate-800">{fmt(m.cumulative_grade)}</div>
+              <div className="text-[11px] text-slate-400">משוקלל מצטבר</div>
+            </>
+          ) : (
+            <Grade value={m?.final_grade ?? null} strong />
           )}
         </div>
-        <span className="text-slate-300">{open ? '▴' : '▾'}</span>
-      </button>
-      <div className="px-4 pb-1">
-        <ContributionBar parts={rows.map((g) => ({ code: g.questionnaire_code, weighted: g.weighted, weight: g.weight ?? program.get(g.questionnaire_code)?.weight ?? null, grade: g.grade }))} />
       </div>
-      {open && (
-        <div className="px-4 pb-4 pt-3">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-[11px] text-slate-400">
-                <th className="pb-1 text-right font-medium">שאלון</th>
-                <th className="pb-1 font-medium">ציון</th>
-                <th className="pb-1 font-medium">משקל</th>
-                <th className="pb-1 font-medium">נקודות</th>
+      <div className="px-4 pb-4 pt-3">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[11px] text-slate-400">
+              <th className="pb-1 text-right font-medium">שאלון</th>
+              <th className="pb-1 font-medium">ציון</th>
+              <th className="pb-1 font-medium">משקל</th>
+              <th className="pb-1 font-medium">משוקלל</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((g) => (
+              <tr key={g.questionnaire_code} className="border-t border-slate-100">
+                <td className="py-1.5">
+                  <span className="font-semibold tabular-nums">{g.questionnaire_code}</span>
+                  <span className="mr-1 text-[11px] text-slate-400">{questionnaireLabel(data.questionnaires.get(g.questionnaire_code), null)}</span>
+                </td>
+                <td className="text-center"><Grade value={g.grade} boxed /></td>
+                <td className="text-center text-xs tabular-nums text-slate-500">{g.weight != null ? `${Math.round(g.weight * 100)}%` : ''}</td>
+                <td className="text-center font-semibold tabular-nums text-slate-700">{fmt(g.weighted, 1)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((g) => (
-                <tr key={g.questionnaire_code} className="border-t border-slate-100">
-                  <td className="py-1.5">
-                    <span className="font-semibold tabular-nums">{g.questionnaire_code}</span>
-                    <span className="mr-1 text-[11px] text-slate-400">{questionnaireLabel(data.questionnaires.get(g.questionnaire_code), null)}</span>
-                  </td>
-                  <td className="text-center"><Grade value={g.grade} /></td>
-                  <td className="text-center text-xs tabular-nums text-slate-500">{g.weight != null ? `${Math.round(g.weight * 100)}%` : ''}</td>
-                  <td className="text-center font-semibold tabular-nums text-slate-700">{fmt(g.weighted, 1)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {m?.cumulative_weight != null && (
-            <div className="mt-2 text-xs text-slate-500">
-              משקל מצטבר {Math.round(m.cumulative_weight * 100)}% · ציון מצטבר {fmt(m.cumulative_grade)}
-            </div>
-          )}
-        </div>
-      )}
+            ))}
+          </tbody>
+        </table>
+        {m?.cumulative_weight != null && (
+          <div className="mt-2 text-xs text-slate-500">
+            משקל מצטבר {Math.round(m.cumulative_weight * 100)}% · ציון מצטבר {fmt(m.cumulative_grade)}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -354,85 +354,7 @@ function AllQuestionnaires({ sid }: { sid: string }) {
   ]
   return (
     <div className="flex h-[60vh] flex-col">
-      <BagrutTable rows={rows} columns={columns} rowKey={(g) => `${g.subject_key}:${g.questionnaire_code}`} initialSort={{ key: 'sub', dir: 'asc' }} />
+      <BagrutTable rows={rows} columns={columns} rowKey={(g) => `${g.subject_key}:${g.questionnaire_code}`} initialSort={{ key: 'sub', dir: 'asc' }} countLabel="שאלונים" rowTitle={(g) => `${g.questionnaire_code} · ${index.subjectByKey.get(g.subject_key)?.subject_name ?? ''}`} />
     </div>
-  )
-}
-
-// ─────────────────────────────── מעקב ───────────────────────────────
-
-function TrackingPanel({ sid }: { sid: string }) {
-  const { data, round, canEditTracking, applyTracking } = useBagrut()
-  const t = data.tracking.get(sid)
-  const [short, setShort] = useState(t?.note_short ?? '')
-  const [long, setLong] = useState(t?.note_long ?? '')
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-
-  useEffect(() => {
-    setShort(t?.note_short ?? '')
-    setLong(t?.note_long ?? '')
-  }, [sid, t?.note_short, t?.note_long])
-
-  const save = async (patch: Parameters<typeof saveTracking>[2]) => {
-    setBusy(true)
-    setMsg(null)
-    try {
-      applyTracking(await saveTracking(round, sid, patch, data.tracking.get(sid)))
-      setMsg({ ok: true, text: 'נשמר' })
-    } catch (e) {
-      setMsg({ ok: false, text: (e as Error).message })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const dirty = short !== (t?.note_short ?? '') || long !== (t?.note_long ?? '')
-
-  return (
-    <Card title="מעקב הצוות" action={t?.updated_at && <span className="text-xs text-slate-400">עודכן {new Date(t.updated_at).toLocaleString('he-IL')}</span>}>
-      {!canEditTracking && <p className="mb-3 text-xs text-slate-500">צפייה בלבד — עדכון המעקב פתוח לצוות בית הספר.</p>}
-      <div className="grid gap-2 sm:grid-cols-2">
-        {TRACKING_FLAGS.map((f) => {
-          const on = Boolean(t?.[f.key as TrackingFlag])
-          return (
-            <button
-              key={f.key}
-              disabled={!canEditTracking || busy}
-              onClick={() => save({ [f.key]: !on })}
-              className={`flex items-center gap-3 rounded-xl border p-3 text-right transition ${
-                on ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-white hover:border-slate-300'
-              } ${canEditTracking ? '' : 'cursor-default'}`}
-            >
-              <span className={`text-lg ${on ? '' : 'opacity-30 grayscale'}`}>{f.icon}</span>
-              <span className="text-sm font-semibold text-slate-700">{f.label}</span>
-              <span className={`mr-auto h-5 w-9 rounded-full p-0.5 transition ${on ? 'bg-amber-500' : 'bg-slate-200'}`}>
-                <span className={`block h-4 w-4 rounded-full bg-white shadow transition ${on ? '-translate-x-4' : ''}`} />
-              </span>
-            </button>
-          )
-        })}
-      </div>
-      <label className="mt-4 block text-sm font-semibold text-slate-700">
-        הערה קצרה
-        <input value={short} disabled={!canEditTracking} onChange={(e) => setShort(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" />
-      </label>
-      <label className="mt-3 block text-sm font-semibold text-slate-700">
-        הערות כלליות לתלמיד
-        <textarea value={long} disabled={!canEditTracking} onChange={(e) => setLong(e.target.value)} rows={4} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" />
-      </label>
-      <div className="mt-3 flex items-center gap-3">
-        {canEditTracking && (
-          <button
-            disabled={!dirty || busy}
-            onClick={() => save({ note_short: short.trim() || null, note_long: long.trim() || null })}
-            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-sky-700 disabled:opacity-40"
-          >
-            {busy ? 'שומר…' : 'שמירת ההערות'}
-          </button>
-        )}
-        {msg && <span className={`text-sm ${msg.ok ? 'text-emerald-700' : 'text-rose-700'}`}>{msg.text}</span>}
-      </div>
-    </Card>
   )
 }

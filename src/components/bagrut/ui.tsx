@@ -25,7 +25,7 @@ export const TONE = {
   slate: { chip: 'bg-slate-100 text-slate-600 ring-slate-200', fill: '#cbd5e1', soft: 'bg-slate-50' },
 } as const
 
-export const KIND_ORDER: EligibilityKind[] = ['eligible', 'eligible_internal', 'one_negative', 'not_eligible']
+export const KIND_ORDER: EligibilityKind[] = ['eligible', 'one_negative', 'not_eligible']
 
 export function StatusBadge({ kind, long = false }: { kind: EligibilityKind; long?: boolean }) {
   const meta = ELIGIBILITY_META[kind]
@@ -34,7 +34,6 @@ export function StatusBadge({ kind, long = false }: { kind: EligibilityKind; lon
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 ring-inset ${TONE[meta.tone].chip}`}
       title={meta.label}
     >
-      {kind === 'eligible_internal' && <span aria-hidden>ⓘ</span>}
       {long ? meta.label : meta.short}
     </span>
   )
@@ -42,19 +41,23 @@ export function StatusBadge({ kind, long = false }: { kind: EligibilityKind; lon
 
 const GRADE_CLASS: Record<GradeTone, string> = {
   fail: 'bg-rose-100 text-rose-800 font-bold',
-  borderline: 'bg-amber-100 text-amber-800 font-bold',
   pass: 'text-slate-800',
-  blocked: 'bg-slate-200 text-slate-500 line-through',
+  // ציון חסם (שלילי מוגבר): הציון עצמו מוצג, ומסגרת כתומה בולטת סביבו
+  blocked: 'bg-orange-50 text-orange-800 font-bold ring-2 ring-inset ring-orange-500',
   none: 'text-slate-300',
 }
 
-/** ציון עם צבע לפי הסף: <45 אדום, 45–54 כתום, חסם 1–4 אפור מחוק. */
-export function Grade({ value, strong = false }: { value: number | null | undefined; strong?: boolean }) {
+/**
+ * ציון עם צבע לפי הסף: מתחת ל-55 אדום; חסם 1–4 — הציון עצמו, במסגרת כתומה.
+ * boxed — גם ציון עובר בריבוע (כחול), כך שכל ציון בטבלה קטנה יושב בריבוע צבע.
+ */
+export function Grade({ value, strong = false, boxed = false }: { value: number | null | undefined; strong?: boolean; boxed?: boolean }) {
   const tone = gradeTone(value)
+  const cls = boxed && tone === 'pass' ? 'bg-sky-100 text-sky-800 font-bold' : GRADE_CLASS[tone]
   return (
     <span
-      className={`inline-block min-w-[2.25rem] rounded-md px-1.5 py-0.5 text-center tabular-nums ${GRADE_CLASS[tone]} ${strong ? 'text-base' : 'text-sm'}`}
-      title={tone === 'blocked' ? 'ציון חסם — אינו נספר (חוקת הזכאות Z-8)' : undefined}
+      className={`inline-block min-w-[2.25rem] rounded-md px-1.5 py-0.5 text-center tabular-nums ${cls} ${strong ? 'text-base font-extrabold' : 'text-sm'}`}
+      title={tone === 'blocked' ? 'ציון חסם (שלילי מוגבר) — מחייב בחינה חוזרת, ואינו נספר' : undefined}
     >
       {value == null ? '—' : fmt(value)}
     </span>
@@ -244,7 +247,7 @@ export function Histogram({
         const lo = i * 10
         const hi = i === 9 ? 100 : lo + 9
         const active = activeBin && activeBin[0] === lo
-        const color = lo + 10 <= 45 ? '#fb7185' : lo < 55 ? '#fbbf24' : '#38bdf8'
+        const color = lo < 55 ? '#fb7185' : '#38bdf8'
         return (
           <g
             key={i}
@@ -321,8 +324,11 @@ export function ContributionBar({
   )
 }
 
-/** פס משקלים של מקצוע במצפן — חייב להתמלא בדיוק ל-100%. */
-export function WeightBar({ weights }: { weights: { code: number; weight: number | null }[] }) {
+/**
+ * פס משקלים של מקצוע במצפן — חייב להתמלא בדיוק ל-100%. קבוצת שאלונים
+ * שקולים מגיעה כקטע אחד, והתווית שלה "14331 / 14383".
+ */
+export function WeightBar({ weights }: { weights: { code: number | string; weight: number | null }[] }) {
   const palette = ['#0ea5e9', '#6366f1', '#14b8a6', '#8b5cf6', '#0284c7', '#4f46e5', '#0d9488']
   const counted = weights.filter((w) => (w.weight ?? 0) > 0)
   const total = counted.reduce((s, w) => s + (w.weight ?? 0), 0)

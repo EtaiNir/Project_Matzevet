@@ -39,6 +39,25 @@ export interface ProgramRow {
   weight: number | null
   sort: number
   notes: string | null
+  /** שאלונים שקולים ("או/או") באותו מקצוע חולקים מספר — נספר אחד מהם. מיגרציה 028 */
+  alt_group: number | null
+}
+
+/**
+ * סכום המשקלים של מקצוע במצפן, כשכל קבוצת שאלונים שקולים נספרת פעם אחת.
+ * 150% של זוג שקול הוא 100% — לא אזהרה.
+ */
+export function programWeightSum(rows: ProgramRow[]): number {
+  const seen = new Set<number>()
+  let sum = 0
+  for (const r of rows) {
+    if (r.alt_group != null) {
+      if (seen.has(r.alt_group)) continue
+      seen.add(r.alt_group)
+    }
+    sum += r.weight ?? 0
+  }
+  return sum
 }
 
 export interface Questionnaire {
@@ -105,8 +124,15 @@ export interface Tracking {
   zero_chance: boolean
   note_short: string | null
   note_long: string | null
+  /** מועד המעקב הבא (YYYY-MM-DD). מיגרציה 029 */
+  next_followup: string | null
+  /** גורמים שאינם בציונים — מתוך CYCLE_FACTORS */
+  factors: string[]
+  factors_note: string | null
   updated_at: string | null
 }
+
+const TRACKING_COLS = 'student_id, suspected, has_blocker, fighting, zero_chance, note_short, note_long, next_followup, factors, factors_note, updated_at'
 
 export const TRACKING_FLAGS = [
   { key: 'fighting', label: 'נלחמים על הזכאות', short: 'נלחמים', icon: '🚩' },
@@ -125,18 +151,28 @@ export interface RoundData {
   grades: GradeRow[]
   subjectRows: SubjectRow[]
   tracking: Map<string, Tracking>
+  /** תוכנית ההתערבות לכל תלמיד — ספירות בלבד, לרשימה ולפס המצב */
+  actionCounts: Map<string, ActionCounts>
+}
+
+export interface ActionCounts {
+  active: number
+  done: number
 }
 
 // ─────────────────────────────── סיווג ───────────────────────────────
 
 /**
- * סטטוס הזכאות מ-T2 הוא טקסט חופשי ("זכאי לפי T1 — בכפוף לדרישות
- * פנימיות"). כאן הוא הופך לקטגוריה אחת מתוך חמש — ושם, ולא ברכיבים,
+ * סטטוס הזכאות מגיע מניתוח הזכאות (T2) כטקסט חופשי ("זכאי לפי T1 — בכפוף
+ * לדרישות פנימיות"). כאן הוא הופך לאחד משלושה סטטוסים — ושם, ולא ברכיבים,
  * יושבת ההחלטה איך לקרוא כל נוסח.
+ *
+ * שלושה בלבד (פגישת 5.10): אין זכאות · זכאי · זכאי במסלול שלילי אחד.
+ * "בכפוף לדרישות פנימיות" נכלל ב"זכאי" — דרישות פנימיות אינן נמדדות כאן,
+ * הן עניין של בית הספר.
  */
 export type EligibilityKind =
   | 'eligible'
-  | 'eligible_internal'
   | 'one_negative'
   | 'not_eligible'
   | 'not_graduating'
@@ -146,7 +182,6 @@ export const ELIGIBILITY_META: Record<
   { label: string; short: string; tone: 'green' | 'teal' | 'amber' | 'red' | 'slate' }
 > = {
   eligible: { label: 'זכאי', short: 'זכאי', tone: 'green' },
-  eligible_internal: { label: 'זכאי — בכפוף לדרישות פנימיות', short: 'זכאי בכפוף', tone: 'teal' },
   one_negative: { label: 'זכאי במסלול שלילי אחד', short: 'שלילי אחד', tone: 'amber' },
   not_eligible: { label: 'אין זכאות', short: 'אין זכאות', tone: 'red' },
   not_graduating: { label: 'לא בשכבה המסיימת', short: '—', tone: 'slate' },
@@ -157,13 +192,12 @@ export function eligibilityKind(s: BagrutStudent): EligibilityKind {
   const t = s.status
   if (t.includes('אין זכאות')) return 'not_eligible'
   if (t.includes('שלילי אחד')) return 'one_negative'
-  if (t.includes('בכפוף')) return 'eligible_internal'
   if (t.includes('זכאי')) return 'eligible'
   return 'not_eligible'
 }
 
 export function isEligible(kind: EligibilityKind): boolean {
-  return kind === 'eligible' || kind === 'eligible_internal' || kind === 'one_negative'
+  return kind === 'eligible' || kind === 'one_negative'
 }
 
 /**
@@ -218,13 +252,14 @@ export function isOnTheEdge(s: BagrutStudent): boolean {
   return eligibilityKind(s) === 'not_eligible' && parseBlockers(s.blockers).length === 1
 }
 
-/** ציון → גוון. חסם 1–4 אינו נספר (חוקת הזכאות Z-8). */
-export type GradeTone = 'fail' | 'borderline' | 'pass' | 'blocked' | 'none'
+/** ציון → גוון. חסם 1–4 אינו נספר (חוקת הזכאות Z-8) — ומסומן בנפרד. */
+export type GradeTone = 'fail' | 'pass' | 'blocked' | 'none'
 export function gradeTone(g: number | null | undefined): GradeTone {
   if (g == null) return 'none'
   if (g >= 1 && g <= 4) return 'blocked'
-  if (g < 45) return 'fail'
-  if (g < 55) return 'borderline'
+  // מתחת ל-55 אדום — כך הצוותים רגילים לקרוא (פגישת 5.10). "נכשל מותר"
+  // 45–54 (Z-7) הוא עניין של ניתוח הזכאות, לא של צבע הציון.
+  if (g < 55) return 'fail'
   return 'pass'
 }
 
@@ -302,7 +337,7 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     }
   }
 
-  const [subjects, program, students, grades, subjectRows, tracking] = await Promise.all([
+  const [subjects, program, students, grades, subjectRows, tracking, actions] = await Promise.all([
     step('מקצועות הסבב', fetchAll<RoundSubject>((f, t) =>
       supabase.from('bagrut_round_subjects').select('*').eq('round_id', rid).order('sort').range(f, t))),
     step('המצפן', fetchAll<ProgramRow>((f, t) =>
@@ -315,11 +350,23 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     step('מדדי מקצוע', fetchAll<SubjectRow>((f, t) =>
       supabase.from('bagrut_subjects').select('student_id, subject_key, final_grade, cumulative_grade, units, questionnaires, cumulative_weight, completion_status')
         .eq('round_id', rid).order('student_id').order('subject_key').range(f, t))),
-    step('מעקב', fetchAll<Tracking & { school_code: string }>((f, t) =>
-      supabase.from('bagrut_tracking').select('student_id, school_code, suspected, has_blocker, fighting, zero_chance, note_short, note_long, updated_at')
+    step('מעקב', fetchAll<Tracking>((f, t) =>
+      supabase.from('bagrut_tracking').select(TRACKING_COLS)
         .eq('authority_code', round.authority_code).eq('school_code', round.school_code)
         .order('student_id').range(f, t))),
+    step('תוכניות התערבות', fetchAll<{ student_id: string; status: BagrutAction['status'] }>((f, t) =>
+      supabase.from('bagrut_actions').select('student_id, status')
+        .eq('authority_code', round.authority_code).eq('school_code', round.school_code)
+        .neq('status', 'dismissed').order('student_id').range(f, t))),
   ])
+
+  const actionCounts = new Map<string, ActionCounts>()
+  for (const a of actions) {
+    const c = actionCounts.get(a.student_id) ?? { active: 0, done: 0 }
+    if (a.status === 'active') c.active++
+    else if (a.status === 'done') c.done++
+    actionCounts.set(a.student_id, c)
+  }
 
   const codes = [...new Set([...program.map((p) => p.questionnaire_code), ...grades.map((g) => g.questionnaire_code)])]
   const qs = await step('אינדקס השאלונים', fetchAll<Questionnaire>((f, t) =>
@@ -335,6 +382,7 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     grades,
     subjectRows,
     tracking: new Map(tracking.map((t) => [t.student_id, t])),
+    actionCounts,
   }
 }
 
@@ -361,17 +409,135 @@ export async function saveTracking(
     zero_chance: current?.zero_chance ?? false,
     note_short: current?.note_short ?? null,
     note_long: current?.note_long ?? null,
+    next_followup: current?.next_followup ?? null,
+    factors: current?.factors ?? [],
+    factors_note: current?.factors_note ?? null,
     ...patch,
   }
   const { data, error } = await supabase
     .from('bagrut_tracking')
     .upsert(row, { onConflict: 'authority_code,school_code,student_id' })
-    .select('student_id, suspected, has_blocker, fighting, zero_chance, note_short, note_long, updated_at')
+    .select(TRACKING_COLS)
     .single()
   if (error) throw new Error(`שמירת המעקב נכשלה: ${error.message}`)
   // RLS שחוסם כתיבה לא תמיד זורק (מלכודת 21) — שורה שלא חזרה = לא נשמר.
   if (!data) throw new Error('שמירת המעקב נחסמה — אין לך הרשאה לעדכן את התלמיד הזה')
   return data as Tracking
+}
+
+// ─────────────────────────────── מחזור ההתערבות ───────────────────────────────
+//
+// תוכנית פעולה ויומן מעקב לתלמיד (מיגרציה 029, docs/bagrut-intervention-design.md).
+// לפי בית ספר + ת"ז, בלי סבב — כמו המעקב. ⚠️ זכאות נקבעת רק לפי T2
+// (decisions/014 §8): פעולה מטפלת בפריט מההתערבות של T2, ואינה מבטיחה זכאות.
+
+export interface BagrutAction {
+  id: string
+  student_id: string
+  /** הפריט של T2 שממנו נולדה ההצעה. null = ידנית */
+  suggest_key: string | null
+  title: string
+  detail: string | null
+  action_type: string | null
+  subject_key: string | null
+  questionnaire_code: number | null
+  required_grade: number | null
+  owner: string | null
+  due_label: string | null
+  status: 'active' | 'done' | 'dismissed'
+  outcome: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type LogKind = 'student' | 'parents' | 'staff' | 'update'
+export const LOG_KIND_LABELS: Record<LogKind, string> = {
+  student: 'שיחה עם התלמיד',
+  parents: 'שיחה עם ההורים',
+  staff: 'ישיבת צוות',
+  update: 'עדכון',
+}
+
+export interface BagrutLogEntry {
+  id: string
+  student_id: string
+  kind: LogKind
+  happened_on: string
+  participants: string | null
+  summary: string | null
+  agreements: string | null
+  next_step: string | null
+  next_followup: string | null
+  created_at: string
+}
+
+/** סוגי פעולה — ברירת מחדל. בעתיד לכל רשות (bagrut_cycle_config, שלב מאוחר) */
+export const ACTION_TYPES = [
+  'תגבור', 'שיפור ציון במועד הבא', 'בחינה חוזרת', 'השלמת שאלון', 'עבודה חלופית',
+  'התאמות בבחינה', 'מעבר רמה', 'שיחה עם הורים', 'הפניה ליועצת', 'בדיקה מול בית הספר', 'אחר',
+]
+export const ACTION_OWNERS = ['מורה המקצוע', 'מחנך', 'רכז הבגרויות', 'יועצת', 'התלמיד']
+/** גורמים שאינם בציונים — מה שמסביר את הציון ומשנה את סוג ההתערבות */
+export const CYCLE_FACTORS = ['נוכחות', 'מוטיבציה', 'קשיי למידה / התאמות בבחינה', 'מצב אישי או משפחתי', 'עבודה אחרי הלימודים']
+
+const ACTION_COLS = 'id, student_id, suggest_key, title, detail, action_type, subject_key, questionnaire_code, required_grade, owner, due_label, status, outcome, created_at, updated_at'
+const LOG_COLS = 'id, student_id, kind, happened_on, participants, summary, agreements, next_step, next_followup, created_at'
+
+const studentKey = (round: BagrutRound, studentId: string) => ({
+  authority_code: round.authority_code,
+  school_code: round.school_code,
+  student_id: studentId,
+})
+
+export async function fetchStudentCycle(round: BagrutRound, studentId: string): Promise<{ actions: BagrutAction[]; log: BagrutLogEntry[] }> {
+  const k = studentKey(round, studentId)
+  const [a, l] = await Promise.all([
+    supabase.from('bagrut_actions').select(ACTION_COLS).match(k).order('created_at'),
+    supabase.from('bagrut_log').select(LOG_COLS).match(k).order('happened_on', { ascending: false }).order('created_at', { ascending: false }),
+  ])
+  if (a.error) throw new Error(`טעינת התוכנית נכשלה: ${a.error.message}`)
+  if (l.error) throw new Error(`טעינת היומן נכשלה: ${l.error.message}`)
+  return { actions: (a.data ?? []) as BagrutAction[], log: (l.data ?? []) as BagrutLogEntry[] }
+}
+
+type ActionInput = Partial<Omit<BagrutAction, 'id' | 'student_id' | 'created_at' | 'updated_at'>> & { title: string }
+
+/** מחזיר את השורה כפי שהשרת שמר (מלכודת 26); שורה שלא חזרה = RLS חסם (מלכודת 21) */
+export async function createAction(round: BagrutRound, studentId: string, input: ActionInput): Promise<BagrutAction> {
+  const { data, error } = await supabase.from('bagrut_actions')
+    .insert({ ...studentKey(round, studentId), ...input }).select(ACTION_COLS).single()
+  if (error) throw new Error(`הוספת הפעולה נכשלה: ${error.message}`)
+  if (!data) throw new Error('הוספת הפעולה נחסמה — אין לך הרשאה לעדכן את התלמיד הזה')
+  return data as BagrutAction
+}
+
+export async function updateAction(id: string, patch: Partial<ActionInput>): Promise<BagrutAction> {
+  const { data, error } = await supabase.from('bagrut_actions').update(patch).eq('id', id).select(ACTION_COLS).maybeSingle()
+  if (error) throw new Error(`עדכון הפעולה נכשל: ${error.message}`)
+  if (!data) throw new Error('עדכון הפעולה נחסם — אין לך הרשאה לעדכן את התלמיד הזה')
+  return data as BagrutAction
+}
+
+export async function deleteAction(id: string): Promise<void> {
+  const { data, error } = await supabase.from('bagrut_actions').delete().eq('id', id).select('id')
+  if (error) throw new Error(`מחיקת הפעולה נכשלה: ${error.message}`)
+  if (!data?.length) throw new Error('מחיקת הפעולה נחסמה — אין לך הרשאה')
+}
+
+type LogInput = Omit<BagrutLogEntry, 'id' | 'student_id' | 'created_at'>
+
+export async function createLogEntry(round: BagrutRound, studentId: string, input: LogInput): Promise<BagrutLogEntry> {
+  const { data, error } = await supabase.from('bagrut_log')
+    .insert({ ...studentKey(round, studentId), ...input }).select(LOG_COLS).single()
+  if (error) throw new Error(`שמירת הרשומה נכשלה: ${error.message}`)
+  if (!data) throw new Error('שמירת הרשומה נחסמה — אין לך הרשאה לעדכן את התלמיד הזה')
+  return data as BagrutLogEntry
+}
+
+export async function deleteLogEntry(id: string): Promise<void> {
+  const { data, error } = await supabase.from('bagrut_log').delete().eq('id', id).select('id')
+  if (error) throw new Error(`מחיקת הרשומה נכשלה: ${error.message}`)
+  if (!data?.length) throw new Error('מחיקת הרשומה נחסמה — אין לך הרשאה')
 }
 
 // ─────────────────────────────── קליטת סבב ───────────────────────────────
@@ -575,7 +741,7 @@ export function t1Summary(index: RoundIndex, studentId: string): T1Summary {
     else if (c === 'not_started') out.notStarted++
     const weak = gs.filter((g) => {
       const t = gradeTone(g.grade)
-      return t === 'fail' || t === 'borderline'
+      return t === 'fail'
     }).length
     if (weak) {
       out.weakGrades += weak

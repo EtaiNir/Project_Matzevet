@@ -11,14 +11,64 @@ import {
   isOnTheEdge,
   loadRound,
   SUBJECT_GROUPS,
+  type ActionCounts,
   type BagrutRound,
   type RoundData,
   type Tracking,
 } from '@/lib/bagrut'
 import { BagrutContext, type BagrutContextValue } from './context'
+import { isFollowupDue } from '@/lib/bagrutCycle'
 import { Empty, ErrorBox, Loading } from '@/components/bagrut/ui'
 
 const ROUND_KEY = 'bagrut:round'
+const ZOOM_KEY = 'bagrut:zoom'
+const ZOOM_STEPS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6]
+
+/** גודל התצוגה — נשמר לכל צופה בדפדפן שלו, כמו הסבב שנבחר */
+function useZoom(): [number, (z: number) => void] {
+  const [zoom, setZoomState] = useState<number>(() => {
+    try {
+      const z = Number(localStorage.getItem(ZOOM_KEY))
+      return ZOOM_STEPS.includes(z) ? z : 1
+    } catch {
+      return 1
+    }
+  })
+  const setZoom = useCallback((z: number) => {
+    setZoomState(z)
+    try {
+      localStorage.setItem(ZOOM_KEY, String(z))
+    } catch {
+      /* מצב פרטי — הגודל פשוט לא יישמר */
+    }
+  }, [])
+  return [zoom, setZoom]
+}
+
+/** כפתורי הגדלה והקטנה — בפינה הימנית העליונה של הדף, מחוץ לאזור המוגדל */
+function ZoomBar({ zoom, onChange }: { zoom: number; onChange: (z: number) => void }) {
+  const i = ZOOM_STEPS.indexOf(zoom)
+  const btn = 'flex h-7 w-7 items-center justify-center rounded-md text-base font-bold text-slate-600 transition hover:bg-sky-50 hover:text-sky-700 disabled:opacity-30 disabled:hover:bg-transparent'
+  return (
+    <div className="flex shrink-0 items-center px-4 pt-2">
+      <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+        <button className={btn} onClick={() => onChange(ZOOM_STEPS[i + 1])} disabled={i >= ZOOM_STEPS.length - 1} title="הגדלה" aria-label="הגדלה">
+          +
+        </button>
+        <button
+          onClick={() => onChange(1)}
+          className="min-w-[3.25rem] rounded-md px-1 py-0.5 text-xs font-semibold tabular-nums text-slate-600 hover:bg-sky-50 hover:text-sky-700"
+          title="חזרה לגודל רגיל"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button className={btn} onClick={() => onChange(ZOOM_STEPS[i - 1])} disabled={i <= 0} title="הקטנה" aria-label="הקטנה">
+          −
+        </button>
+      </div>
+    </div>
+  )
+}
 
 const BAGRUT_ROLE_LABELS: Record<string, string> = {
   council: 'צפייה מועצתית',
@@ -41,6 +91,10 @@ export default function BagrutShell() {
   // מסך הקליטה עומד בפני עצמו: לרשות חדשה עוד אין סבב, ובלי זה לא היה
   // אפשר להגיע אליו כדי לקלוט את הראשון.
   const isUpload = Boolean(useMatch('/bagrut/:code/upload'))
+  const isHome = Boolean(useMatch('/bagrut/:code'))
+  // הגדלה והקטנה — בכל דף חוץ מתמונת המצב וקליטת הסבב
+  const zoomable = !isUpload && !isHome
+  const [zoom, setZoom] = useZoom()
 
   const [allAuthorities, setAllAuthorities] = useState<Authority[]>([])
   useEffect(() => {
@@ -110,6 +164,15 @@ export default function BagrutShell() {
     })
   }, [])
 
+  const applyActionCounts = useCallback((studentId: string, counts: ActionCounts) => {
+    setData((d) => {
+      if (!d) return d
+      const actionCounts = new Map(d.actionCounts)
+      actionCounts.set(studentId, counts)
+      return { ...d, actionCounts }
+    })
+  }, [])
+
   const ctx: BagrutContextValue | null =
     round && data && index
       ? {
@@ -119,6 +182,7 @@ export default function BagrutShell() {
           index,
           canEditTracking: isSuperAdmin || (Boolean(profile?.bagrut_role) && profile?.bagrut_role !== 'council'),
           applyTracking,
+          applyActionCounts,
           base: `/bagrut/${authorityCode}`,
         }
       : null
@@ -193,27 +257,36 @@ export default function BagrutShell() {
 
       <div className="flex min-h-0 flex-1">
         {ctx && <Rail ctx={ctx} isSuperAdmin={isSuperAdmin} />}
-        <main className="thin-scrollbar flex min-w-0 flex-1 flex-col overflow-auto">
-          {isUpload ? (
-            <Outlet />
-          ) : error ? (
-            <ErrorBox message={error} />
-          ) : rounds && rounds.length === 0 ? (
-            <Empty title="אין עדיין נתוני בגרות לרשות הזו">
-              סבב נטען לכל בית ספר אחרי כל מועד (קיץ / חורף): T1, T2 והמצפן של בית הספר.
-              {isSuperAdmin && (
-                <Link to={`/bagrut/${authorityCode}/upload`} className="mt-3 block font-semibold text-sky-700 hover:underline">
-                  ⬆ קליטת הסבב הראשון
-                </Link>
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {zoomable && <ZoomBar zoom={zoom} onChange={setZoom} />}
+          {/* גלילת הדף — ב-RTL הסרגל יושב בצד השמאלי של המסך */}
+          <div className="min-h-0 flex-1 overflow-auto">
+            {/* zoom ולא transform: הדף מתארגן מחדש בכל גודל (רוחב וגובה באחוזים
+                נשארים יחסיים למסך), והטבלאות הווירטואליות מודדות נכון — נבדק
+                בכרום: scrollTop ו-ResizeObserver ביחידות של האלמנט עצמו. */}
+            <div className="flex h-full flex-col" style={zoomable && zoom !== 1 ? { zoom } : undefined}>
+              {isUpload ? (
+                <Outlet />
+              ) : error ? (
+                <ErrorBox message={error} />
+              ) : rounds && rounds.length === 0 ? (
+                <Empty title="אין עדיין נתוני בגרות לרשות הזו">
+                  סבב נטען לכל בית ספר אחרי כל מועד (קיץ / חורף): הציונים, ניתוח הזכאות והמצפן של בית הספר.
+                  {isSuperAdmin && (
+                    <Link to={`/bagrut/${authorityCode}/upload`} className="mt-3 block font-semibold text-sky-700 hover:underline">
+                      ⬆ קליטת הסבב הראשון
+                    </Link>
+                  )}
+                </Empty>
+              ) : ctx ? (
+                <BagrutContext.Provider value={ctx}>
+                  <Outlet />
+                </BagrutContext.Provider>
+              ) : (
+                <Loading />
               )}
-            </Empty>
-          ) : ctx ? (
-            <BagrutContext.Provider value={ctx}>
-              <Outlet />
-            </BagrutContext.Provider>
-          ) : (
-            <Loading />
-          )}
+            </div>
+          </div>
         </main>
       </div>
     </div>
@@ -232,6 +305,7 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
       notEligible: t2.filter((s) => eligibilityKind(s) === 'not_eligible').length,
       edge: t2.filter(isOnTheEdge).length,
       fighting: data.students.filter((s) => data.tracking.get(s.student_id)?.fighting).length,
+      followup: data.students.filter((s) => isFollowupDue(data.tracking.get(s.student_id)?.next_followup)).length,
       // שכבות שאינן מסיימות — בלי T2, עם התקדמות T1 בלבד
       otherGrades: [...data.students.reduce((m, s) => {
         if (s.grade && s.grade !== ctx.round.graduating_grade) m.set(s.grade, (m.get(s.grade) ?? 0) + 1)
@@ -277,6 +351,7 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
           ['?view=edge', '⚡ על הסף', counts.edge],
           ['?kind=not_eligible', 'אין זכאות', counts.notEligible],
           ['?flag=fighting', '🚩 נלחמים על הזכאות', counts.fighting],
+          ['?view=followup', '📅 מעקב השבוע', counts.followup],
         ].map(([q, label, n]) => {
           const active = location.pathname === `${base}/students` && location.search === q
           return (

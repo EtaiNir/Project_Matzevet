@@ -17,6 +17,7 @@ Vault תיעוד (Obsidian) לפרויקט ממשק ניהול נתוני תלמ
 | [tier-b-template.md](tier-b-template.md) | תבנית קובץ הקליטה לדרג ב' (גנים, לידה עד 3, קידום נוער, חינוך ביתי) |
 | [extra-fields-design.md](extra-fields-design.md) | אפיון העמודות שהמשתמש מוסיף (טקסט/סימון) והמסכים הייעודיים |
 | [dedup-review.md](dedup-review.md) | השוואת שני מנועי הדדופ, לקראת מעבר עם סבא |
+| [bagrut-intervention-design.md](bagrut-intervention-design.md) | תכנון לשונית המעקב כמחזור התערבות (מודול הבגרות) — טיוטה לדיון |
 | [roadmap.md](roadmap.md) | **מפת דרכים** — מה נשאר לסגור, ולאן הפרויקט הולך |
 | [dev-log.md](dev-log.md) | יומן פיתוח כרונולוגי |
 | [decisions/](decisions/) | החלטות טכניות |

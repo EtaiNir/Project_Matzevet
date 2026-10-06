@@ -71,7 +71,7 @@ function GraduatingView() {
 
   const grad = useMemo(() => data.students.filter((s) => s.in_t2), [data])
   const byKind = useMemo(() => {
-    const m: Record<EligibilityKind, number> = { eligible: 0, eligible_internal: 0, one_negative: 0, not_eligible: 0, not_graduating: 0 }
+    const m: Record<EligibilityKind, number> = { eligible: 0, one_negative: 0, not_eligible: 0, not_graduating: 0 }
     for (const s of grad) m[eligibilityKind(s)]++
     return m
   }, [grad])
@@ -136,7 +136,7 @@ function GraduatingView() {
   return (
     <>
       <p className="-mt-3 text-sm text-slate-500">
-        תמונת הזכאות של שכבה {round.graduating_grade} ({grad.length} תלמידים), לפי ניתוח T2. כל מספר כאן נפתח לרשימת התלמידים שמאחוריו.
+        תמונת הזכאות של שכבה {round.graduating_grade} ({grad.length} תלמידים), לפי ניתוח הזכאות. כל מספר כאן נפתח לרשימת התלמידים שמאחוריו.
       </p>
 
       {/* ── מדדים ── */}
@@ -148,7 +148,7 @@ function GraduatingView() {
             center={<span className="text-xs font-bold text-slate-500">{grad.length}</span>}
           />
         </Kpi>
-        <Kpi value={byKind.eligible + byKind.eligible_internal + byKind.one_negative} label="זכאים" sub={`מתוכם ${byKind.eligible_internal} בכפוף לדרישות פנימיות`} tone="green" onClick={() => go('?kind=eligible_any')} />
+        <Kpi value={byKind.eligible + byKind.one_negative} label="זכאים" sub={byKind.one_negative ? `מתוכם ${byKind.one_negative} במסלול שלילי אחד` : undefined} tone="green" onClick={() => go('?kind=eligible_any')} />
         <Kpi value={byKind.not_eligible} label="אין זכאות" tone="red" onClick={() => go('?kind=not_eligible')} />
         <Kpi value={edge} label="⚡ על הסף" sub="אין זכאות — וחסם אחד בלבד" tone="amber" onClick={() => go('?view=edge')} />
         {fighting > 0 && <Kpi value={fighting} label="🚩 נלחמים על הזכאות" onClick={() => go('?flag=fighting')} />}
@@ -168,7 +168,7 @@ function GraduatingView() {
           <div className="flex flex-col gap-2.5">
             {classes.map(([cls, counts]) => {
               const n = Object.values(counts).reduce((a, b) => a + b, 0)
-              const ok = (counts.eligible ?? 0) + (counts.eligible_internal ?? 0) + (counts.one_negative ?? 0)
+              const ok = (counts.eligible ?? 0) + (counts.one_negative ?? 0)
               return (
                 <div key={cls} className="flex items-center gap-3">
                   <button onClick={() => go(`?class=${encodeURIComponent(cls)}&view=graduating`)} className="w-14 shrink-0 text-right text-sm font-bold text-slate-700 hover:text-sky-700">
@@ -241,7 +241,7 @@ function GraduatingView() {
       </Card>
 
       <p className="text-center text-xs text-slate-400">
-        סטטוס הזכאות, החסמים וההתערבות המומלצת מגיעים מניתוח T2. "על הסף" = אין זכאות וחסם אחד בלבד.
+        סטטוס הזכאות, החסמים וההתערבות המומלצת מגיעים מניתוח הזכאות. "על הסף" = אין זכאות וחסם אחד בלבד.
       </p>
     </>
   )
@@ -310,7 +310,7 @@ function ProgressView({ grade }: { grade: string }) {
   return (
     <>
       <p className="-mt-3 text-sm text-slate-500">
-        לשכבה {grade} אין עדיין ניתוח זכאות (T2 רץ על השכבה המסיימת בלבד). התמונה כאן מ-T1: התקדמות במקצועות, וציונים חלשים שכדאי לטפל בהם עכשיו.
+        לשכבה {grade} אין עדיין ניתוח זכאות (הוא נעשה לשכבה המסיימת בלבד). התמונה כאן: התקדמות במקצועות, וציונים חלשים שכדאי לטפל בהם עכשיו.
       </p>
 
       <div className="flex flex-wrap gap-4">
