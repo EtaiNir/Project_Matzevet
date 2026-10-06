@@ -1,9 +1,17 @@
-import { useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { fieldLabel, getField } from '@/config/fields'
 import { isChecked } from '@/lib/filters'
 import { IconFilter, IconPin } from '@/components/brand/Icons'
-import type { SortState } from '@/lib/table'
+import { rowId, type SortState } from '@/lib/table'
 
 type Row = Record<string, unknown>
 
@@ -44,7 +52,23 @@ interface Props {
   extraHidden?: boolean
   /** האם יש בכלל עמודות תוספתיות ברשות */
   hasExtraColumns?: boolean
+  /** גרירת כותרת עמודה: `from` עובר לצד `after` של `to` (ב-RTL: אחרי = משמאל) */
+  onReorderFields?: (from: string, to: string, after: boolean) => void
+  /** גרירת תא המספור של שורה: השורה `from` עוברת מעל/מתחת לשורה `to` */
+  onReorderRows?: (from: string, to: string, after: boolean) => void
 }
+
+/** מה נגרר עכשיו — עמודה לפי מפתח השדה, או שורה לפי זהותה */
+type DragItem = { kind: 'col'; key: string } | { kind: 'row'; id: string }
+/** על מה מרחפים, ובאיזה צד שלו תיפול הגרירה */
+type DropSpot = { target: string; after: boolean }
+
+// קו ההנחתה — בצד שבו הפריט ייכנס. צל פנימי ולא גבול, כדי שלא יזיז
+// את התוכן בפיקסל. ב-RTL "לפני" הוא הצד הימני.
+const DROP_BEFORE_COL = ' shadow-[inset_-3px_0_0_#0284c7]'
+const DROP_AFTER_COL = ' shadow-[inset_3px_0_0_#0284c7]'
+const DROP_BEFORE_ROW = ' shadow-[inset_0_3px_0_#0284c7]'
+const DROP_AFTER_ROW = ' shadow-[inset_0_-3px_0_#0284c7]'
 
 // גובה קבוע לשורה ולכותרת — מקום לשתי שורות טקסט, כדי שערך ארוך
 // ייגלש במקום להיחתך, ושורה קצרה תישב במרכז ולא תיראה כתיבה ריקה
@@ -55,30 +79,6 @@ const MIN_COL_WIDTH = 56
 const INDEX_WIDTH = 52 // מספר השורה + סיכת הקיבוע
 // שוליים בקצה שורת הכותרת לכפתורי העמודות התוספתיות
 const GUTTER_WIDTH = 72
-/** השדה שמזהה שורה לאורך מיון וסינון — לא האינדקס, שמשתנה בכל מיון */
-const ROW_ID = 'MISPAR_ZEHUT'
-
-/**
- * זהות השורה — תעודת זהות, ולדרג ב' גם הקבוצה.
- *
- * ילד יכול להופיע **פעמיים** ובצדק: הוא היה בקובץ הגנים ובינתיים שובץ
- * לכיתה א', ולכן יש לו רשומה בטבלה הראשית וגם בדרג ב'. לפי
- * `tier-b-template.md` שתי הרשומות נשמרות — "עדיף להשאיר תלמיד
- * במערכת מאשר למחוק אותו".
- *
- * אבל ת"ז לבדה כמפתח הייתה נותנת לשתיהן **אותו** `key` ב-React ואותה
- * זהות בקיבוע: הנעץ היה מקבע את שתיהן, ורשימה מווירטואלית הייתה
- * ממחזרת שורה אחת לתוך השנייה — בדיוק הבאג שבגללו הזהות עברה
- * מלכתחילה לת"ז ([החלטה 010](../../docs/decisions/010-students-rail-and-pinning.md)).
- *
- * `source_group` קיים רק בשורות דרג ב', ולכן שורות המצב"ת שומרות על
- * הזהות שהייתה להן — ואין כאן שינוי התנהגות לרשות שלא קלטה גנים.
- */
-const rowId = (row: Row | undefined) => {
-  const zehut = String(row?.[ROW_ID] ?? '')
-  const group = row?.['source_group']
-  return group ? `${zehut}@${String(group)}` : zehut
-}
 
 /**
  * הטבלה הראשית — שורות מווירטואלות (~50k), רוחב עמודות ניתן לשינוי בגרירה (אפיון §6.1).
@@ -98,6 +98,17 @@ const rowId = (row: Row | undefined) => {
  *
  * הקיבוע חי בזיכרון הרכיב בלבד ואינו נשמר בין רענונים: הוא נכון לשאלה
  * שנשאלת עכשיו, לא להעדפה קבועה.
+ *
+ * ## גרירה
+ *
+ * כותרת עמודה נגררת ימינה ושמאלה, ותא המספור של שורה נגרר למעלה ולמטה.
+ * הטבלה רק מדווחת "מה עבר לאן"; הסדר עצמו נשמר ב-Dashboard, כי הוא קובע
+ * גם את הייצוא ואת דפדוף הכרטיס. עמודה מקובעת זזה רק בין המקובעות —
+ * התצוגה מציגה אותן ראשונות בכל מקרה, ונפילה מעבר לגבול הייתה נראית
+ * כאילו לא קרה כלום.
+ *
+ * גרירה ולא מחווה חדשה: לחיצה על הכותרת נשארת מיון, ולחיצה על המספר
+ * נשארת כרטיס — HTML5 drag אינו יורה click בסוף גרירה.
  */
 export default function StudentTable({
   rows,
@@ -114,6 +125,8 @@ export default function StudentTable({
   onToggleExtra,
   extraHidden = false,
   hasExtraColumns = false,
+  onReorderFields,
+  onReorderRows,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null)
   // רוחב לכל עמודה לפי מפתח השדה (נשמר גם במעבר בין תצורות/דפים)
@@ -175,10 +188,14 @@ export default function StudentTable({
     overscan: 12,
   })
 
+  /** באמצע שינוי רוחב — כדי שהכותרת לא תתחיל גרירת עמודה במקביל */
+  const resizing = useRef(false)
+
   // גרירת ידית לשינוי רוחב עמודה
   function startResize(e: ReactMouseEvent, key: string) {
     e.preventDefault()
     e.stopPropagation()
+    resizing.current = true
     const startX = e.clientX
     const startW = widthOf(key)
     function onMove(ev: MouseEvent) {
@@ -187,6 +204,7 @@ export default function StudentTable({
       setColWidths((w) => ({ ...w, [key]: newW }))
     }
     function onUp() {
+      resizing.current = false
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
       document.body.style.cursor = ''
@@ -194,6 +212,81 @@ export default function StudentTable({
     document.body.style.cursor = 'col-resize'
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
+  }
+
+  // ── גרירת עמודות ושורות ──
+  const [drag, setDrag] = useState<DragItem | null>(null)
+  const [drop, setDrop] = useState<DropSpot | null>(null)
+
+  function endDrag() {
+    setDrag(null)
+    setDrop(null)
+  }
+
+  // שורה מווירטואלית שנגללה מהמסך באמצע גרירה יוצאת מה-DOM, ואז
+  // `dragend` שלה לא מגיע לשום מקום. מאזין על החלון מנקה בכל מקרה.
+  useEffect(() => {
+    if (!drag) return
+    const clear = () => {
+      setDrag(null)
+      setDrop(null)
+    }
+    window.addEventListener('dragend', clear)
+    window.addEventListener('drop', clear)
+    return () => {
+      window.removeEventListener('dragend', clear)
+      window.removeEventListener('drop', clear)
+    }
+  }, [drag])
+
+  function startDrag(e: ReactDragEvent, item: DragItem, image?: Element | null) {
+    e.dataTransfer.effectAllowed = 'move'
+    // פיירפוקס אינו מתחיל גרירה בלי נתון כלשהו
+    e.dataTransfer.setData('text/plain', item.kind === 'col' ? item.key : item.id)
+    if (image) {
+      // תמונת הגרירה של שורה — השורה כולה ולא רק תא המספור
+      const r = image.getBoundingClientRect()
+      e.dataTransfer.setDragImage(image, e.clientX - r.left, e.clientY - r.top)
+    }
+    setDrag(item)
+  }
+
+  /** עדכון קו ההנחתה — רק כשהשתנה, כי dragover יורה עשרות פעמים בשנייה */
+  function markDrop(target: string, after: boolean) {
+    setDrop((cur) => (cur?.target === target && cur.after === after ? cur : { target, after }))
+  }
+
+  function overColumn(e: ReactDragEvent, key: string) {
+    if (drag?.kind !== 'col' || !onReorderFields) return
+    // עמודה מקובעת זזה רק בין המקובעות, ולהפך
+    if (pinnedCols.has(drag.key) !== pinnedCols.has(key)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const r = e.currentTarget.getBoundingClientRect()
+    // RTL: החצי השמאלי של התיבה = אחרי
+    markDrop(key, e.clientX < r.left + r.width / 2)
+  }
+
+  function dropColumn(e: ReactDragEvent, key: string) {
+    if (drag?.kind !== 'col' || !onReorderFields || !drop) return
+    e.preventDefault()
+    if (drag.key !== key) onReorderFields(drag.key, key, drop.after)
+    endDrag()
+  }
+
+  function overRow(e: ReactDragEvent, id: string) {
+    if (drag?.kind !== 'row' || !onReorderRows || !id) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const r = e.currentTarget.getBoundingClientRect()
+    markDrop(id, e.clientY > r.top + r.height / 2)
+  }
+
+  function dropRow(e: ReactDragEvent, id: string) {
+    if (drag?.kind !== 'row' || !onReorderRows || !drop) return
+    e.preventDefault()
+    if (drag.id !== id) onReorderRows(drag.id, id, drop.after)
+    endDrag()
   }
 
   const gutter = Boolean(onAddColumn || (onToggleExtra && hasExtraColumns))
@@ -215,14 +308,25 @@ export default function StudentTable({
     // רקע אטום, לא שקוף: תאים מקובעים נדבקים מעל התוכן שנגלל מתחתם
     const stripe = pinnedRow ? 'bg-white' : index % 2 ? 'bg-slate-50' : 'bg-white'
     const stickyBg = stripe + ' group-hover:bg-sky-50'
+    const rowDraggable = Boolean(onReorderRows && id)
+    const dropMark =
+      drag?.kind === 'row' && drop?.target === id && drag.id !== id
+        ? drop.after
+          ? DROP_AFTER_ROW
+          : DROP_BEFORE_ROW
+        : ''
 
     return (
       <div
         key={id || `i${index}`}
+        onDragOver={(e) => overRow(e, id)}
+        onDrop={(e) => dropRow(e, id)}
         className={
           'group flex w-full border-b border-slate-100 transition-colors hover:bg-sky-50 ' +
           (pinnedRow ? '' : 'absolute ') +
-          stripe
+          stripe +
+          dropMark +
+          (drag?.kind === 'row' && drag.id === id ? ' opacity-40' : '')
         }
         style={
           pinnedRow
@@ -230,17 +334,29 @@ export default function StudentTable({
             : { transform: `translateY(${top}px)`, height: ROW_HEIGHT }
         }
       >
-        {/* מספר השורה — קיצור ישיר לכרטיס, בלי תפריט ביניים */}
+        {/* מספר השורה — קיצור ישיר לכרטיס, וגם הידית לגרירת השורה */}
         <div
+          draggable={rowDraggable}
+          onDragStart={
+            rowDraggable
+              ? (e) => startDrag(e, { kind: 'row', id }, e.currentTarget.parentElement)
+              : undefined
+          }
+          onDragEnd={endDrag}
           className={
             'group/idx sticky right-0 z-[1] flex shrink-0 items-center text-xs text-slate-400 ' +
+            (rowDraggable ? 'cursor-grab active:cursor-grabbing ' : '') +
             stickyBg
           }
           style={{ width: INDEX_WIDTH }}
         >
           <span
             onClick={() => onRowClick(index)}
-            title="פתיחת כרטיס התלמיד"
+            title={
+              rowDraggable
+                ? 'לחיצה — כרטיס התלמיד · גרירה למעלה או למטה — הזזת השורה'
+                : 'פתיחת כרטיס התלמיד'
+            }
             className="flex-1 cursor-pointer text-center transition hover:text-sky-700"
           >
             {index + 1}
@@ -384,30 +500,65 @@ export default function StudentTable({
                 style.right = pinOffset[key]
                 style.zIndex = 1
               }
+              const dropMark =
+                drag?.kind === 'col' && drop?.target === key && drag.key !== key
+                  ? drop.after
+                    ? DROP_AFTER_COL
+                    : DROP_BEFORE_COL
+                  : ''
               return (
                 <div
                   key={key}
                   style={style}
+                  draggable={Boolean(onReorderFields)}
+                  onDragStart={(e) => {
+                    // גרירת ידית הרוחב אינה גרירת עמודה
+                    if (resizing.current) {
+                      e.preventDefault()
+                      return
+                    }
+                    startDrag(e, { kind: 'col', key })
+                  }}
+                  onDragOver={(e) => overColumn(e, key)}
+                  onDrop={(e) => dropColumn(e, key)}
+                  onDragEnd={endDrag}
                   className={
                     'group relative flex shrink-0 items-center border-b-2 font-semibold ' +
                     (key === lastPinnedField ? 'border-l-2 border-l-sky-300 ' : 'border-l border-l-sky-100 ') +
                     (isFiltered
                       ? 'border-b-sky-500 bg-sky-100 text-sky-800'
-                      : 'border-b-sky-200 bg-sky-50 text-sky-700')
+                      : 'border-b-sky-200 bg-sky-50 text-sky-700') +
+                    dropMark +
+                    (drag?.kind === 'col' && drag.key === key ? ' opacity-40' : '')
                   }
                 >
-                  <button
+                  {/*
+                    div ולא button: בפיירפוקס גרירה אינה מתחילה מתוך כפתור,
+                    וכל שטח הכותרת הוא גם המקום לתפוס את העמודה.
+                  */}
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => onSort(key)}
-                    title={fieldLabel(key) + ' — לחץ למיון'}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onSort(key)
+                      }
+                    }}
+                    title={
+                      fieldLabel(key) +
+                      (onReorderFields ? ' — לחיצה: מיון · גרירה: הזזת העמודה' : ' — לחץ למיון')
+                    }
                     className={
-                      'flex min-w-0 flex-1 items-center justify-center gap-1 pr-1.5 text-center leading-tight transition hover:text-sky-900 ' +
+                      'flex h-full min-w-0 flex-1 cursor-pointer select-none items-center justify-center gap-1 pr-1.5 text-center leading-tight transition hover:text-sky-900 ' +
                       // שומרים מקום רק לפקד שגלוי תמיד; המרחפים צפים מעל
                       (permanentControls === 2 ? 'pl-10' : permanentControls === 1 ? 'pl-6' : 'pl-1.5')
                     }
                   >
                     <span className="line-clamp-2 break-words">{fieldLabel(key)}</span>
                     {active && <span className="shrink-0 text-sky-500">{sort.direction === 'asc' ? '▲' : '▼'}</span>}
-                  </button>
+                  </div>
 
                   {/*
                     פקדי העמודה צפים בפינה השמאלית ואינם גוזלים רוחב מהכותרת.

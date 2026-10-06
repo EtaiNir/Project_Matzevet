@@ -20,7 +20,7 @@ import {
 } from '@/lib/extraColumns'
 import { applyFilters, isConditionReady, type FilterCondition } from '@/lib/filters'
 import { columnValues } from '@/lib/columnValues'
-import { sortRows, type SortState } from '@/lib/table'
+import { moveItem, orderByIds, orderByList, rowId, sortRows, type SortState } from '@/lib/table'
 import { exportToExcel } from '@/lib/exportExcel'
 import {
   PRESETS,
@@ -69,6 +69,37 @@ import ShareDialog, { type ShareTarget } from '@/components/ShareDialog'
 
 function newId() {
   return Math.random().toString(36).slice(2, 9)
+}
+
+// ─── סדר העמודות שהמשתמש גרר — נשמר בדפדפן שלו בלבד ───
+//
+// אישי למשתמש: המפתח כולל את מזהה המשתמש, כך ששני אנשים שעובדים על
+// אותו מחשב לא רואים זה את הסידור של זה. ולכל רשות ולכל מסך (תצורה או
+// טבלה ייעודית) סדר משלו.
+//
+// ⚠️ **סדר השורות אינו נשמר — בכוונה, ואין להוסיף לו שמירה.** הוא רשימת
+// תעודות זהות של קטינים, וכל אחסון בדפדפן (גם sessionStorage) משאיר אותה
+// על הדיסק של מחשב משותף ברשות (CLAUDE.md — פרטיות). הוא חי בזיכרון הדף
+// בלבד, כמו הקיבוע. סדר העמודות הוא שמות שדות בלבד, ולכן נשמר.
+
+function readFieldOrder(key: string): string[] | null {
+  try {
+    const raw = localStorage.getItem(key)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return Array.isArray(parsed) ? parsed.map(String) : null
+  } catch {
+    return null
+  }
+}
+
+/** null מוחק את הסדר השמור */
+function writeFieldOrder(key: string, value: string[] | null): void {
+  try {
+    if (value) localStorage.setItem(key, JSON.stringify(value))
+    else localStorage.removeItem(key)
+  } catch {
+    /* מצב פרטי או אחסון מלא — הסדר פשוט לא יישמר */
+  }
 }
 
 /**
@@ -168,6 +199,16 @@ export default function Dashboard() {
   const [selectedFields, setSelectedFields] = useState<string[]>(DEFAULT_PRESET.defaultFields)
   const [filters, setFilters] = useState<FilterCondition[]>(() => presetFilters(DEFAULT_PRESET))
   const [sort, setSort] = useState<SortState | null>(null)
+  /**
+   * סדר ידני — מה שהמשתמש גרר בטבלה, כרשימת זהויות שורה.
+   *
+   * הוא והמיון אינם חיים יחד: גרירה מבטלת את המיון (השורה נשארת איפה
+   * שהונחה), ומיון מבטל את הסדר הידני. "איפוס הכל" ומעבר תצורה מנקים.
+   * **בזיכרון בלבד** — רשימת ת"ז, ולכן לעולם לא נשמרת בדפדפן.
+   */
+  const [manualOrder, setManualOrder] = useState<string[] | null>(null)
+  /** סדר העמודות שהמשתמש גרר. null = הסדר של תמהיל השדות כמו שהוא */
+  const [fieldOrder, setFieldOrder] = useState<string[] | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [cardIndex, setCardIndex] = useState<number | null>(null)
   const [siblingParentId, setSiblingParentId] = useState<string | null>(null)
@@ -525,10 +566,60 @@ export default function Dashboard() {
     return rows
   }, [allStudents, siblingParentId, viewMembers])
 
-  const results = useMemo(
-    () => sortRows(applyFilters(scopedRows, activeFilters), sort),
-    [scopedRows, activeFilters, sort],
+  const results = useMemo(() => {
+    const filtered = applyFilters(scopedRows, activeFilters)
+    return manualOrder ? orderByIds(filtered, manualOrder) : sortRows(filtered, sort)
+  }, [scopedRows, activeFilters, sort, manualOrder])
+
+  /**
+   * המפתח של הסדר השמור: משתמש · רשות · מסך. null עד שהפרופיל נטען —
+   * בלי מזהה משתמש אין למי לשמור.
+   */
+  const orderKey =
+    profile?.id && authorityCode
+      ? `matzevet:order:${profile.id}:${authorityCode}:${viewId ? `view:${viewId}` : `preset:${activePreset}`}`
+      : null
+
+  // מעבר מסך, רשות או משתמש — טוענים את סדר העמודות שנשמר לשם. הסדר
+  // הידני של השורות שייך למסך הקודם ואינו עובר איתנו.
+  useEffect(() => {
+    setFieldOrder(orderKey ? readFieldOrder(`${orderKey}:cols`) : null)
+    setManualOrder(null)
+  }, [orderKey])
+
+  function saveFieldOrder(order: string[] | null) {
+    setFieldOrder(order)
+    if (orderKey) writeFieldOrder(`${orderKey}:cols`, order)
+  }
+
+  /**
+   * גרירת שורה: הסדר הנוכחי על המסך הופך לסדר ידני, והמיון מתבטל.
+   * בזיכרון בלבד — ראה ההערה על readFieldOrder למה אין כאן שמירה.
+   */
+  function reorderRows(from: string, to: string, after: boolean) {
+    setManualOrder(moveItem(results.map(rowId), from, to, after))
+    setSort(null)
+  }
+
+  /**
+   * העמודות בסדר התצוגה: תמהיל השדות, מסודר לפי מה שהמשתמש גרר. שדה
+   * שנוסף מבורר השדות אחרי הגרירה מצטרף בסוף.
+   */
+  const currentFields = useMemo(
+    () => (fieldOrder ? orderByList(selectedFields, fieldOrder) : selectedFields),
+    [selectedFields, fieldOrder],
   )
+
+  /** גרירת כותרת: משנה את סדר העמודות — וגם בייצוא, שהולך לפי אותו סדר */
+  function reorderFields(from: string, to: string, after: boolean) {
+    saveFieldOrder(moveItem(currentFields, from, to, after))
+  }
+
+  /** מיון חדש מבטל את הסדר הידני — שניהם עונים על "באיזה סדר השורות" */
+  function applySort(next: SortState | null) {
+    setSort(next)
+    setManualOrder(null)
+  }
 
   /**
    * הערכים שיוצגו בתפריט הסינון של עמודה.
@@ -592,39 +683,36 @@ export default function Dashboard() {
     })
   }
 
-  /**
-   * כל השדות שנבחרו מוצגים יחד, והטבלה נגללת אופקית כשהם חורגים מהמסך.
-   *
-   * קודם הם חולקו לדפים ברוחב המסך (אפיון §6.2) עם חצי ניווט. הדפדוף
-   * הוסר: הוא מנע כל חריגה, ולכן סרגל הגלילה האופקי מעולם לא הופיע —
-   * וגלילה היא מה שמשתמש מצפה לו בטבלה.
-   */
-  const currentFields = selectedFields
+  // כל השדות שנבחרו מוצגים יחד (currentFields, למעלה), והטבלה נגללת
+  // אופקית כשהם חורגים מהמסך. דפדוף השדות של אפיון §6.2 הוסר: הוא מנע כל
+  // חריגה, ולכן סרגל הגלילה האופקי מעולם לא הופיע.
 
   function changePreset(id: string) {
     const preset = PRESETS.find((p) => p.id === id) ?? DEFAULT_PRESET
     setActivePreset(id)
     setSelectedFields(preset.defaultFields)
     setFilters(presetFilters(preset))
+    // הסדר הידני מתאפס, וסדר העמודות של המסך החדש נטען, כשהמפתח מתחלף
     setSort(null)
     setSiblingParentId(null)
   }
 
   /**
-   * חזרה לנקודת האפס של התצורה: הסינון שלה, בלי מיון ובלי זיהוי אחים.
-   * תמהיל השדות נשאר — לו יש איפוס נפרד בתוך בורר השדות.
+   * חזרה לנקודת האפס של התצורה: הסינון שלה, בלי מיון, בלי סדר ידני ובלי
+   * זיהוי אחים. תמהיל השדות נשאר — לו יש איפוס נפרד בתוך בורר השדות.
    */
   function resetView() {
     const preset = PRESETS.find((p) => p.id === activePreset) ?? DEFAULT_PRESET
     setFilters(presetFilters(preset))
-    setSort(null)
+    applySort(null)
     setSiblingParentId(null)
   }
 
-  /** חזרה לתמהיל השדות של התצורה, בלי לגעת בסינון */
+  /** חזרה לתמהיל השדות של התצורה ולסדר שלה, בלי לגעת בסינון */
   function resetFields() {
     const preset = PRESETS.find((p) => p.id === activePreset) ?? DEFAULT_PRESET
     setSelectedFields(preset.defaultFields)
+    saveFieldOrder(null)
   }
 
   function toggleField(key: string) {
@@ -634,9 +722,9 @@ export default function Dashboard() {
   }
 
   function handleSort(field: string) {
-    setSort((prev) =>
-      prev?.field === field
-        ? { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+    applySort(
+      sort?.field === field
+        ? { field, direction: sort.direction === 'asc' ? 'desc' : 'asc' }
         : { field, direction: 'asc' },
     )
   }
@@ -650,7 +738,7 @@ export default function Dashboard() {
     try {
       await exportToExcel(
         results,
-        selectedFields,
+        currentFields,
         `${authorityName || authorityCode}_${preset?.name ?? 'תלמידים'}_${stamp}`,
         { sheetName: preset?.name ?? 'תלמידים' },
       )
@@ -833,6 +921,8 @@ export default function Dashboard() {
                 onToggleExtra={toggleExtraColumns}
                 extraHidden={extraHidden}
                 hasExtraColumns={extraColumns.length > 0}
+                onReorderFields={reorderFields}
+                onReorderRows={reorderRows}
               />
             )}
         </div>
@@ -878,7 +968,7 @@ export default function Dashboard() {
           values={menuValues}
           selected={columnSelection(columnMenu.field)}
           onChange={(values) => setColumnSelection(columnMenu.field, values)}
-          onSort={(direction) => setSort({ field: columnMenu.field, direction })}
+          onSort={(direction) => applySort({ field: columnMenu.field, direction })}
           anchor={columnMenu.anchor}
           onClose={() => setColumnMenu(null)}
         />
@@ -1006,7 +1096,7 @@ export default function Dashboard() {
           code={authorityCode}
           ids={results.map((r) => String(r['MISPAR_ZEHUT'] ?? '')).filter(Boolean)}
           filters={activeFilters}
-          fields={selectedFields}
+          fields={currentFields}
           basePreset={activePreset}
           // בלי זה הטבלה החדשה נוצרה במסד אבל לא הופיעה בסרגל עד רענון
           // הדף: הדיאלוג דיווח על ההצלחה, ואיש לא טען את הרשימה מחדש.
