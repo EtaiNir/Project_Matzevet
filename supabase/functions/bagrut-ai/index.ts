@@ -338,5 +338,6 @@ Deno.serve(async (req) => {
     round_id, kind, content, model: r.model ?? MODEL, input_hash: await sha256(inputText),
   }).select('id, kind, content, model, round_id, created_at').single()
   if (saveErr) return json({ error: `שמירת הניתוח: ${saveErr.message}` }, 500)
-  return json(saved)
+  // usage — למעקב עלות (לא נשמר); dropped — פעולות שהבדיקה סיננה
+  return json({ ...saved, usage: r.usage ?? null })
 })
