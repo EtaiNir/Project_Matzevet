@@ -52,19 +52,30 @@ T_T2 = "זכאות 14 - ניתוח AI מהצאט"
 T_INDEX = "זכאות 3 - מותאם GPT אינדקס שאלני בגרות של משרד החינוך ללא כפילות"
 
 # מדדי מקצוע ב-T1. הסדר חשוב: "MishkalMitztaber" נבדק לפני "ziunMitztaber".
+# שתי שפות כותרת: אקסס ("Anglit3TziunSofi") וקובץ T1 המאוחד ("ציון סופי אנגלית 3 יח"ל").
 METRICS = [
-    ("final_grade", re.compile(r"(?i)t?ziunsofi$")),
-    ("cumulative_weight", re.compile(r"(?i)mishkalmitztaber$")),
-    ("cumulative_grade", re.compile(r"(?i)t?ziunmitztaber$")),
-    ("units", re.compile(r"(?i)yechidot$")),
-    ("questionnaires", re.compile(r"(?i)sheelonim$")),
-    ("completion_status", re.compile(r"(?i)statushashlama$")),
+    ("final_grade", re.compile(r"(?i)t?ziunsofi$|^ציון סופי ")),
+    ("cumulative_weight", re.compile(r"(?i)mishkalmitztaber$|^משקל מצטבר ")),
+    ("cumulative_grade", re.compile(r"(?i)t?ziunmitztaber$|^ציון מצטבר ")),
+    ("units", re.compile(r"(?i)yechidot$|^יחידות ")),
+    ("questionnaires", re.compile(r"(?i)sheelonim$|^שאלונים בוצעו מתוך ")),
+    ("completion_status", re.compile(r"(?i)statushashlama$|^סטטוס השלמה ")),
 ]
-Q_COL = re.compile(r"^Q(\d+)")
-ROLE_BY_SUFFIX = [("weighted", re.compile(r"(?i)meshuklal$")),
-                  ("weight", re.compile(r"(?i)mishkal$")),
-                  ("grade", re.compile(r"(?i)tziun$"))]
+# "Q34211…" באקסס, "34211 אזרחות בחינה חיצונית … ציון" בקובץ המאוחד
+Q_COL = re.compile(r"^Q?(\d{4,})")
+ROLE_BY_SUFFIX = [("weighted", re.compile(r"(?i)meshuklal$|משוקלל$")),
+                  ("weight", re.compile(r"(?i)mishkal$|משקל$")),
+                  ("grade", re.compile(r"(?i)tziun$|ציון$"))]
 POSITIONAL_ROLES = ["grade", "weight", "weighted"]
+# מפתח המקצוע = עמודת היחידות בלי הקידומת/סיומת שלה
+UNITS_AFFIX = re.compile(r"(?i)yechidot$|^יחידות ")
+FINAL_AFFIX = re.compile(r"(?i)t?ziunsofi$|^ציון סופי ")
+
+
+def key_level(key):
+    """רמת היחידות מתוך מפתח המקצוע: "Anglit3" או 'אנגלית 3 יח"ל'."""
+    m = re.search(r"(\d)$", key) or re.search(r"(\d)\s*יח", key)
+    return int(m.group(1)) if m else None
 
 T2_FIELDS = {
     "סטטוס לזכאות לפ T1": "status",
@@ -82,6 +93,24 @@ T2_FIELDS = {
     "סהכ יחדות זכאות": "total_units",
     "תאור סיבת אי הזכאות": "reason",
 }
+# T2 בקובץ המאוחד (אגיאל) — אותם שדות בניסוח אחר. "האם זכאי לשיפוי" ו"תאור
+# סיבת אי הזכאות" אינם בקובץ, ונשארים ריקים.
+T2_ALIASES = {
+    "מספר זהות": "MsparZehutTalmid",
+    "ריכוז ציונים ומקצועות לזכאות": "ריכוז מקצועות וציונים לזכאות",
+    "חוסרים וחסמים לזכאות": "חסמים לזכאות",
+    "סטטוס זכאות לפי T1": "סטטוס לזכאות לפ T1",
+    "התערבות מומלצת": "התערבות מומלצת לזכאות",
+    "מספר ציונים שליליים": "מספר שליליים",
+    "סטטוס שפת אם ערבית": "סטטוס בשפת אם - ערבית",
+    'סה"כ יחידות מלל': "סהכ יחידות לתלמיד במקצועות המלל",
+    'סה"כ יחידות זכאות': "סהכ יחדות זכאות",
+}
+
+# סוג המקצוע במצפן (עמודת "סוג המקצוע") → קבוצת המקצוע בסבב. בקובץ המאוחד
+# כל המקצועות בגיליון אחד, ולכן הקבוצה נגזרת מהמצפן ולא משם הטבלה.
+KIND_TO_GROUP = {"מלל": "חובה", "אנגלית": "אנגלית ומתמטיקה", "מתמטיקה": "אנגלית ומתמטיקה",
+                 "מורחב": "מורחב"}
 
 
 # ─────────────────────────────── עזרים ───────────────────────────────
@@ -119,37 +148,49 @@ def read_table(cur, table, columns=None):
 # ─────────────────────────────── המצפן ───────────────────────────────
 
 def read_compass(path):
-    """גיליון2: שורה לכל מקצוע — סוג (I), קוד (J), שם (K), זוגות שאלון/משקל
-    בעמודות X..AK, הערות (AL). שורות בלי שם מקצוע (סיכומים) — מדלגים."""
+    """שורה לכל מקצוע — סוג, קוד ושם, אחריהם 7 זוגות שאלון/משקל, ואז הערות.
+    שורות בלי שם מקצוע (סיכומים) — מדלגים.
+
+    הגיליון והעמודות מזוהים לפי הכותרות בשורה 2 ("שם המקצוע", "שאלון 1"),
+    לא לפי שם או מיקום קבוע: באבו רביע ורמות זבולון השם ב-K והשאלונים
+    מ-X (והגיליון "גיליון2" או "גיליון4" — ושם "גיליון2" הוא פיבוט ספירות);
+    באגיאל השם ב-C והשאלונים מ-Q. הסוג תמיד שתי עמודות לפני השם."""
     wb = openpyxl.load_workbook(path, data_only=True)
-    # הגיליון מזוהה לפי הכותרות שלו (K2 = "שם המקצוע", X2 = "שאלון 1"), לא לפי
-    # השם: באבו רביע זה "גיליון2", ברמות זבולון "גיליון4" — ושם "גיליון2" הוא
-    # פיבוט ספירות. מיקום העמודות I/J/K ו-X..AK זהה בשני הקבצים.
-    ws = next((s for s in wb.worksheets
-               if str(s.cell(2, 11).value or "").strip() == "שם המקצוע"
-               and str(s.cell(2, 24).value or "").strip() == "שאלון 1"), None)
+
+    def header_cols(ws):
+        heads = {str(ws.cell(2, c).value or "").strip(): c for c in range(1, ws.max_column + 1)}
+        return heads.get("שם המקצוע"), heads.get("שאלון 1"), heads.get("הערות")
+
+    ws = next((s for s in wb.worksheets if all(header_cols(s)[:2])), None)
     if ws is None:
-        sys.exit("לא נמצא במצפן גיליון עם 'שם המקצוע' ב-K2 ו'שאלון 1' ב-X2")
+        sys.exit("לא נמצא במצפן גיליון עם 'שם המקצוע' ו'שאלון 1' בשורה 2")
+    name_col, q1_col, notes_col = header_cols(ws)
+    notes_col = notes_col or q1_col + 14
+    # המקצועות הפנימיים בטבלה תחתונה עם כותרת משלה ("שם המקצוע" שוב). בלי
+    # כותרת שנייה — המיקום הישן (שורה 35 ואילך).
+    second = next((r for r in range(4, ws.max_row + 1)
+                   if str(ws.cell(r, name_col).value or "").strip() == "שם המקצוע"), None)
+    internal_from = second or 35
     rows = []
     for r in range(4, ws.max_row + 1):
-        name = txt(ws.cell(r, 11).value)          # K
+        name = txt(ws.cell(r, name_col).value)
         if not name or name == "שם המקצוע":
             continue
         pairs = []
-        for col in range(24, 38, 2):              # X=24 … AJ=36
+        for col in range(q1_col, q1_col + 14, 2):
             code = ws.cell(r, col).value
             if isinstance(code, (int, float)) and code >= 1000:
                 pairs.append((int(code), num(ws.cell(r, col + 1).value)))
         if not pairs:
             continue
-        kind = txt(ws.cell(r, 9).value)           # I: מלל / אנגלית / מתמטיקה / מורחב
+        kind = txt(ws.cell(r, name_col - 2).value) if name_col > 2 else None  # מלל / אנגלית / מתמטיקה / מורחב
         rows.append({
             "row": r,
             "name": name,
             "kind": kind,
-            "internal": r >= 35,                  # הטבלה התחתונה: מקצועות פנימיים
+            "internal": r >= internal_from,
             "pairs": pairs,
-            "notes": txt(ws.cell(r, 38).value),   # AL
+            "notes": txt(ws.cell(r, notes_col).value),
         })
     return rows
 
@@ -194,14 +235,16 @@ def parse_t1_table(names, rows, group):
             flush_q()
             cur_block = {"metrics": {}, "trios": [], "group": group, "key": None}
             blocks.append(cur_block)
+        elif cur_block is None:
+            continue        # "יחידות אנגלית לתלמיד" — עמודת זיהוי לפני המקצוע הראשון
         cur_block["metrics"][metric] = col
         if metric == "units":                          # הקידומת העקבית ביותר
-            cur_block["key"] = re.sub(r"(?i)yechidot$", "", col)
+            cur_block["key"] = UNITS_AFFIX.sub("", col).strip()
     flush_q()
 
     for b in blocks:
         if not b["key"]:
-            b["key"] = re.sub(r"(?i)t?ziunsofi$", "", b["metrics"]["final_grade"])
+            b["key"] = FINAL_AFFIX.sub("", b["metrics"]["final_grade"]).strip()
 
     grades, subjects = [], []
     for row in rows:
@@ -242,9 +285,9 @@ def name_blocks(blocks, compass, index):
         names = collections.Counter(index[c]["subject_name"] for c in codes if c in index and index[c]["subject_name"])
         name = names.most_common(1)[0][0] if names else b["key"]
         # באינדקס "אנגלית" אחת לכל הרמות; הרמה יושבת בקידומת (Anglit3)
-        lvl = re.search(r"(\d)$", b["key"])
+        lvl = key_level(b["key"])
         if lvl and not re.search(r"\d", name):
-            name = f"{name} {lvl.group(1)}"
+            name = f"{name} {lvl}"
         b["name"], b["compass"] = name, None
 
 
@@ -390,10 +433,90 @@ class XlsxSource:
         pass
 
 
+def read_sheet_from_header(path, id_headers):
+    """הגיליון הראשון, החל משורת הכותרת — השורה הראשונה (מתוך 10) שיש בה אחת
+    מכותרות הת"ז. ב-T2 של אגיאל יש מעליה כותרת ושורה ריקה."""
+    ws = openpyxl.load_workbook(path, read_only=True, data_only=True).worksheets[0]
+    rows = list(ws.iter_rows(values_only=True))
+    hi = next((i for i, r in enumerate(rows[:10])
+               if any(str(v).strip() in id_headers for v in r if v is not None)), None)
+    if hi is None:
+        sys.exit(f"לא נמצאה שורת כותרת עם עמודת ת\"ז ב-{os.path.basename(path)}")
+    names = [str(h).strip() if h is not None else "" for h in rows[hi]]
+    data = [dict(zip(names, r)) for r in rows[hi + 1:] if any(v is not None for v in r)]
+    return rows[:hi], names, data
+
+
+class UnifiedSource:
+    """המבנה של אגיאל: קובץ T1 אחד עם כל המקצועות (כותרות בעברית), קובץ T2
+    לכל השכבות, ומצפן. אין קובץ פרטי תלמידים — הת"ז, השם והכיתה בעמודות
+    הראשונות של T1, והשכבה נגזרת מהכיתה ("יג-3" → "יג"). אין סמל מוסד בקבצים,
+    ולכן בדיקת סמל המוסד אינה אפשרית כאן."""
+
+    T1_ID = "מספר זהות חינוך"
+    T1_ALIASES = {"מספר זהות חינוך": "MisparZehutChinuch", "שם תלמיד חינוך": "ShemTalmidChinuch",
+                  "כיתת אם חינוך": "KitatEmChinuch", "האם חסר חינוך": "HaImChaserChinuch"}
+
+    def __init__(self, folder, t1, t2):
+        self.dir = folder
+        self.name = os.path.basename(t1)
+        self.t1_path = os.path.join(folder, t1)
+        self.t2_path = os.path.join(folder, t2) if t2 else None
+        self.missing = []        # בלי T2 — אזהרה (no_t2), לא שגיאה
+        self.school_name = None
+        _, self._t1_names, self._t1_rows = read_sheet_from_header(self.t1_path, {self.T1_ID})
+        for r in self._t1_rows:                 # parse_t1_table מחפש את הת"ז בשם האקסס
+            r["MisparZehutChinuch"] = r.get(self.T1_ID)
+
+    @staticmethod
+    def detect(folder):
+        """(t1, t2) אם התיקייה במבנה המאוחד, אחרת None."""
+        files = sorted(f for f in os.listdir(folder) if f.lower().endswith(".xlsx"))
+        if any(f.startswith("זכאות 11") for f in files):
+            return None
+        t1 = [f for f in files if re.search(r"(?<![A-Za-z0-9])T1(?![0-9])", f)]
+        t2 = [f for f in files if re.search(r"(?<![A-Za-z0-9])T2(?![0-9])", f) or f.startswith("זכאות 14")]
+        if len(t1) != 1:
+            return None
+        return t1[0], (t2[0] if t2 else None)
+
+    def index(self):
+        return {}
+
+    def details(self):
+        out = []
+        for r in self._t1_rows:
+            d = {self.T1_ALIASES.get(k, k): v for k, v in r.items() if k in self.T1_ALIASES}
+            cls = txt(d.get("KitatEmChinuch"))
+            d["Shichva"] = cls.split("-")[0].strip() if cls and "-" in cls else None
+            out.append(d)
+        return out
+
+    def t1_tables(self):
+        # קבוצה None — נקבעת לכל מקצוע לפי הסוג שלו במצפן (KIND_TO_GROUP)
+        yield self._t1_names, self._t1_rows, None
+
+    def t2_rows(self):
+        if not self.t2_path:
+            return []
+        above, _, rows = read_sheet_from_header(self.t2_path, {"מספר זהות", "MsparZehutTalmid"})
+        # שם בית הספר מכותרת הגיליון: "T2 — ניתוח זכאות … | אגיאל"
+        title = next((str(v) for r in above for v in r if v), "")
+        if "|" in title:
+            self.school_name = title.rsplit("|", 1)[1].strip() or None
+        return [{T2_ALIASES.get(k, k): v for k, v in r.items()} for r in rows]
+
+    def close(self):
+        pass
+
+
 def make_source(a):
     if bool(a.accdb) == bool(a.xlsx_dir):
         sys.exit("יש לבחור מקור אחד: --accdb או --xlsx-dir")
-    return AccessSource(resolve(a.accdb)) if a.accdb else XlsxSource(a.xlsx_dir)
+    if a.accdb:
+        return AccessSource(resolve(a.accdb))
+    unified = UnifiedSource.detect(a.xlsx_dir)
+    return UnifiedSource(a.xlsx_dir, *unified) if unified else XlsxSource(a.xlsx_dir)
 
 
 def pg_connect():
@@ -543,7 +666,14 @@ def main():
     index = src.index()
     index_from_source = bool(index)
     if not index:
-        index = index_from_db()
+        try:
+            index = index_from_db()
+        except KeyError:
+            # אין פרטי מסד במחשב הזה. ב-dry-run מספיק המצפן לשמות המקצועות.
+            if not a.dry_run:
+                raise
+            print("(אין פרטי מסד — האינדקס הארצי לא נטען; השמות מהמצפן)")
+            index = {}
 
     compass_path = resolve(a.compass) if a.compass else None
     compass = read_compass(compass_path) if compass_path else []
@@ -581,6 +711,12 @@ def main():
         subjects += sb
 
     name_blocks(all_blocks, compass, index)
+    # קובץ T1 מאוחד: הקבוצה לפי סוג המקצוע במצפן
+    for b in all_blocks:
+        if b["group"] is None:
+            c = b["compass"]
+            b["group"] = ("פנימי" if c and c["internal"]
+                          else KIND_TO_GROUP.get(c["kind"], "מורחב") if c else "מורחב")
 
     # מפתח כפול = אותו מקצוע פוצל בין שתי טבלאות — שגיאה במבנה, לא ממזגים בשקט.
     dup = [k for k, n in collections.Counter(b["key"] for b in all_blocks).items() if n > 1]
@@ -600,6 +736,7 @@ def main():
         if rec["status"] is None:
             continue
         eligibility.append(rec)
+    school_name = school_name or getattr(src, "school_name", None)
     src.close()
 
     # ── המצפן → מקצועות הסבב ותוכנית. מקצוע במצפן שאין לו בלוק ב-T1
@@ -609,10 +746,13 @@ def main():
     for i, b in enumerate(all_blocks):
         units = collections.Counter(index[c]["units"] for c, _ in b["trios"]
                                     if c in index and index[c]["units"]).most_common(1)
-        lvl = re.search(r"(\d)$", b["key"])
+        # גיבוי אחרון: היחידות שב-T1 עצמו (עמודת "יחידות …" של המקצוע)
+        units = units or collections.Counter(int(sb["units"]) for sb in subjects
+                                             if sb["subject_key"] == b["key"] and sb["units"]).most_common(1)
+        lvl = key_level(b["key"])
         round_subjects.append({"subject_key": b["key"], "subject_name": b["name"],
                                "subject_group": b["group"],
-                               "units": int(lvl.group(1)) if lvl else (units[0][0] if units else None),
+                               "units": lvl or (units[0][0] if units else None),
                                "sort": i})
     if not compass:
         # אין מצפן: המשקל של כל שאלון נגזר מ-T1 עצמו — לכל ציון מצורף

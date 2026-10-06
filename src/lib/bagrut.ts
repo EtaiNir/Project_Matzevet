@@ -380,14 +380,15 @@ export async function saveTracking(
 // רשומה ב-bagrut_uploads בסטטוס pending, והסוכן לוקח משם. המבנה קבוע —
 // אין מיפוי ואין אישור. ראה מיגרציה 027.
 
-export type BagrutRole = 'details' | 't1_11' | 't1_12' | 't1_13' | 't2' | 'compass' | 'accdb'
+export type BagrutRole = 'details' | 't1_11' | 't1_12' | 't1_13' | 't1' | 't2' | 'compass' | 'accdb'
 
 export const BAGRUT_ROLE_LABELS: Record<BagrutRole, string> = {
   details: 'פרטי תלמידים (זכאות 1)',
   t1_11: 'T1 — מקצועות המלל (זכאות 11)',
   t1_12: 'T1 — אנגלית ומתמטיקה (זכאות 12)',
   t1_13: 'T1 — מקצועות הרחבה (זכאות 13)',
-  t2: 'T2 — ניתוח זכאות (זכאות 14)',
+  t1: 'T1 — קובץ מאוחד, כל המקצועות',
+  t2: 'T2 — ניתוח זכאות',
   compass: 'המצפן — מפת השאלונים',
   accdb: 'קובץ אקסס (במקום ייצוא האקסל)',
 }
@@ -403,6 +404,9 @@ export function detectBagrutRole(name: string): BagrutRole | null {
   if (/^זכאות 12/.test(n)) return 't1_12'
   if (/^זכאות 13/.test(n)) return 't1_13'
   if (/^זכאות 14/.test(n)) return 't2'
+  // המבנה המאוחד: "אגיאל_T1_נתוני_זכאות….xlsx", "אגיאל_T2_ניתוח_זכאות….xlsx"
+  if (/(^|[^A-Za-z0-9])T1([^0-9]|$)/.test(n)) return 't1'
+  if (/(^|[^A-Za-z0-9])T2([^0-9]|$)/.test(n)) return 't2'
   if (/שאלונים|מצפן/.test(n)) return 'compass'
   return null
 }
@@ -410,7 +414,11 @@ export function detectBagrutRole(name: string): BagrutRole | null {
 /** מה חסר כדי שהסבב יהיה שלם. ריק = אפשר להעלות. */
 export function missingBagrutRoles(roles: BagrutRole[]): BagrutRole[] {
   const has = (r: BagrutRole) => roles.includes(r)
-  const need: BagrutRole[] = has('accdb') ? ['compass'] : ['details', 't1_11', 't1_12', 't1_13', 't2', 'compass']
+  const need: BagrutRole[] = has('accdb')
+    ? ['compass']
+    : has('t1')
+      ? ['t1', 't2', 'compass']
+      : ['details', 't1_11', 't1_12', 't1_13', 't2', 'compass']
   return need.filter((r) => !has(r))
 }
 

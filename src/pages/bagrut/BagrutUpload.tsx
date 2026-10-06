@@ -74,7 +74,7 @@ export default function BagrutUpload() {
   const roles = picked.map((p) => p.role).filter(Boolean) as BagrutRole[]
   const missing = useMemo(() => missingBagrutRoles(roles), [roles])
   const unknown = picked.filter((p) => !p.role)
-  const dupes = (['details', 't1_11', 't1_12', 't2', 'compass', 'accdb'] as BagrutRole[]).filter(
+  const dupes = (['details', 't1_11', 't1_12', 't1', 't2', 'compass', 'accdb'] as BagrutRole[]).filter(
     (r) => roles.filter((x) => x === r).length > 1,
   )
   const ready = picked.length > 0 && !missing.length && !unknown.length && !dupes.length && /^\d+$/.test(school) && year.trim()
@@ -128,7 +128,7 @@ export default function BagrutUpload() {
             שנה
             <input value={year} onChange={(e) => setYear(e.target.value)} placeholder='תשפ"ו' className={`${input} mt-1 block w-28`} />
           </label>
-          <p className="mb-2 text-xs text-slate-400">הסוכן משווה את סמל המוסד לסמל שבקובץ פרטי התלמידים, ועוצר אם אינם תואמים.</p>
+          <p className="mb-2 text-xs text-slate-400">הסוכן משווה את סמל המוסד לסמל שבקובץ פרטי התלמידים, ועוצר אם אינם תואמים. בקובץ T1 מאוחד אין סמל מוסד — לוודא כאן.</p>
         </div>
       </Card>
 
@@ -136,7 +136,7 @@ export default function BagrutUpload() {
       <Card title="2 · הקבצים">
         <label className="flex cursor-pointer flex-col items-center gap-1 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center transition hover:border-sky-400 hover:bg-sky-50">
           <span className="text-sm font-bold text-slate-700">בחירת קבצים</span>
-          <span className="text-xs text-slate-500">ייצוא האקסל של טבלאות האקסס (זכאות 1, 11, 12, 13, 14) והמצפן — או קובץ האקסס והמצפן</span>
+          <span className="text-xs text-slate-500">קובץ T1, קובץ T2 והמצפן — או ייצוא האקסל של טבלאות האקסס (זכאות 1, 11, 12, 13, 14) והמצפן, או קובץ האקסס והמצפן</span>
           <input
             type="file"
             multiple
