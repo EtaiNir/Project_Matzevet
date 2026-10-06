@@ -27,6 +27,8 @@ export interface UserProfile {
   can_edit_extra?: boolean
   /** תפקיד במודול זכאות לבגרות (מיגרציות 026, 030). null = אין גישה למודול */
   bagrut_role?: 'council' | 'coordinator' | 'grade_coordinator' | 'subject_coordinator' | 'homeroom' | null
+  /** רכז מקצוע: המקצועות שלו (subject_key של הסבב) — מיקוד במסכים, לא הגבלת גישה (מיגרציה 030) */
+  bagrut_subject_keys?: string[]
 }
 
 const BASE_COLUMNS = 'id, email, display_name, role, authority_codes'
@@ -36,7 +38,7 @@ const BASE_COLUMNS = 'id, email, display_name, role, authority_codes'
  * כך האתר עובד לפני ההרצה, ומציג את השדות מיד אחריה בלי פריסה מחדש.
  */
 const EXTENDED_COLUMNS =
-  `${BASE_COLUMNS}, job_title, institution_name, institution_code, can_edit_extra, bagrut_role`
+  `${BASE_COLUMNS}, job_title, institution_name, institution_code, can_edit_extra, bagrut_role, bagrut_subject_keys`
 
 interface AuthContextValue {
   session: Session | null

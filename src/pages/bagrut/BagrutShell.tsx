@@ -320,6 +320,12 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
     return m
   }, [index])
 
+  const { profile } = useAuth()
+  const mySubjects = useMemo(() => {
+    const keys = profile?.bagrut_role === 'subject_coordinator' ? profile.bagrut_subject_keys ?? [] : []
+    return data.subjects.filter((s) => keys.includes(s.subject_key))
+  }, [profile, data.subjects])
+
   const link = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition ${
       isActive ? 'bg-sky-100 font-bold text-sky-900' : 'text-slate-700 hover:bg-slate-100'
@@ -361,6 +367,19 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
           )
         })}
       </div>
+
+      {/* רכז מקצוע: המקצועות שלו בראש — מיקוד, לא הגבלה (הוא רואה את כל בית הספר) */}
+      {mySubjects.length > 0 && (
+        <div className="rounded-xl bg-sky-50/60 py-1.5">
+          <div className="px-3 pb-1 text-xs font-bold text-sky-700">המקצועות שלי</div>
+          {mySubjects.map((s) => (
+            <NavLink key={s.subject_key} to={`${base}/subject/${s.subject_key}`} className={link}>
+              <span className="truncate">{s.subject_name}</span>
+              {count(takers.get(s.subject_key) ?? 0)}
+            </NavLink>
+          ))}
+        </div>
+      )}
 
       {SUBJECT_GROUPS.map((g) => {
         const subs = data.subjects.filter((s) => s.subject_group === g && takers.get(s.subject_key))
