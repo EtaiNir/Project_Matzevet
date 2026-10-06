@@ -74,7 +74,7 @@ const BAGRUT_ROLE_LABELS: Record<string, string> = {
   council: 'צפייה מועצתית',
   coordinator: 'רכז/ת בגרויות',
   grade_coordinator: 'רכז/ת שכבה',
-  track_coordinator: 'רכז/ת מגמה',
+  subject_coordinator: 'רכז/ת מקצוע',
   homeroom: 'מחנך/ת',
 }
 

@@ -25,8 +25,8 @@ export interface UserProfile {
   institution_code?: string | null
   /** רשאי למלא ערכים בעמודות שהמשתמש הוסיף (מיגרציה 016) */
   can_edit_extra?: boolean
-  /** תפקיד במודול זכאות לבגרות (מיגרציה 026). null = אין גישה למודול */
-  bagrut_role?: 'council' | 'coordinator' | 'grade_coordinator' | 'track_coordinator' | 'homeroom' | null
+  /** תפקיד במודול זכאות לבגרות (מיגרציות 026, 030). null = אין גישה למודול */
+  bagrut_role?: 'council' | 'coordinator' | 'grade_coordinator' | 'subject_coordinator' | 'homeroom' | null
 }
 
 const BASE_COLUMNS = 'id, email, display_name, role, authority_codes'
