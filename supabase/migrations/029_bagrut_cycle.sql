@@ -21,9 +21,8 @@
 -- את התלמיד, כתיבה ב-may_edit_bagrut_student (צוות בית הספר בהיקף שלו, כולל
 -- רכז מקצוע; לא המועצה).
 --
--- ⚠️ may_edit_bagrut_student ותפקיד subject_coordinator קיימים במסד אבל
--- **המיגרציה שיצרה אותם אינה בריפו** (נמצא 7.10). 026 בריפו עדיין מגדיר את
--- may_edit_bagrut_tracking הישנה — הרצה חוזרת של 026 תחזיר את המסד אחורה.
+-- ⚠️ may_edit_bagrut_student ותפקיד subject_coordinator הוחלו על המסד בלי
+-- מיגרציה בריפו (נמצא 7.10). הם שוחזרו מהמסד החי ל-027b, שרצה לפני 029.
 
 -- ── מעקב: מעקב הבא + גורמים שאינם בציונים
 alter table public.bagrut_tracking
