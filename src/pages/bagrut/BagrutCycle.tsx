@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { useBagrut } from './context'
 import {
   ACTION_OWNERS,
   ACTION_TYPES,
-  BLOCKER_LABELS,
   CYCLE_FACTORS,
   LOG_KIND_LABELS,
   TRACKING_FLAGS,
@@ -12,28 +11,36 @@ import {
   deleteAction,
   deleteLogEntry,
   eligibilityKind,
+  fetchLatestAi,
   fetchStudentCycle,
+  requestAi,
   saveTracking,
   updateAction,
   type ActionCounts,
+  type AiAnalysis,
+  type AiPicture,
+  type AiPlan,
+  type AiPlanAction,
   type BagrutAction,
   type BagrutLogEntry,
   type LogKind,
   type TrackingFlag,
 } from '@/lib/bagrut'
-import { buildSuggestions, fmtDate, relDays, studentPicture, todayIso, type Suggestion } from '@/lib/bagrutCycle'
+import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
 
 /**
  * לשונית המעקב כמחזור התערבות — מצב → תוכנית → מעקב
- * (docs/bagrut-intervention-design.md, שלב 1).
+ * (docs/bagrut-intervention-design.md).
  *
- * ⚠️ זכאות נקבעת רק לפי T2 (decisions/014 §8). הסטטוס והחסמים כאן הם של
- * T2; ההצעות לתוכנית הן פריטי ההתערבות המומלצת של T2; הקוד מוסיף רק חשבון
- * ציונים (איזה ציון צריך כדי לסיים מקצוע ב-55).
+ * "מצב התלמיד" ו"תוכנית התערבות" מיוצרים ע"י AI — בכפתור, רק לתלמיד שהמורה
+ * בוחר (Edge Function bagrut-ai, מיגרציה 031). ⚠️ זכאות נקבעת רק לפי T2
+ * (decisions/014 §8): הניתוח מנסח ומתכנן, ואינו קובע זכאות.
  *
  * למורה בלבד — לתלמידים אין גישה למערכת.
  */
+
+type AiState = { picture: AiAnalysis<AiPicture> | null; plan: AiAnalysis<AiPlan> | null }
 
 type Inner = 'plan' | 'log' | 'prep'
 
@@ -51,18 +58,21 @@ export default function CycleTab({ sid }: { sid: string }) {
   const [inner, setInner] = useState<Inner>('plan')
   const [actions, setActions] = useState<BagrutAction[] | null>(null)
   const [log, setLog] = useState<BagrutLogEntry[] | null>(null)
+  const [ai, setAi] = useState<AiState | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
     setActions(null)
     setLog(null)
+    setAi(null)
     setError(null)
-    fetchStudentCycle(round, sid)
-      .then((r) => {
+    Promise.all([fetchStudentCycle(round, sid), fetchLatestAi(round, sid)])
+      .then(([r, a]) => {
         if (!alive) return
         setActions(r.actions)
         setLog(r.log)
+        setAi(a)
       })
       .catch((e: Error) => alive && setError(e.message))
     return () => {
@@ -77,7 +87,7 @@ export default function CycleTab({ sid }: { sid: string }) {
   }, [sid, applyActionCounts])
 
   if (error) return <Card><p className="text-sm text-rose-700">{error}</p></Card>
-  if (!actions || !log) return <Card><p className="text-sm text-slate-400">טוען את המעקב…</p></Card>
+  if (!actions || !log || !ai) return <Card><p className="text-sm text-slate-400">טוען את המעקב…</p></Card>
 
   const tabs: [Inner, string][] = [['plan', 'מצב ותוכנית'], ['log', `יומן מעקב${log.length ? ` (${log.length})` : ''}`], ['prep', '🗒 הכנה לשיחה']]
 
@@ -97,7 +107,7 @@ export default function CycleTab({ sid }: { sid: string }) {
           </button>
         ))}
       </div>
-      {inner === 'plan' && <PlanView sid={sid} actions={actions} onActions={changeActions} />}
+      {inner === 'plan' && <PlanView sid={sid} actions={actions} onActions={changeActions} ai={ai} onAi={setAi} />}
       {inner === 'log' && <LogView sid={sid} log={log} onLog={setLog} />}
       {inner === 'prep' && <PrepView />}
     </div>
@@ -165,74 +175,122 @@ function Stat({ label, value, warn = false }: { label: string; value: ReactNode;
 
 // ─────────────────────────────── מצב ותוכנית ───────────────────────────────
 
-function PlanView({ sid, actions, onActions }: { sid: string; actions: BagrutAction[]; onActions: (a: BagrutAction[]) => void }) {
+function PlanView({ sid, actions, onActions, ai, onAi }: {
+  sid: string
+  actions: BagrutAction[]
+  onActions: (a: BagrutAction[]) => void
+  ai: AiState
+  onAi: (a: AiState) => void
+}) {
   const { index } = useBagrut()
   const s = index.studentById.get(sid)!
-  const suggestions = useMemo(() => buildSuggestions(s, index), [s, index])
-  const picture = useMemo(() => studentPicture(s, index, suggestions), [s, index, suggestions])
 
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 lg:grid-cols-5">
-        <Card title="מצב התלמיד" className="lg:col-span-3">
-          <p className="text-base font-bold leading-snug text-slate-800">{picture.sentence}</p>
-
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Question n={2} title="מה מפריד אותו מזכאות" empty={picture.graduating ? 'לא אותרו חסמים בניתוח הזכאות' : 'אין ניתוח זכאות לשכבה הזו'}>
-              {picture.blockers.map((b, i) => (
-                <li key={i}>
-                  <strong className="font-semibold">{BLOCKER_LABELS[b.kind]}</strong>
-                  {b.kind === 'missing_required' && b.subjects ? `: ${b.subjects.join(', ')}` : b.kind !== 'other' && b.text !== BLOCKER_LABELS[b.kind] ? ` — ${b.text}` : b.kind === 'other' ? ` — ${b.text}` : ''}
-                </li>
-              ))}
-              {picture.failing.map((f) => (
-                <li key={f.name}>{f.name}: <strong className="text-rose-700">{f.final}</strong> <span className="text-slate-500">— {f.gap} נקודות מ-55</span></li>
-              ))}
-            </Question>
-
-            <Question n={3} title="מה הכי קרוב לתיקון" empty="אין כרגע פעולה עם חשבון ציון">
-              {picture.closest.map((c) => (
-                <li key={c.key}>
-                  <strong className="font-semibold">{c.title}</strong>
-                  {c.detail && <div className="text-xs text-slate-500">{c.detail}</div>}
-                </li>
-              ))}
-            </Question>
-
-            <Question n={4} title="מה בסכנה" empty="אין מקצוע בתהליך שהממוצע בו מתחת ל-55">
-              {picture.atRisk.map((r) => (
-                <li key={r.name}>{r.name}: ממוצע <strong className="text-rose-700">{r.average}</strong> <span className="text-slate-500">ב-{r.done}% שבוצעו</span></li>
-              ))}
-            </Question>
-
-            <Question n={5} title="על מה אפשר לבנות" empty="עוד אין מקצוע שהושלם בציון 80 ומעלה">
-              {picture.strengths.map((x) => (
-                <li key={x.name}>{x.name}: <strong className="text-emerald-700">{x.final}</strong></li>
-              ))}
-            </Question>
-          </div>
-          <p className="mt-4 text-[11px] text-slate-400">
-            הסטטוס והחסמים — מניתוח הזכאות. החשבון (נקודות חסרות, ציון נדרש) — מציוני השאלונים ומשקלי המצפן. פירוט מלא בלשוניות "מקצועות" ו"כל השאלונים".
-          </p>
-        </Card>
-
+        <PictureCard sid={sid} analysis={ai.picture} onNew={(a) => onAi({ ...ai, picture: a })} className="lg:col-span-3" />
         <StaffCard sid={sid} className="lg:col-span-2" />
       </div>
-
-      <PlanCard sid={sid} suggestions={suggestions} actions={actions} onActions={onActions} intervention={s.intervention} />
+      <PlanCard sid={sid} actions={actions} onActions={onActions} intervention={s.intervention}
+        plan={ai.plan} onNewPlan={(a) => onAi({ ...ai, plan: a })} />
     </div>
   )
 }
 
-function Question({ n, title, empty, children }: { n: number; title: string; empty: string; children: ReactNode }) {
-  const items = (Array.isArray(children) ? children.flat() : [children]).filter(Boolean)
+/** כפתור "יצירת ניתוח" — קורא ל-AI רק כשהמורה לוחץ. לוקח עד דקה. */
+function useAiRequest<T extends AiPicture | AiPlan>(sid: string, kind: 'picture' | 'plan', onNew: (a: AiAnalysis<T>) => void) {
+  const { round } = useBagrut()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const run = async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      onNew(await requestAi<T>(round, sid, kind))
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return { busy, err, run }
+}
+
+function AiButton({ has, busy, onClick }: { has: boolean; busy: boolean; onClick: () => void }) {
+  const { canEditTracking } = useBagrut()
+  if (!canEditTracking) return null
+  return (
+    <button
+      disabled={busy}
+      onClick={onClick}
+      className={`flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-bold transition disabled:opacity-60 ${
+        has ? 'border border-violet-300 text-violet-700 hover:bg-violet-50' : 'bg-violet-600 text-white shadow-sm hover:bg-violet-700'
+      }`}
+    >
+      {busy && <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+      {busy ? 'ה-AI מנתח… (עד דקה)' : has ? '↻ ניתוח מחדש' : '✨ יצירת ניתוח'}
+    </button>
+  )
+}
+
+/** "נוצר ב-…" — ואזהרה אם הניתוח נוצר על סבב קודם */
+function AiMeta({ analysis }: { analysis: AiAnalysis }) {
+  const { round } = useBagrut()
+  const stale = analysis.round_id && analysis.round_id !== round.id
+  return (
+    <p className="mt-4 text-[11px] text-slate-400">
+      ניתוח AI · {new Date(analysis.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })} — לבדיקת המורה. הזכאות עצמה — רק לפי ניתוח הזכאות.
+      {stale && <span className="mr-1 rounded bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-800">נוצר על סבב קודם — כדאי לנתח מחדש</span>}
+    </p>
+  )
+}
+
+function PictureCard({ sid, analysis, onNew, className = '' }: {
+  sid: string
+  analysis: AiAnalysis<AiPicture> | null
+  onNew: (a: AiAnalysis<AiPicture>) => void
+  className?: string
+}) {
+  const { busy, err, run } = useAiRequest<AiPicture>(sid, 'picture', onNew)
+  const p = analysis?.content
+  return (
+    <Card title="מצב התלמיד" className={className} action={<AiButton has={Boolean(analysis)} busy={busy} onClick={run} />}>
+      {err && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{err}</div>}
+      {!p ? (
+        <p className="text-sm leading-relaxed text-slate-500">
+          עוד לא נוצר ניתוח לתלמיד הזה. "יצירת ניתוח" שולח ל-AI את הציונים, ניתוח הזכאות ומה שהצוות כתב — בלי שם ובלי ת"ז —
+          ומחזיר תמונת מצב למורה: מה מפריד מזכאות, מה הכי קרוב לתיקון, ועל מה לבנות בשיחה.
+        </p>
+      ) : (
+        <>
+          {p.headline && <p className="text-base font-bold leading-snug text-slate-800">{p.headline}</p>}
+          {p.story && <p className="mt-2 text-sm leading-relaxed text-slate-700">{p.story}</p>}
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Points title="מה מפריד אותו מזכאות" items={p.gaps} />
+            <Points title="מה הכי קרוב לתיקון" items={p.closest} />
+            <Points title="מה בסכנה" items={p.risks} />
+            <Points title="על מה אפשר לבנות" items={p.strengths} />
+          </div>
+          {p.conversation_tips.length > 0 && (
+            <div className="mt-4 rounded-xl bg-violet-50/60 px-4 py-3">
+              <Points title="לשיחה עם התלמיד" items={p.conversation_tips} />
+            </div>
+          )}
+          <AiMeta analysis={analysis!} />
+        </>
+      )}
+    </Card>
+  )
+}
+
+function Points({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null
   return (
     <div>
-      <div className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-slate-500">
-        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-[10px] text-slate-500">{n}</span>
-        {title}
-      </div>
-      {items.length ? <ul className="flex flex-col gap-1.5 text-sm text-slate-700">{children}</ul> : <p className="text-sm text-slate-400">{empty}</p>}
+      <div className="mb-1.5 text-xs font-bold text-slate-500">{title}</div>
+      <ul className="flex flex-col gap-1.5 text-sm text-slate-700">
+        {items.map((x, i) => <li key={i} className="flex gap-2"><span className="text-slate-300">•</span><span>{x}</span></li>)}
+      </ul>
     </div>
   )
 }
@@ -241,17 +299,17 @@ function Question({ n, title, empty, children }: { n: number; title: string; emp
 function StaffCard({ sid, className = '' }: { sid: string; className?: string }) {
   const { data, round, canEditTracking, applyTracking } = useBagrut()
   const t = data.tracking.get(sid)
-  const [short, setShort] = useState(t?.note_short ?? '')
+  // "הערה קצרה" הוסרה מהמסך (אייל, 7.10). העמודה note_short נשארת במסד — לא
+  // מוחקים ערכים שכבר נכתבו (או יובאו מאקסס).
   const [long, setLong] = useState(t?.note_long ?? '')
   const [factorsNote, setFactorsNote] = useState(t?.factors_note ?? '')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
-    setShort(t?.note_short ?? '')
     setLong(t?.note_long ?? '')
     setFactorsNote(t?.factors_note ?? '')
-  }, [sid, t?.note_short, t?.note_long, t?.factors_note])
+  }, [sid, t?.note_long, t?.factors_note])
 
   const save = async (patch: Parameters<typeof saveTracking>[2]) => {
     setBusy(true)
@@ -267,7 +325,7 @@ function StaffCard({ sid, className = '' }: { sid: string; className?: string })
   }
 
   const factors = t?.factors ?? []
-  const dirty = short !== (t?.note_short ?? '') || long !== (t?.note_long ?? '') || factorsNote !== (t?.factors_note ?? '')
+  const dirty = long !== (t?.note_long ?? '') || factorsNote !== (t?.factors_note ?? '')
 
   return (
     <Card title="מה הצוות יודע" className={className} action={t?.updated_at && <span className="text-xs text-slate-400">עודכן {new Date(t.updated_at).toLocaleDateString('he-IL')}</span>}>
@@ -309,13 +367,9 @@ function StaffCard({ sid, className = '' }: { sid: string; className?: string })
           )
         })}
       </div>
-      <input value={factorsNote} disabled={!canEditTracking} onChange={(e) => setFactorsNote(e.target.value)} placeholder="פירוט (לא נשלח לשום מקום מחוץ למערכת)" className={`${input} mt-2`} />
+      <input value={factorsNote} disabled={!canEditTracking} onChange={(e) => setFactorsNote(e.target.value)} placeholder="פירוט (נכלל בניתוח ה-AI — בלי שם ובלי ת״ז)" className={`${input} mt-2`} />
 
       <label className="mt-4 block text-xs font-bold text-slate-500">
-        הערה קצרה
-        <input value={short} disabled={!canEditTracking} onChange={(e) => setShort(e.target.value)} className={`${input} mt-1`} />
-      </label>
-      <label className="mt-3 block text-xs font-bold text-slate-500">
         הערות כלליות לתלמיד
         <textarea value={long} disabled={!canEditTracking} onChange={(e) => setLong(e.target.value)} rows={3} className={`${input} mt-1`} />
       </label>
@@ -323,7 +377,7 @@ function StaffCard({ sid, className = '' }: { sid: string; className?: string })
         {canEditTracking && (
           <button
             disabled={!dirty || busy}
-            onClick={() => save({ note_short: short.trim() || null, note_long: long.trim() || null, factors_note: factorsNote.trim() || null })}
+            onClick={() => save({ note_long: long.trim() || null, factors_note: factorsNote.trim() || null })}
             className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-bold text-white shadow-sm hover:bg-sky-700 disabled:opacity-40"
           >
             {busy ? 'שומר…' : 'שמירה'}
@@ -336,21 +390,27 @@ function StaffCard({ sid, className = '' }: { sid: string; className?: string })
 }
 
 // ── תוכנית ההתערבות
-function PlanCard({ sid, suggestions, actions, onActions, intervention }: {
+/** מפתח קבוע להצעת AI — כדי שהצעה שאושרה או נדחתה לא תוצע שוב */
+const aiKey = (a: AiPlanAction) => `ai:${a.title.replace(/\s+/g, ' ').trim()}`
+
+function PlanCard({ sid, actions, onActions, intervention, plan, onNewPlan }: {
   sid: string
-  suggestions: Suggestion[]
   actions: BagrutAction[]
   onActions: (a: BagrutAction[]) => void
   intervention: string | null
+  plan: AiAnalysis<AiPlan> | null
+  onNewPlan: (a: AiAnalysis<AiPlan>) => void
 }) {
-  const { round, canEditTracking } = useBagrut()
+  const { round, data, canEditTracking } = useBagrut()
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [showClosed, setShowClosed] = useState(false)
+  const ai = useAiRequest<AiPlan>(sid, 'plan', onNewPlan)
 
   const taken = new Set(actions.map((a) => a.suggest_key).filter(Boolean))
-  const open = suggestions.filter((s) => !taken.has(s.key))
+  const open = (plan?.content.actions ?? []).filter((s) => !taken.has(aiKey(s)))
+  const subjectKeyOf = (name: string | null) => (name ? data.subjects.find((x) => x.subject_name === name)?.subject_key ?? null : null)
   const active = actions.filter((a) => a.status === 'active')
   const done = actions.filter((a) => a.status === 'done')
   const dismissed = actions.filter((a) => a.status === 'dismissed')
@@ -367,10 +427,12 @@ function PlanCard({ sid, suggestions, actions, onActions, intervention }: {
     }
   }
 
-  const fromSuggestion = (s: Suggestion, status: 'active' | 'dismissed') =>
-    run(s.key, async () => [...actions, await createAction(round, sid, {
-      suggest_key: s.key, title: s.title, detail: s.detail, action_type: s.action_type,
-      subject_key: s.subject_key, questionnaire_code: s.questionnaire_code, required_grade: s.required_grade, status,
+  const fromSuggestion = (s: AiPlanAction, status: 'active' | 'dismissed') =>
+    run(aiKey(s), async () => [...actions, await createAction(round, sid, {
+      suggest_key: aiKey(s), title: s.title,
+      detail: [s.why && `מטפל ב: ${s.why}`, s.how].filter(Boolean).join('\n') || null,
+      action_type: s.action_type, subject_key: subjectKeyOf(s.subject), questionnaire_code: s.questionnaire_code,
+      required_grade: s.required_grade, owner: s.owner || null, status,
     })])
 
   const patch = (a: BagrutAction, p: Partial<BagrutAction>) =>
@@ -386,9 +448,14 @@ function PlanCard({ sid, suggestions, actions, onActions, intervention }: {
     })
 
   return (
-    <Card title="תוכנית התערבות" action={canEditTracking && !adding && (
-      <button onClick={() => setAdding(true)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">+ פעולה ידנית</button>
-    )}>
+    <Card title="תוכנית התערבות" action={
+      <div className="flex items-center gap-2">
+        {canEditTracking && !adding && (
+          <button onClick={() => setAdding(true)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50">+ פעולה ידנית</button>
+        )}
+        <AiButton has={Boolean(plan)} busy={ai.busy} onClick={ai.run} />
+      </div>
+    }>
       {intervention && (
         <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5">
           <div className="text-xs font-bold text-sky-700">ההתערבות המומלצת בניתוח הזכאות</div>
@@ -396,7 +463,14 @@ function PlanCard({ sid, suggestions, actions, onActions, intervention }: {
         </div>
       )}
 
-      {err && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{err}</div>}
+      {(err || ai.err) && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{err || ai.err}</div>}
+      {!plan && (
+        <p className="mb-3 text-sm text-slate-500">
+          "יצירת ניתוח" בונה מה-AI תוכנית מדורגת לתלמיד הזה — מתוך ההתערבות המומלצת והחסמים בניתוח הזכאות, הציונים ומה שהצוות כתב.
+          כל פעולה מגיעה כהצעה, והמורה מחליט מה נכנס לתוכנית.
+        </p>
+      )}
+      {plan?.content.note && <p className="mb-3 rounded-lg bg-violet-50/60 px-3 py-2 text-sm text-violet-950">{plan.content.note}</p>}
       {/* הצעות לשדות "אחראי" ו"עד מתי" — פעם אחת לכרטיס, לא בכל שורה */}
       <datalist id="bagrut-owners">{ACTION_OWNERS.map((o) => <option key={o} value={o} />)}</datalist>
       <datalist id="bagrut-sessions">{SESSIONS.map((o) => <option key={o} value={o} />)}</datalist>
@@ -404,19 +478,25 @@ function PlanCard({ sid, suggestions, actions, onActions, intervention }: {
       {adding && <ManualAction sid={sid} onCancel={() => setAdding(false)} onSaved={(a) => { onActions([...actions, a]); setAdding(false) }} />}
 
       {open.length > 0 && (
-        <Section title={`הצעות מתוך ניתוח הזכאות (${open.length})`} hint="כל הצעה היא פריט מההתערבות המומלצת. אישור מכניס אותה לתוכנית.">
-          {open.map((s) => (
-            <div key={s.key} className="flex flex-wrap items-start gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-3">
+        <Section title={`הצעות ה-AI (${open.length})`} hint="לפי סדר העדיפות. אישור מכניס פעולה לתוכנית.">
+          {open.map((s, i) => (
+            <div key={aiKey(s)} className="flex flex-wrap items-start gap-3 rounded-xl border border-dashed border-violet-300 bg-violet-50/30 p-3">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[11px] font-bold text-violet-700">{i + 1}</span>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold text-slate-800">{s.title}</div>
-                {s.detail && <div className="mt-0.5 text-xs text-slate-600">{s.detail}</div>}
-                {s.source !== s.title && <div className="mt-1 text-[11px] text-slate-400">מתוך: {s.source}</div>}
+                {s.why && <div className="mt-0.5 text-xs text-slate-500">מטפל ב: {s.why}</div>}
+                {s.how && <div className="mt-1 text-xs leading-relaxed text-slate-700">{s.how}</div>}
+                <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] text-slate-500">
+                  {s.action_type && <span className="rounded bg-white px-1.5 py-0.5 ring-1 ring-slate-200">{s.action_type}</span>}
+                  {s.subject && <span className="rounded bg-white px-1.5 py-0.5 ring-1 ring-slate-200">{s.subject}{s.questionnaire_code ? ` · ${s.questionnaire_code}` : ''}</span>}
+                  {s.owner && <span className="rounded bg-white px-1.5 py-0.5 ring-1 ring-slate-200">{s.owner}</span>}
+                </div>
               </div>
               {s.required_grade != null && <RequiredBadge n={s.required_grade} />}
               {canEditTracking && (
                 <div className="flex shrink-0 gap-1.5">
-                  <button disabled={busy === s.key} onClick={() => fromSuggestion(s, 'active')} className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-bold text-white hover:bg-sky-700 disabled:opacity-40">✓ לתוכנית</button>
-                  <button disabled={busy === s.key} onClick={() => fromSuggestion(s, 'dismissed')} className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-40">לא רלוונטי</button>
+                  <button disabled={busy === aiKey(s)} onClick={() => fromSuggestion(s, 'active')} className="rounded-lg bg-sky-600 px-3 py-1 text-xs font-bold text-white hover:bg-sky-700 disabled:opacity-40">✓ לתוכנית</button>
+                  <button disabled={busy === aiKey(s)} onClick={() => fromSuggestion(s, 'dismissed')} className="rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-40">לא רלוונטי</button>
                 </div>
               )}
             </div>
@@ -448,6 +528,7 @@ function PlanCard({ sid, suggestions, actions, onActions, intervention }: {
           ))}
         </div>
       )}
+      {plan && <AiMeta analysis={plan} />}
     </Card>
   )
 }

@@ -540,6 +540,78 @@ export async function deleteLogEntry(id: string): Promise<void> {
   if (!data?.length) throw new Error('מחיקת הרשומה נחסמה — אין לך הרשאה')
 }
 
+// ─────────────────────────────── ניתוח AI ───────────────────────────────
+//
+// "מצב התלמיד" ו"תוכנית התערבות" — מיוצרים ב-Edge Function bagrut-ai רק כשהמורה
+// לוחץ (מיגרציה 031). הפונקציה קוראת בהרשאות של המורה, שולחת בלי שם ובלי ת"ז,
+// מצמידה את הציון הנדרש מהקוד, ומסננת טענות על זכאות (014 §8).
+
+export interface AiPicture {
+  headline: string
+  story: string
+  gaps: string[]
+  closest: string[]
+  risks: string[]
+  strengths: string[]
+  conversation_tips: string[]
+}
+
+export interface AiPlanAction {
+  title: string
+  why: string
+  how: string
+  action_type: string
+  subject: string | null
+  questionnaire_code: number | null
+  required_grade: number | null
+  owner: string
+}
+
+export interface AiPlan {
+  actions: AiPlanAction[]
+  note: string
+}
+
+export interface AiAnalysis<T = AiPicture | AiPlan> {
+  id: string
+  kind: 'picture' | 'plan'
+  content: T
+  model: string | null
+  round_id: string | null
+  created_at: string
+}
+
+/** הניתוח האחרון מכל סוג לתלמיד (ישנים נשמרים כהיסטוריה) */
+export async function fetchLatestAi(round: BagrutRound, studentId: string): Promise<{ picture: AiAnalysis<AiPicture> | null; plan: AiAnalysis<AiPlan> | null }> {
+  const { data, error } = await supabase.from('bagrut_ai_analysis')
+    .select('id, kind, content, model, round_id, created_at')
+    .match(studentKey(round, studentId)).order('created_at', { ascending: false }).limit(20)
+  if (error) throw new Error(`טעינת ניתוחי ה-AI נכשלה: ${error.message}`)
+  const rows = (data ?? []) as AiAnalysis[]
+  return {
+    picture: (rows.find((r) => r.kind === 'picture') as AiAnalysis<AiPicture> | undefined) ?? null,
+    plan: (rows.find((r) => r.kind === 'plan') as AiAnalysis<AiPlan> | undefined) ?? null,
+  }
+}
+
+/** בקשת ניתוח חדש מה-AI. לוקח כ-20–60 שניות. מחזיר את מה שנשמר במסד. */
+export async function requestAi<T extends AiPicture | AiPlan>(round: BagrutRound, studentId: string, kind: 'picture' | 'plan'): Promise<AiAnalysis<T>> {
+  const { data, error } = await supabase.functions.invoke('bagrut-ai', {
+    body: { round_id: round.id, student_id: studentId, kind },
+  })
+  if (error) {
+    // שגיאה מהפונקציה מגיעה כתשובה עם { error } — מציגים את ההודעה שלה, לא "non-2xx"
+    let message = error.message
+    try {
+      const ctx = (error as { context?: Response }).context
+      const body = ctx ? await ctx.json() : null
+      if (body?.error) message = body.error
+    } catch { /* נשארים עם ההודעה הכללית */ }
+    throw new Error(message)
+  }
+  return data as AiAnalysis<T>
+}
+
 // ─────────────────────────────── קליטת סבב ───────────────────────────────
 //
 // בדפוס של העלאת המצב"ת (lib/admin.ts → uploadMoeFiles): קבצים לבאקט,

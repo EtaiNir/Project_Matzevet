@@ -221,8 +221,13 @@ export default function BagrutStudents() {
     ),
     {
       key: 'note', group: 'track', header: 'הערה', width: 200,
-      render: (s) => <span className="truncate text-xs text-slate-600">{data.tracking.get(s.student_id)?.note_short}</span>,
-      sortValue: (s) => data.tracking.get(s.student_id)?.note_short,
+      // "הערה קצרה" הוסרה מהכרטיס — כאן ההערות הכלליות (וקצרה ישנה, אם יש)
+      render: (s) => {
+        const t = data.tracking.get(s.student_id)
+        const note = t?.note_long || t?.note_short
+        return <span className="truncate text-xs text-slate-600" title={note ?? ''}>{note}</span>
+      },
+      sortValue: (s) => data.tracking.get(s.student_id)?.note_long || data.tracking.get(s.student_id)?.note_short,
     },
     {
       key: 'plan', group: 'track', header: 'תוכנית', exportHeader: 'תוכנית התערבות', width: 80, align: 'center',
