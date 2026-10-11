@@ -177,3 +177,48 @@ export function IconBadge(p: IconProps) {
     </Svg>
   )
 }
+
+/** לוח עם רשימת תלמידים — מצבת תלמידים */
+export function IconRoster(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="4.5" y="4.5" width="15" height="16" rx="2.2" />
+      <rect x="9" y="3" width="6" height="3" rx="1" />
+      <circle cx="9" cy="11" r="1.6" />
+      <circle cx="9" cy="16" r="1.6" />
+      <path d="M12.5 11h3.5M12.5 16h3.5" />
+    </Svg>
+  )
+}
+
+/** כובע סיום — זכאות לבגרות */
+export function IconGraduation(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M12 4.5 21.5 9 12 13.5 2.5 9z" />
+      <path d="M6.5 11.2v4c0 1.7 2.5 3.3 5.5 3.3s5.5-1.6 5.5-3.3v-4" />
+      <path d="M21.5 9v5.5" />
+    </Svg>
+  )
+}
+
+/** בניין ציבורי — רשויות וניהול לקוחות */
+export function IconLandmark(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.5 9 12 4l8.5 5z" />
+      <path d="M6 10v7M10 10v7M14 10v7M18 10v7" />
+      <path d="M4.5 17.5h15M3.5 20.5h17" />
+    </Svg>
+  )
+}
+
+/** בית — האזור האישי */
+export function IconHome(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3.5 11 12 4l8.5 7" />
+      <path d="M6 9.5V19a1 1 0 0 0 1 1h3.5v-5.5h3V20H17a1 1 0 0 0 1-1V9.5" />
+    </Svg>
+  )
+}

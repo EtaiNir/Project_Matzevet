@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { productAccess, useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
+import { IconGraduation, IconLandmark, IconLock, IconRoster } from '@/components/brand/Icons'
 import { supabase } from '@/lib/supabase'
 import { fetchAuthorities, ROLE_LABELS, BAGRUT_ROLE_LABELS, type Authority } from '@/lib/admin'
 
@@ -39,9 +40,28 @@ function ago(iso: string | null): string {
   return `עודכן ב-${new Date(iso).toLocaleDateString('he-IL')}`
 }
 
+/** מספר באותיות עבריות עם גרש/גרשיים — 30 → ל׳, 787 → תשפ״ז */
+function gematria(n: number): string {
+  const ones = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט']
+  const tens = ['', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ']
+  const hundreds = ['', 'ק', 'ר', 'ש', 'ת', 'תק', 'תר', 'תש', 'תת', 'תתק']
+  const rest = n % 100
+  // ט״ו וט״ז — לא כותבים את צירופי השם
+  const low = rest === 15 ? 'טו' : rest === 16 ? 'טז' : tens[Math.floor(rest / 10)] + ones[rest % 10]
+  const s = hundreds[Math.floor(n / 100)] + low
+  return s.length === 1 ? s + '׳' : s.slice(0, -1) + '״' + s.slice(-1)
+}
+
+/** התאריך העברי — ל׳ בתשרי תשפ״ז. הדפדפן נותן ספרות (30 בתשרי 5787) */
 function hebrewDate(d = new Date()): string {
   try {
-    return d.toLocaleDateString('he-IL-u-ca-hebrew', { day: 'numeric', month: 'long', year: 'numeric' })
+    const parts = new Intl.DateTimeFormat('he-IL-u-ca-hebrew', { day: 'numeric', month: 'long', year: 'numeric' }).formatToParts(d)
+    const get = (type: string) => parts.find((x) => x.type === type)?.value ?? ''
+    const day = Number(get('day'))
+    const year = Number(get('year'))
+    if (!day || !year) return ''
+    const month = get('month')
+    return `${gematria(day)} ${month.startsWith('ב') ? month : 'ב' + month} ${gematria(year % 1000)}`
   } catch {
     return ''
   }
@@ -186,7 +206,9 @@ export default function Home() {
 
           {none ? (
             <section className="mt-8 rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
-              <div className="text-4xl">🔒</div>
+              <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+                <IconLock className="h-7 w-7" />
+              </span>
               <h2 className="mt-3 text-xl font-bold text-slate-800">עדיין לא הוגדרה לך גישה</h2>
               <p className="mx-auto mt-2 max-w-md text-slate-600">
                 החשבון שלך פעיל, אבל עוד לא ניתנה לך גישה לאף מוצר. מנהל המערכת ברשות שלך יכול להעניק אותה.
@@ -198,7 +220,7 @@ export default function Home() {
               <h2 className="mb-3 mt-10 text-sm font-bold text-slate-500">המוצרים שלך</h2>
               <div className="grid gap-5 md:grid-cols-2">
                 {access.matzevet ? (
-                  <ProductCard icon="📋" title="מצבת תלמידים" tone="sky" delay={1}
+                  <ProductCard icon={<IconRoster />} title="מצבת תלמידים" tone="sky" delay={1}
                     description="נתוני התלמידים מהמצבת החודשית של משרד החינוך — סינון, כרטיס תלמיד וייצוא לאקסל."
                     loading={matzevet == null}
                     rows={(matzevet ?? []).map((m) => ({
@@ -207,11 +229,11 @@ export default function Home() {
                     }))}
                     empty="אין עדיין נתוני מצבת ברשויות שלך." />
                 ) : (
-                  <LockedCard icon="📋" title="מצבת תלמידים" />
+                  <LockedCard icon={<IconRoster />} title="מצבת תלמידים" />
                 )}
 
                 {access.bagrut ? (
-                  <ProductCard icon="🎓" title="זכאות לבגרות" tone="violet" delay={2}
+                  <ProductCard icon={<IconGraduation />} title="זכאות לבגרות" tone="violet" delay={2}
                     description="תמונת הזכאות של השכבה המסיימת, כרטיס תלמיד, מעקב ותוכנית התערבות."
                     loading={bagrut == null}
                     rows={(bagrut ?? []).map((b) => ({
@@ -221,11 +243,11 @@ export default function Home() {
                     }))}
                     empty="אין עדיין סבב בגרות ברשויות שלך." />
                 ) : (
-                  <LockedCard icon="🎓" title="זכאות לבגרות" />
+                  <LockedCard icon={<IconGraduation />} title="זכאות לבגרות" />
                 )}
 
                 {access.superAdmin && (
-                  <ProductCard icon="⚙️" title="ניהול לקוחות" tone="slate" delay={3}
+                  <ProductCard icon={<IconLandmark />} title="ניהול לקוחות" tone="slate" delay={3}
                     description="רשויות, משתמשים והרשאות, העלאת נתונים והיסטוריית עדכונים."
                     rows={[{
                       key: 'admin', to: '/admin', title: 'לכל הלקוחות',
@@ -279,13 +301,13 @@ function BannerArt() {
 }
 
 const TONES = {
-  sky: { ring: 'hover:border-sky-300 hover:shadow-sky-100', stripe: 'from-sky-400 to-sky-600', icon: 'bg-sky-100', link: 'text-sky-700' },
-  violet: { ring: 'hover:border-violet-300 hover:shadow-violet-100', stripe: 'from-violet-400 to-indigo-600', icon: 'bg-violet-100', link: 'text-violet-700' },
-  slate: { ring: 'hover:border-slate-300 hover:shadow-slate-200', stripe: 'from-slate-300 to-slate-500', icon: 'bg-slate-100', link: 'text-slate-700' },
+  sky: { ring: 'hover:border-sky-300 hover:shadow-sky-100', stripe: 'from-sky-400 to-sky-600', icon: 'from-sky-500 to-blue-600 shadow-sky-200', link: 'text-sky-700' },
+  violet: { ring: 'hover:border-violet-300 hover:shadow-violet-100', stripe: 'from-violet-400 to-indigo-600', icon: 'from-violet-500 to-indigo-600 shadow-violet-200', link: 'text-violet-700' },
+  slate: { ring: 'hover:border-slate-300 hover:shadow-slate-200', stripe: 'from-slate-300 to-slate-500', icon: 'from-slate-500 to-slate-700 shadow-slate-200', link: 'text-slate-700' },
 }
 
 function ProductCard({ icon, title, description, tone, rows, loading = false, empty, delay = 0 }: {
-  icon: string
+  icon: ReactNode
   title: string
   description: string
   tone: keyof typeof TONES
@@ -304,7 +326,7 @@ function ProductCard({ icon, title, description, tone, rows, loading = false, em
       <div className={`h-1.5 bg-gradient-to-l ${t.stripe}`} />
       <div className="flex flex-1 flex-col p-6">
         <div className="flex items-center gap-3">
-          <span className={`flex h-11 w-11 items-center justify-center rounded-2xl text-2xl ${t.icon}`}>{icon}</span>
+          <span className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-md ${t.icon}`}>{icon}</span>
           <h3 className="text-lg font-extrabold text-slate-800">{title}</h3>
         </div>
         <p className="mt-2 text-sm leading-relaxed text-slate-500">{description}</p>
@@ -332,14 +354,14 @@ function ProductCard({ icon, title, description, tone, rows, loading = false, em
 }
 
 /** מוצר שאין גישה אליו — כדי שידעו שהוא קיים ואיך מבקשים */
-function LockedCard({ icon, title }: { icon: string; title: string }): ReactNode {
+function LockedCard({ icon, title }: { icon: ReactNode; title: string }): ReactNode {
   return (
     <section className="flex flex-col rounded-3xl border border-dashed border-slate-300 bg-white/50 p-6 backdrop-blur motion-safe:animate-fade-up">
-      <div className="flex items-center gap-3 opacity-50">
-        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-200 text-2xl grayscale">{icon}</span>
-        <h3 className="text-lg font-extrabold text-slate-700">{title}</h3>
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">{icon}</span>
+        <h3 className="text-lg font-extrabold text-slate-400">{title}</h3>
       </div>
-      <p className="mt-2 text-sm text-slate-500">🔒 אין לך גישה למוצר הזה. לבקשת גישה — מנהל המערכת ברשות שלך.</p>
+      <p className="mt-2 text-sm text-slate-500">אין לך גישה למוצר הזה. לבקשת גישה — מנהל המערכת ברשות שלך.</p>
     </section>
   )
 }
