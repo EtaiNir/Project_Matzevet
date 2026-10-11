@@ -82,20 +82,36 @@ Register-ScheduledTask -TaskName "עדכון מצבת חודשי" -Action $actio
 
 # פריסת Edge Functions
 
+| פונקציה | מה | סוד נדרש |
+|---|---|---|
+| `admin-users` | יצירת משתמש, סיסמה, השהיה ומחיקה (`service_role`) | — (מוגדר אוטומטית) |
+| `bagrut-ai` | ניתוח AI לתלמיד בבגרות — מצב ותוכנית (מיגרציה 031) | `ANTHROPIC_API_KEY` |
+
 ה-CLI של Supabase **לא עובד ברשת הזו** — נטספארק מיירט את ה-TLS והוא נכשל ב-
 `TransportError`. הפריסה נעשית ישירות מול ה-Management API, ש-curl כן מצליח לפנות אליו.
+
+הטוקן והמפתח יושבים מקומית ב-`.env.deploy` (`SUPABASE_ACCESS_TOKEN`,
+`ANTHROPIC_API_KEY`) — בתיקייה הראשית, חסום ב-`.gitignore`.
 
 ```bash
 TOKEN=<supabase-access-token>   # https://supabase.com/dashboard/account/tokens
 REF=agcoeqshvkyopjjdvril
-SLUG=admin-users
+SLUG=admin-users                # או bagrut-ai
 
-# metadata.json:  {"entrypoint_path":"index.ts","name":"admin-users","verify_jwt":true}
+# metadata.json:  {"entrypoint_path":"index.ts","name":"<SLUG>","verify_jwt":true}
 
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   -F "metadata=@metadata.json;type=application/json" \
   -F "file=@supabase/functions/$SLUG/index.ts;type=application/typescript" \
   "https://api.supabase.com/v1/projects/$REF/functions/deploy?slug=$SLUG"
+```
+
+**סוד לפונקציה** (פעם אחת; לא נכנס לקוד ולא לגיט):
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '[{"name":"ANTHROPIC_API_KEY","value":"<key>"}]' \
+  "https://api.supabase.com/v1/projects/$REF/secrets"
 ```
 
 **שתי מלכודות שעלו בפריסה הראשונה:**

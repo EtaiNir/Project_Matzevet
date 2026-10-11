@@ -181,7 +181,7 @@
 - **`moe_uploads`**: קריאה לכל מי שמשויך לרשות; **כתיבה — `may_update_moe`
   בלבד** (מיגרציה 012).
 
-## מודול זכאות לבגרות (מיגרציה 026)
+## מודול זכאות לבגרות (מיגרציות 026–031)
 
 **טבלאות משותפות לכל הרשויות** — חריגה מכוונת מטבלה-לכל-רשות; הסיבה
 ב-[החלטה 014 §2](decisions/014-bagrut-module.md).
@@ -191,23 +191,37 @@
 | `bagrut_questionnaires` | שאלון באינדקס הארצי | אקסס, טבלה 3 | עדכון (upsert) |
 | `bagrut_rounds` | סבב: בית ספר × מועד × שנה | הקליטה | הסבב כולו נמחק ונטען (cascade) |
 | `bagrut_round_subjects` | מקצוע בסבב + קבוצה (חובה / אנגלית ומתמטיקה / מורחב / פנימי) | בלוקי T1 + מצפן | עם הסבב |
-| `bagrut_program` | מקצוע × שאלון × משקל — "המצפן" | אקסל, גיליון2 | עם הסבב |
+| `bagrut_program` | מקצוע × שאלון × משקל — "המצפן". `alt_group` מסמן שאלונים שקולים ("או/או"), שנספר אחד מהם בסכום (028) | אקסל, גיליון2 | עם הסבב |
 | `bagrut_students` | תלמיד בסבב + עמודות T2 (`in_t2`) | אקסס, טבלאות 1 ו-14 | עם הסבב |
 | `bagrut_grades` | תלמיד × שאלון: ציון, משקל, משוקלל | T1 — טבלאות 11–13 | עם הסבב |
 | `bagrut_subjects` | תלמיד × מקצוע: סופי, מצטבר, יח"ל, השלמה | T1 — טבלאות 11–13 | עם הסבב |
-| `bagrut_tracking` | תלמיד בבית ספר: 4 דגלים + הערות | הצוות, באתר | **לעולם לא** — בלי סבב, בלי מפתח זר |
+| `bagrut_tracking` | תלמיד בבית ספר: 4 דגלים, הערות, מעקב הבא וגורמים שאינם בציונים (029) | הצוות, באתר | **לעולם לא** — בלי סבב, בלי מפתח זר |
+| `bagrut_actions` | פעולה בתוכנית ההתערבות. `suggest_key` — הצעה שאושרה או נדחתה לא מוצעת שוב (029) | הצוות, באתר | **לעולם לא** |
+| `bagrut_log` | רשומה ביומן המעקב: שיחה עם תלמיד / הורים, ישיבת צוות, עדכון (029) | הצוות, באתר | **לעולם לא** |
+| `bagrut_ai_analysis` | ניתוח AI — "מצב התלמיד" (`picture`) או "תוכנית התערבות" (`plan`). ניתוח חדש = שורה חדשה; `round_id` בלי מפתח זר, כדי לסמן ניתוח שנוצר על סבב קודם (031) | Edge Function `bagrut-ai` | **לעולם לא** |
+| `bagrut_uploads` | תור קליטת סבבים — בדפוס `moe_uploads` (027) | מסך «קליטת סבב» | — |
 
-**הרשאות:** `has_authority(authority_code)` **וגם** `in_bagrut_scope(school,
-grade, class, track)` על `bagrut_students`. ציונים ומדדים גלויים אם
-התלמיד גלוי (תת-שאילתה — ה-RLS של `bagrut_students` חל בתוכה). כתיבה
-לנתוני הסבב — מנהל-על בלבד (הקליטה רצה בחיבור ישיר). מעקב — כולם חוץ
-מהמועצה, בתוך ההיקף (`may_edit_bagrut_tracking`). מצפן — רכז בגרויות
-או מנהל-על (`may_edit_bagrut_program`).
+ארבע הטבלאות של הצוות (`tracking`, `actions`, `log`, `ai_analysis`) מזוהות
+לפי **רשות + בית ספר + ת"ז** — תוכנית שנבנתה בקיץ ממשיכה לחורף. מי ומתי
+נקבע בטריגר במסד (`bagrut_row_stamp`), לא בדפדפן.
+
+**הרשאות:** `has_authority(authority_code)` **וגם** `bagrut_student_visible(round,
+student, school, grade, class, track)` על `bagrut_students`. ציונים ומדדים
+גלויים אם התלמיד גלוי (תת-שאילתה — ה-RLS של `bagrut_students` חל בתוכה).
+כתיבה לנתוני הסבב — מנהל-על בלבד (הקליטה רצה בחיבור ישיר). מעקב, תוכנית,
+יומן וניתוח AI — כולם חוץ מהמועצה, בתוך ההיקף (`may_edit_bagrut_student`,
+ובטבלאות של 029/031 דרך `bagrut_cycle_visible` / `bagrut_cycle_editable`).
+מצפן — רכז בגרויות או מנהל-על (`may_edit_bagrut_program`).
 
 **התפקידים** (עמודות ב-`users`, לא נוגעות בהיקף המצבת): `bagrut_role`
-∈ council / coordinator / grade_coordinator / track_coordinator / homeroom,
-ו-`bagrut_schools`, `bagrut_grades`, `bagrut_classes`, `bagrut_tracks`.
+∈ council / coordinator / grade_coordinator / subject_coordinator / homeroom,
+ו-`bagrut_schools`, `bagrut_grades`, `bagrut_classes`, `bagrut_subject_keys`.
 מערך ריק = **כלום**, לא הכול.
+
+> **רכז מקצוע רואה את כל בית הספר.** `bagrut_subject_keys` קובע רק מה מוצג
+> בראש הסרגל ("המקצועות שלי") — **לא הגבלת גישה**: T1 אינו יודע מי לומד
+> מקצוע לפני הציון הראשון. רכז המגמה (`track_coordinator`, `bagrut_tracks`)
+> הוסר ב-030. ראה [014 §4](decisions/014-bagrut-module.md).
 
 ## שדות מחושבים
 
@@ -343,6 +357,11 @@ grade, class, track)` על `bagrut_students`. ציונים ומדדים גלוי
 | 025 | `tier_b_composite_key` | מפתח `(ת"ז, קבוצה)` — ילד יכול להימצא בשתי קבוצות של דרג ב' |
 | 026 | `bagrut` | מודול זכאות לבגרות: 8 טבלאות משותפות, חמישה תפקידים (`bagrut_role` + היקפים), `in_bagrut_scope` ([014](decisions/014-bagrut-module.md)) |
 | 027 | `bagrut_uploads` | תור קליטת סבבי בגרות — בדפוס `moe_uploads`, בלי שלב אישור; אזהרות ב-`report` |
+| 027b | `subject_coordinator_snapshot` | רכז מקצוע (`subject_coordinator`, `bagrut_subject_keys`), `may_edit_bagrut_student`, `bagrut_student_visible` — **שוחזרה מהמסד החי**: השינוי הוחל ישירות על המסד בלי מיגרציה. על המסד החי אינה משנה דבר |
+| 028 | `bagrut_alt_questionnaires` | `alt_group` — שאלונים שקולים ("או/או") במצפן |
+| 029 | `bagrut_cycle` | מחזור ההתערבות: `bagrut_actions`, `bagrut_log`, מעקב הבא וגורמים ב-`bagrut_tracking` |
+| 030 | `subject_replaces_track_coordinator` | רכז מקצוע מחליף את רכז המגמה, ורואה את כל בית הספר; `users.bagrut_tracks` נמחקה |
+| 031 | `bagrut_ai_analysis` | ניתוח AI לתלמיד — מצב ותוכנית, נשמר עם היסטוריה |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.

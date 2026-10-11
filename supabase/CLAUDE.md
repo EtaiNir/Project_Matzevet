@@ -26,6 +26,10 @@
 **פעולות שמחייבות `service_role`** (יצירת משתמש, קביעת סיסמה, השהיה) רצות
 ב-Edge Function `admin-users` בלבד — לעולם לא בדפדפן.
 
+**שתי Edge Functions:** `admin-users`, ו-`bagrut-ai` (ניתוח AI לתלמיד בבגרות —
+קוראת **בהרשאות המורה**, לא ב-`service_role`; הסוד `ANTHROPIC_API_KEY` ב-Supabase
+secrets). פריסה: [server-migration.md](../docs/server-migration.md#פריסת-edge-functions).
+
 **מנהל-העל האחרון מוגן** — אי אפשר למחוק, להשהות או להוריד בתפקיד את
 האחרון שנשאר. הסוכן מסומן `is_service_account` ואינו נספר.
 
@@ -35,9 +39,12 @@
 
 טבלאות `bagrut_*` **משותפות** לכל הרשויות (עם `authority_code`), לא טבלה
 לכל רשות — ראה [decisions/014](../docs/decisions/014-bagrut-module.md).
-ההרשאה בעמודות `bagrut_role` + `bagrut_schools/grades/classes/tracks`,
+ההרשאה בעמודות `bagrut_role` + `bagrut_schools/grades/classes/subject_keys`,
 **נפרדת** מ-`scope_level` של המצבת. מערך היקף ריק = **כלום**, לא הכול.
-`bagrut_tracking` לעולם אינה נמחקת בקליטה.
+רכז מקצוע רואה את כל בית הספר — `bagrut_subject_keys` הוא מיקוד במסכים, לא
+הגבלה (מיגרציה 030). טבלאות הצוות (`bagrut_tracking`, `bagrut_actions`,
+`bagrut_log`, `bagrut_ai_analysis`) לעולם אינן נמחקות בקליטה.
+**זכאות נקבעת רק לפי T2** — גם ב-`bagrut-ai` ([014 §8](../docs/decisions/014-bagrut-module.md)).
 
 ## מבנה מסד הנתונים
 

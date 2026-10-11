@@ -58,11 +58,18 @@ npm run dev
 ```
 פתח **http://localhost:5173** והתחבר.
 
-## שלב 6 (עתידי) — פריסה ל-Netlify
+## שלב 6 — פריסה ל-Netlify
 - `npm run build` מייצר את `dist/`.
-- להעלות ל-Netlify (חיבור GitHub / CLI / גרירה ידנית) ולהגדיר את שני משתני הסביבה
-  (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) בהגדרות ה-Site.
-- קובץ `netlify.toml` עם redirect ל-SPA (`/* → /index.html`) יידרש לניתוב.
+- Netlify בונה אוטומטית בכל push ל-`EtaiNir/Project_Matzevet` — `origin` מוגדר
+  עם שני push URLs, כך ש-`git push` אחד מגיע לשני הריפואים ([009](decisions/009-hosting-split.md)).
+- שני משתני הסביבה (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) מוגדרים
+  בהגדרות ה-Site. שינוי בהם נכנס רק בבנייה הבאה.
+- `netlify.toml` — redirect ל-SPA (`/* → /index.html`) וכותרת `X-Robots-Tag: noindex`.
+
+## שלב 7 — Edge Functions
+`admin-users` (ניהול משתמשים) ו-`bagrut-ai` (ניתוח AI בבגרות, דורשת את הסוד
+`ANTHROPIC_API_KEY`). ה-CLI של Supabase לא עובד ברשת הזו — הפריסה והסודות
+דרך ה-Management API: [server-migration.md](server-migration.md), "פריסת Edge Functions".
 
 ## תקלות נפוצות באתר
 
@@ -72,10 +79,10 @@ npm run dev
 | הכניסה נכשלת עם "פרטים שגויים" למרות סיסמה נכונה | מפתח סביבה קטוע ב-Netlify. `lib/diagnostics.ts` מציג את אורך המפתח במסך הכניסה |
 | ההעלאה נרשמה אבל הסטטוס תקוע ב"ממתין" | הסוכן אינו רץ. לבדוק `agent.log` במחשב שבו הוא מותקן |
 
-## מצב נוכחי (2026-08-03)
-- Supabase: פרויקט `agcoeqshvkyopjjdvril`, טבלה `students_1400000` עם **8,244** תלמידים
-  (7,919 "משובץ" + 325 בסטטוסים אחרים), **165 עמודות**.
-- משתמש: `eyal.yinnon@gmail.com` (admin, רשות 1400000).
+## מצב נוכחי (2026-10-11)
+- Supabase: פרויקט `agcoeqshvkyopjjdvril`. 8 לקוחות — 5 רשויות עם מצבת
+  (`students_{code}`, **165 עמודות**) ו-3 בתי ספר בבגרות בלבד. מיגרציות 001–031.
+- משתמש: `eyal.yinnon@gmail.com` (מנהל-על).
 - **האתר חי:** https://moonlit-macaron-430f54.netlify.app
   (Netlify של איתי, בונה מ-`EtaiNir/Project_Matzevet` —
   ראה [decisions/009](decisions/009-hosting-split.md))
