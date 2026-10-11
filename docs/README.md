@@ -8,16 +8,17 @@ Vault תיעוד (Obsidian) לפרויקט ממשק ניהול נתוני תלמ
 |------|--------|
 | [project-spec.md](project-spec.md) | **מסמך האפיון המלא** — מקור האמת לדרישות |
 | [architecture.md](architecture.md) | סקירת הארכיטקטורה, שלוש השכבות, מבנה תיקיות |
-| [database.md](database.md) | סכימת ה-DB, טבלאות, RLS, שדות מחושבים |
-| [data-loading.md](data-loading.md) | טעינת נתונים מקבצי ה-pipeline ל-Supabase |
-| [features.md](features.md) | מיפוי פיצ'רים של שלב א' לקוד |
+| [database.md](database.md) | סכימת ה-DB, טבלאות, RLS, שדות מחושבים, אינדקס המיגרציות |
+| [data-loading.md](data-loading.md) | טעינת נתונים מקבצי ה-pipeline ל-Supabase, וקליטת סבב בגרות |
+| [features.md](features.md) | מיפוי הפיצ'רים לקוד — המצבת ומודול הבגרות |
 | [setup-and-run.md](setup-and-run.md) | מדריך הקמה והרצה מאפס |
 | [server-migration.md](server-migration.md) | מה רץ איפה, העברה לשרת, ופריסת Edge Functions |
 | [../agent/README.md](../agent/README.md) | סוכן העיבוד — התקנה והפעלה |
 | [tier-b-template.md](tier-b-template.md) | תבנית קובץ הקליטה לדרג ב' (גנים, לידה עד 3, קידום נוער, חינוך ביתי) |
 | [extra-fields-design.md](extra-fields-design.md) | אפיון העמודות שהמשתמש מוסיף (טקסט/סימון) והמסכים הייעודיים |
 | [dedup-review.md](dedup-review.md) | השוואת שני מנועי הדדופ, לקראת מעבר עם סבא |
-| [bagrut-intervention-design.md](bagrut-intervention-design.md) | תכנון לשונית המעקב כמחזור התערבות (מודול הבגרות) — טיוטה לדיון |
+| [bagrut-eligibility-rules.md](bagrut-eligibility-rules.md) | חוקת הזכאות לבגרות (Z-1 עד Z-18) — חומר רקע להבנת T2, **לא מנוע החלטה** |
+| [bagrut-intervention-design.md](bagrut-intervention-design.md) | לשונית המעקב כמחזור התערבות — תכנון; שלבים 1–2 מומשו (כולל AI), עם הפערים מהתכנון |
 | [roadmap.md](roadmap.md) | **מפת דרכים** — מה נשאר לסגור, ולאן הפרויקט הולך |
 | [dev-log.md](dev-log.md) | יומן פיתוח כרונולוגי |
 | [decisions/](decisions/) | החלטות טכניות |
@@ -36,7 +37,9 @@ Vault תיעוד (Obsidian) לפרויקט ממשק ניהול נתוני תלמ
   — דף בית ציבורי, אודות ופרטי קשר **לפני** הכניסה.
   רץ ב-Netlify של איתי ([009](decisions/009-hosting-split.md));
   היעד הוא סאב-דומיין תחת `meiryoffe.co.il`
-- 🗄 Supabase: 5 רשויות · 20 מיגרציות · Edge Function לניהול משתמשים
+- 🗄 Supabase: 8 לקוחות (5 רשויות במצבת + 3 בתי ספר בבגרות) · 32 מיגרציות
+  (001–031 ו-027b) · שתי Edge Functions — ניהול משתמשים, וניתוח AI בבגרות
+- 🎓 מודול זכאות לבגרות — חי מ-28.9; מחזור התערבות עם AI מ-7.10
 - 🤖 סוכן עיבוד אוטומטי — העלאה באתר מפעילה עדכון בלי מגע יד
 - 📁 סריקת תיקייה מקומית — קבצים שמגיעים למחשב מעובדים מעצמם
 - 🔒 העלאת מצב"ת — מנהל רשות בלבד, נאכף ב-RLS
@@ -50,8 +53,12 @@ Vault תיעוד (Obsidian) לפרויקט ממשק ניהול נתוני תלמ
 שורדות את העדכון החודשי בלי שום שינוי בסוכן. מסך התלמידים נבנה מחדש
 סביב סרגל מסכים אנכי מימין.
 
+מ-28.9 פועל **מודול זכאות לבגרות** — המודול הראשון בפורטל: תמונת מצב,
+בקרה לפי מקצוע וכרטיס תלמיד מתוך T1/T2 של סבא, וקליטת סבב דרך הסוכן.
+ב-7.10 לשונית המעקב הפכה למחזור התערבות, עם ניתוח AI לכל תלמיד בכפתור.
+
 ראה [dev-log.md](dev-log.md) לפרטים, ו-[decisions/](decisions/) להחלטות —
-האחרונה היא [010](decisions/010-students-rail-and-pinning.md).
+האחרונה היא [014](decisions/014-bagrut-module.md).
 
 **הסיכון הפתוח הגדול ביותר:** מעבר שנת לימודים 26→27 — ביוני–יולי מגיעים
 12 קבצים במקום 6, והסוכן עלול לדרוס שנה בשנייה.

@@ -1,19 +1,12 @@
 import { useState } from 'react'
-import {
-  createUser,
-  ROLE_LABELS,
-  SCOPE_LABELS,
-  type ScopeLevel,
-  type ScopeOption,
-  type UserRole,
-} from '@/lib/admin'
+import { createUser, type BagrutScopeOptions } from '@/lib/admin'
+import { BagrutFields, MatzevetFields, type BagrutValue, type MatzevetValue } from './ProductFields'
 
 interface Props {
   authorityCode: string
-  /** אפשרויות ההיקף לרשות זו — נטענות ברכיב האב לפי הרמה שנבחרה */
-  options: ScopeOption[]
-  optionsLoading: boolean
-  onScopeLevelChange: (level: ScopeLevel) => void
+  /** לרשות בלי מצבת (למשל לקוח בגרות בלבד) — אין מה להעניק */
+  hasMatzevet: boolean
+  bagrutOptions: BagrutScopeOptions | null
   onCreated: () => void
   onCancel: () => void
 }
@@ -25,50 +18,45 @@ export function suggestPassword() {
   return `${word}${Math.floor(1000 + Math.random() * 9000)}`
 }
 
-export default function NewUserForm({
-  authorityCode,
-  options,
-  optionsLoading,
-  onScopeLevelChange,
-  onCreated,
-  onCancel,
-}: Props) {
+/**
+ * משתמש חדש: פרטים משותפים, ואז **סימון מפורש של כל מוצר** (אייל, 11.10).
+ * בלי סימון — אין גישה. מוצר אחד לפחות נדרש (נאכף גם ב-admin-users).
+ */
+export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions, onCreated, onCancel }: Props) {
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [password, setPassword] = useState(suggestPassword)
-  const [role, setRole] = useState<UserRole>('viewer')
-  const [scopeLevel, setScopeLevel] = useState<ScopeLevel>('council')
-  const [scopeValues, setScopeValues] = useState<string[]>([])
-  const [query, setQuery] = useState('')
+  const [withMatzevet, setWithMatzevet] = useState(false)
+  const [withBagrut, setWithBagrut] = useState(false)
+  const [matzevet, setMatzevet] = useState<MatzevetValue>({ role: 'viewer', scope_level: 'council', scope_values: [] })
+  const [bagrut, setBagrut] = useState<BagrutValue>({
+    bagrut_role: 'coordinator', bagrut_schools: [], bagrut_grades: [], bagrut_classes: [], bagrut_subject_keys: [],
+  })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const filtered = query.trim()
-    ? options.filter(
-        (o) =>
-          o.label.toLowerCase().includes(query.trim().toLowerCase()) ||
-          o.value.includes(query.trim()),
-      )
-    : options
-
-  function changeLevel(level: ScopeLevel) {
-    setScopeLevel(level)
-    setScopeValues([])
-    onScopeLevelChange(level)
-  }
+  const superAdmin = withMatzevet && matzevet.role === 'super_admin'
+  const ready = email.trim() && password.length >= 8 && (withMatzevet || withBagrut)
 
   async function submit() {
     setBusy(true)
     setError(null)
     try {
+      const b = withBagrut && !superAdmin ? bagrut : null
       await createUser({
         email: email.trim(),
         password,
         display_name: displayName.trim(),
-        role,
+        // בלי מצבת — צפייה בלבד: "מנהל רשות" נותן גם פעולות מצבת (העלאת קבצים)
+        role: withMatzevet ? matzevet.role : 'viewer',
         authority_codes: [authorityCode],
-        scope_level: scopeLevel,
-        scope_values: scopeLevel === 'council' ? [] : scopeValues,
+        scope_level: withMatzevet ? matzevet.scope_level : 'none',
+        scope_values: withMatzevet && matzevet.scope_level !== 'council' ? matzevet.scope_values : [],
+        bagrut_role: b?.bagrut_role ?? null,
+        bagrut_schools: b?.bagrut_schools ?? [],
+        bagrut_grades: b?.bagrut_grades ?? [],
+        bagrut_classes: b?.bagrut_classes ?? [],
+        bagrut_subject_keys: b?.bagrut_subject_keys ?? [],
       })
       onCreated()
     } catch (e) {
@@ -78,154 +66,74 @@ export default function NewUserForm({
     }
   }
 
-  const inputClass =
-    'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300'
+  const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300'
 
   return (
     <div className="rounded-xl border-2 border-sky-200 bg-sky-50/50 p-5">
       <h4 className="mb-4 font-bold text-sky-800">משתמש חדש</h4>
+      {error && <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
-      {error && (
-        <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <label className="block">
           <span className="mb-1 block text-sm text-slate-600">כתובת מייל</span>
-          <input
-            type="email"
-            dir="ltr"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className={inputClass}
-          />
+          <input type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} />
         </label>
-
         <label className="block">
           <span className="mb-1 block text-sm text-slate-600">שם לתצוגה</span>
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className={inputClass}
-          />
+          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputClass} />
         </label>
-
         <label className="block">
-          <span className="mb-1 block text-sm text-slate-600">
-            סיסמה <span className="text-xs text-slate-400">(8 תווים לפחות)</span>
-          </span>
+          <span className="mb-1 block text-sm text-slate-600">סיסמה <span className="text-xs text-slate-400">(8 תווים לפחות)</span></span>
           <div className="flex gap-2">
-            <input
-              dir="ltr"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className={inputClass + ' font-mono'}
-            />
-            <button
-              type="button"
-              onClick={() => setPassword(suggestPassword())}
-              title="הצע סיסמה אחרת"
-              className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-white"
-            >
-              🎲
-            </button>
+            <input dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass + ' font-mono'} />
+            <button type="button" onClick={() => setPassword(suggestPassword())} title="הצע סיסמה אחרת"
+              className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-white">🎲</button>
           </div>
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-sm text-slate-600">תפקיד</span>
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as UserRole)}
-            className={inputClass}
-          >
-            {Object.entries(ROLE_LABELS).map(([v, l]) => (
-              <option key={v} value={v}>
-                {l}
-              </option>
-            ))}
-          </select>
         </label>
       </div>
 
-      <label className="mt-4 block">
-        <span className="mb-1 block text-sm text-slate-600">היקף הצפייה</span>
-        <select
-          value={scopeLevel}
-          onChange={(e) => changeLevel(e.target.value as ScopeLevel)}
-          className={inputClass}
-        >
-          {Object.entries(SCOPE_LABELS).map(([v, l]) => (
-            <option key={v} value={v}>
-              {l}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {scopeLevel !== 'council' && (
-        <div className="mt-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-sm text-slate-600">
-              {scopeLevel === 'locality' ? 'יישובים מותרים' : 'מוסדות מותרים'}
-              {scopeValues.length > 0 && (
-                <strong className="mr-1 text-sky-700">({scopeValues.length})</strong>
-              )}
-            </span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="חיפוש…"
-              className="w-40 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
-            />
-          </div>
-
-          {optionsLoading ? (
-            <p className="text-sm text-slate-400">טוען רשימה…</p>
-          ) : (
-            <div className="thin-scrollbar max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white">
-              {filtered.map((o) => (
-                <label
-                  key={o.value}
-                  className="flex cursor-pointer items-center gap-2 border-b border-slate-50 px-3 py-1.5 text-sm last:border-0 hover:bg-sky-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={scopeValues.includes(o.value)}
-                    onChange={() =>
-                      setScopeValues((v) =>
-                        v.includes(o.value) ? v.filter((x) => x !== o.value) : [...v, o.value],
-                      )
-                    }
-                    className="accent-sky-600"
-                  />
-                  <span className="flex-1 truncate">{o.label}</span>
-                  <span className="text-xs text-slate-400">{o.count}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <div className="mt-5 text-sm font-bold text-slate-700">גישה למוצרים <span className="font-normal text-slate-500">— בלי סימון אין גישה</span></div>
+      <div className="mt-2 grid gap-3 lg:grid-cols-2">
+        <ProductBox title="מצבת תלמידים" checked={withMatzevet} onToggle={setWithMatzevet}
+          disabledReason={hasMatzevet ? null : 'לרשות הזו אין מצבת'}>
+          <MatzevetFields code={authorityCode} value={matzevet} onChange={setMatzevet} />
+        </ProductBox>
+        <ProductBox title="זכאות לבגרות" checked={withBagrut && !superAdmin} onToggle={setWithBagrut}
+          disabledReason={superAdmin ? 'מנהל־על רואה ממילא את שני המוצרים' : bagrutOptions && !bagrutOptions.schools.length ? 'לרשות הזו אין עדיין סבב בגרות' : null}>
+          <BagrutFields options={bagrutOptions} value={bagrut} onChange={setBagrut} />
+        </ProductBox>
+      </div>
 
       <div className="mt-4 flex items-center gap-2">
-        <button
-          onClick={submit}
-          disabled={busy || !email.trim() || password.length < 8}
-          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:opacity-50"
-        >
+        <button onClick={submit} disabled={busy || !ready}
+          className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:opacity-50">
           {busy ? 'יוצר…' : 'יצירת משתמש'}
         </button>
-        <button
-          onClick={onCancel}
-          className="rounded-lg px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100"
-        >
-          ביטול
-        </button>
+        <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100">ביטול</button>
         <span className="mr-auto text-xs text-slate-500">
-          רשום את הסיסמה — היא לא תוצג שוב
+          {!withMatzevet && !withBagrut ? 'יש לסמן מוצר אחד לפחות' : 'רשום את הסיסמה — היא לא תוצג שוב'}
         </span>
       </div>
+    </div>
+  )
+}
+
+/** קופסת מוצר: תיבת סימון בכותרת, והשדות נפתחים רק כשמסומנת */
+export function ProductBox({ title, checked, onToggle, disabledReason, children }: {
+  title: string
+  checked: boolean
+  onToggle: (v: boolean) => void
+  disabledReason: string | null
+  children: React.ReactNode
+}) {
+  return (
+    <div className={`rounded-xl border bg-white p-4 ${checked ? 'border-sky-300 ring-1 ring-sky-200' : 'border-slate-200'}`}>
+      <label className={`flex items-center gap-2 font-semibold ${disabledReason ? 'cursor-not-allowed text-slate-400' : 'cursor-pointer text-slate-800'}`}>
+        <input type="checkbox" checked={checked && !disabledReason} disabled={Boolean(disabledReason)} onChange={(e) => onToggle(e.target.checked)} className="accent-sky-600" />
+        {title}
+        {disabledReason && <span className="text-xs font-normal">· {disabledReason}</span>}
+      </label>
+      {checked && !disabledReason && <div className="mt-3 border-t border-slate-100 pt-3">{children}</div>}
     </div>
   )
 }

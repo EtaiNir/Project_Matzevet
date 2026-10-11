@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import Logo from '@/components/brand/Logo'
+import HomeLink from '@/components/HomeLink'
 import ModuleSwitch from '@/components/ModuleSwitch'
 import type { PivotNavState } from '@/lib/pivot'
 
@@ -89,7 +90,10 @@ export default function RailTopBar({
     <header className="shrink-0 border-b border-slate-200 bg-white shadow-sm">
       {/* ── שורה 1: זהות ── */}
       <div className="flex flex-wrap items-center gap-3 px-4 pt-2.5">
-        <Logo className="h-7 w-7 shrink-0" />
+        {/* הלוגו מוביל לאזור האישי — משם עוברים בין המוצרים */}
+        <Link to="/home" title="לאזור האישי" className="shrink-0 rounded-lg transition hover:opacity-80">
+          <Logo className="h-7 w-7" />
+        </Link>
 
         {authorities.length > 1 ? (
           <select
@@ -110,6 +114,7 @@ export default function RailTopBar({
         )}
 
         <ModuleSwitch authorityCode={authorityCode} />
+        <HomeLink />
 
         <span className="mr-auto" />
 

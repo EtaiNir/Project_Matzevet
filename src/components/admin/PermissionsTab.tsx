@@ -1,70 +1,138 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  BAGRUT_ROLE_LABELS,
+  ROLE_LABELS,
+  authorityHasMatzevet,
+  bagrutPatch,
+  deleteUser,
+  fetchBagrutScopeOptions,
   fetchUsers,
-  fetchScopeOptions,
-  updateUserPermissions,
   setUserPassword,
   setUserSuspended,
-  deleteUser,
-  ROLE_LABELS,
-  SCOPE_LABELS,
+  updateUserPermissions,
+  userProducts,
+  type BagrutScopeOptions,
   type ManagedUser,
-  type ScopeLevel,
-  type ScopeOption,
-  type UserRole,
 } from '@/lib/admin'
-import NewUserForm, { suggestPassword } from './NewUserForm'
+import NewUserForm, { ProductBox, suggestPassword } from './NewUserForm'
+import { BagrutFields, MatzevetFields } from './ProductFields'
 
 interface Props {
   code: string
 }
 
-/** מסך 2 — ניהול הרשאות: תפקיד + היקף (מועצתי / יישובי / בית-ספרי). */
+type Product = 'matzevet' | 'bagrut'
+const PRODUCT_LABELS: Record<Product, string> = { matzevet: 'מצבת תלמידים', bagrut: 'זכאות לבגרות' }
+
+/**
+ * מסך 2 — ניהול הרשאות, מפוצל לשני המוצרים (אייל, 11.10).
+ *
+ * רשימת משתמשים אחת; בכל תת-לשונית רואים את ההרשאה של המשתמש **במוצר הזה**,
+ * ומי שאין לו גישה אליו מופיע מעומעם עם "מתן גישה". כל מוצר מוענק בנפרד:
+ * מצבת — scope_level ≠ 'none' (מיגרציה 032); בגרות — bagrut_role ≠ null.
+ * שמירה בלשונית אחת אינה נוגעת בהרשאה של המוצר האחר. האכיפה ב-RLS.
+ */
 export default function PermissionsTab({ code }: Props) {
+  const [product, setProduct] = useState<Product>('matzevet')
   const [users, setUsers] = useState<ManagedUser[]>([])
-  // שדות התפקיד והמוסד קיימים רק אחרי מיגרציה 010
   const [hasProfileFields, setHasProfileFields] = useState(false)
+  const [hasMatzevet, setHasMatzevet] = useState(true)
+  const [bagrutOptions, setBagrutOptions] = useState<BagrutScopeOptions | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState<ManagedUser | null>(null)
-  const [options, setOptions] = useState<ScopeOption[]>([])
-  const [optionsLoading, setOptionsLoading] = useState(false)
-  const [scopeQuery, setScopeQuery] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [adding, setAdding] = useState(false)
-  // רמת ההיקף שנבחרה בטופס המשתמש החדש — קובעת אילו אפשרויות לטעון
-  const [newUserLevel, setNewUserLevel] = useState<ScopeLevel>('council')
-  const [notice, setNotice] = useState<string | null>(null)
-  // שדה הסיסמה שבתוך טופס העריכה — ריק פירושו "לא לשנות"
+  // בעריכה: האם יש גישה למוצר שבלשונית
+  const [access, setAccess] = useState(false)
   const [newPassword, setNewPassword] = useState('')
-
-  useEffect(() => {
-    fetchUsers()
-      .then(({ users, hasProfileFields }) => {
-        setUsers(users)
-        setHasProfileFields(hasProfileFields)
-      })
-      .catch((e) => setError(e.message))
-  }, [])
-
-  // טוענים את רשימת היישובים/המוסדות רק כשבאמת צריך אותה
-  const activeLevel: ScopeLevel = adding ? newUserLevel : (draft?.scope_level ?? 'council')
-  useEffect(() => {
-    if (activeLevel === 'council') {
-      setOptions([])
-      return
-    }
-    setOptionsLoading(true)
-    fetchScopeOptions(code, activeLevel)
-      .then(setOptions)
-      .catch((e) => setError(e.message))
-      .finally(() => setOptionsLoading(false))
-  }, [activeLevel, code])
+  const [adding, setAdding] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  // הסיסמה שנקבעה זה עתה — מוצגת עד שסוגרים, כדי למסור אותה למשתמש. היא אינה
+  // נשמרת בשום מקום: המערכת שומרת רק גיבוב, ואת הסיסמה הנוכחית אי אפשר לשחזר.
+  const [setPw, setSetPw] = useState<{ who: string; password: string } | null>(null)
 
   async function reload() {
-    const { users, hasProfileFields } = await fetchUsers()
-    setUsers(users)
-    setHasProfileFields(hasProfileFields)
+    const r = await fetchUsers()
+    setUsers(r.users)
+    setHasProfileFields(r.hasProfileFields)
+  }
+
+  useEffect(() => {
+    reload().catch((e) => setError(e.message))
+    authorityHasMatzevet(code).then(setHasMatzevet)
+    fetchBagrutScopeOptions(code).then(setBagrutOptions).catch(() => setBagrutOptions({ schools: [], grades: [], classes: [], subjects: [] }))
+  }, [code])
+
+  // מעבר בין מוצרים סוגר עריכה פתוחה — היא שייכת למוצר הקודם
+  useEffect(() => {
+    setEditing(null)
+    setDraft(null)
+  }, [product])
+
+  const inRashut = users.filter((u) => u.authority_codes.includes(code))
+  // מי שיש לו גישה למוצר — קודם; מי שאין — אחריו, מעומעם
+  const rows = useMemo(
+    () => [...inRashut].sort((a, b) => Number(userProducts(b)[product]) - Number(userProducts(a)[product])),
+    [inRashut, product],
+  )
+  const withAccess = inRashut.filter((u) => userProducts(u)[product]).length
+
+  function startEdit(user: ManagedUser, grant = false) {
+    const has = userProducts(user)[product]
+    const d = { ...user }
+    if (grant && product === 'matzevet') {
+      d.role = 'viewer'
+      d.scope_level = 'council'
+      d.scope_values = []
+    }
+    if (grant && product === 'bagrut') d.bagrut_role = 'coordinator'
+    setDraft(d)
+    setAccess(has || grant)
+    setEditing(user.id)
+    setNewPassword('')
+    setError(null)
+    setNotice(null)
+  }
+
+  async function save() {
+    if (!draft) return
+    setBusy(true)
+    setError(null)
+    try {
+      const shared = hasProfileFields
+        ? {
+            job_title: draft.job_title?.trim() || null,
+            institution_name: draft.institution_name?.trim() || null,
+            institution_code: draft.institution_code?.trim() || null,
+          }
+        : {}
+      if (product === 'matzevet') {
+        const superAdmin = draft.role === 'super_admin'
+        const on = superAdmin || access
+        await updateUserPermissions(draft.id, {
+          ...shared,
+          // בלי מצבת — צפייה בלבד: "מנהל רשות" נותן גם פעולות מצבת (העלאת קבצים)
+          role: on ? draft.role : 'viewer',
+          scope_level: superAdmin ? 'council' : on ? draft.scope_level : 'none',
+          scope_values: on && !superAdmin && draft.scope_level !== 'council' ? draft.scope_values : [],
+          ...(hasProfileFields ? { can_edit_extra: on && draft.role === 'viewer' ? Boolean(draft.can_edit_extra) : false } : {}),
+        })
+      } else {
+        await updateUserPermissions(draft.id, { ...shared, ...bagrutPatch(access ? draft.bagrut_role ?? 'coordinator' : null, draft) })
+      }
+      if (newPassword) {
+        await setUserPassword(draft.id, newPassword)
+        setSetPw({ who: draft.display_name || draft.email, password: newPassword })
+      }
+      await reload()
+      setEditing(null)
+      setDraft(null)
+      setNotice(newPassword ? 'ההרשאות והסיסמה עודכנו' : 'ההרשאות עודכנו')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function toggleSuspended(user: ManagedUser) {
@@ -90,467 +158,168 @@ export default function PermissionsTab({ code }: Props) {
     }
   }
 
-  const filteredOptions = useMemo(() => {
-    const q = scopeQuery.trim().toLowerCase()
-    if (!q) return options
-    return options.filter(
-      (o) => o.label.toLowerCase().includes(q) || o.value.includes(q),
-    )
-  }, [options, scopeQuery])
-
-  function startEdit(user: ManagedUser) {
-    setEditing(user.id)
-    setDraft({ ...user })
-    setScopeQuery('')
-    setNewPassword('')
-    setError(null)
-  }
-
-  function toggleScopeValue(value: string) {
-    setDraft((d) =>
-      d
-        ? {
-            ...d,
-            scope_values: d.scope_values.includes(value)
-              ? d.scope_values.filter((v) => v !== value)
-              : [...d.scope_values, value],
-          }
-        : d,
-    )
-  }
-
-  async function save() {
-    if (!draft) return
-    setBusy(true)
-    setError(null)
-    try {
-      await updateUserPermissions(draft.id, {
-        role: draft.role,
-        authority_codes: draft.authority_codes,
-        scope_level: draft.scope_level,
-        // ברמה מועצתית אין ערכי היקף — מנקים כדי שלא יישארו שאריות
-        scope_values: draft.scope_level === 'council' ? [] : draft.scope_values,
-        // נשלחים רק אם העמודות קיימות, אחרת העדכון כולו נכשל
-        ...(hasProfileFields
-          ? {
-              // מאופס למי שאינו צופה: הורדה בתפקיד לא תשאיר הרשאה
-              // תלויה שאיש אינו רואה במסך.
-              can_edit_extra: draft.role === 'viewer' ? Boolean(draft.can_edit_extra) : false,
-              job_title: draft.job_title?.trim() || null,
-              institution_name: draft.institution_name?.trim() || null,
-              institution_code: draft.institution_code?.trim() || null,
-            }
-          : {}),
-      })
-      if (newPassword) {
-        await setUserPassword(draft.id, newPassword)
-      }
-      await reload()
-      setEditing(null)
-      setDraft(null)
-      setNotice(newPassword ? 'ההרשאות והסיסמה עודכנו' : 'ההרשאות עודכנו')
-      setNewPassword('')
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const inRashut = users.filter((u) => u.authority_codes.includes(code))
-  const others = users.filter((u) => !u.authority_codes.includes(code))
+  const productBlocked = product === 'matzevet' && !hasMatzevet
+    ? 'לרשות הזו אין מצבת — אין מה להעניק.'
+    : product === 'bagrut' && bagrutOptions && !bagrutOptions.schools.length
+      ? 'לרשות הזו אין עדיין סבב בגרות — אפשר להעניק גישה אחרי הקליטה הראשונה.'
+      : null
 
   return (
     <div className="space-y-6">
-      {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">שגיאה: {error}</p>
-      )}
-
-      {notice && (
-        <p className="rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{notice}</p>
+      {error && <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">שגיאה: {error}</p>}
+      {notice && <p className="rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{notice}</p>}
+      {setPw && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <span>הסיסמה החדשה של <strong>{setPw.who}</strong>:</span>
+          <code dir="ltr" className="rounded bg-white px-2 py-1 font-mono text-base ring-1 ring-emerald-200">{setPw.password}</code>
+          <button onClick={() => navigator.clipboard?.writeText(setPw.password)} className="rounded-lg border border-emerald-300 bg-white px-3 py-1 hover:bg-emerald-100">העתקה</button>
+          <span className="text-xs text-emerald-700">מוצגת רק עכשיו — אחרי סגירה אי אפשר לראות אותה שוב.</span>
+          <button onClick={() => setSetPw(null)} className="mr-auto text-emerald-700 hover:text-emerald-900" title="סגירה">✕</button>
+        </div>
       )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <h3 className="font-bold text-sky-800">משתמשים ברשות זו</h3>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-0.5 rounded-xl bg-slate-100 p-1">
+            {(Object.keys(PRODUCT_LABELS) as Product[]).map((p) => (
+              <button key={p} onClick={() => setProduct(p)}
+                className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${product === p ? 'bg-white text-sky-800 shadow-sm' : 'text-slate-500 hover:text-sky-700'}`}>
+                {PRODUCT_LABELS[p]}
+              </button>
+            ))}
+          </div>
           {!adding && (
-            <button
-              onClick={() => {
-                setAdding(true)
-                setEditing(null)
-                setDraft(null)
-                setNotice(null)
-              }}
-              className="rounded-lg border border-dashed border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 transition hover:bg-sky-50"
-            >
+            <button onClick={() => { setAdding(true); setEditing(null); setDraft(null); setNotice(null) }}
+              className="rounded-lg border border-dashed border-sky-400 px-3 py-1.5 text-sm font-medium text-sky-700 transition hover:bg-sky-50">
               + משתמש חדש
             </button>
           )}
         </div>
         <p className="mb-4 text-sm text-slate-500">
-          התפקיד קובע מה מותר לעשות; ההיקף קובע <strong>אילו תלמידים</strong> נראים.
-          ההיקף אוכף במסד הנתונים (RLS) — לא רק בתצוגה.
+          {product === 'matzevet'
+            ? <>התפקיד קובע מה מותר לעשות; ההיקף קובע <strong>אילו תלמידים</strong> נראים.</>
+            : <>התפקיד קובע <strong>אילו תלמידים</strong> נראים ומי עורך מעקב.</>}
+          {' '}{withAccess} מתוך {inRashut.length} משתמשים עם גישה. כל מוצר מוענק בנפרד, והאכיפה במסד הנתונים (RLS) — לא רק בתצוגה.
         </p>
+        {productBlocked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{productBlocked}</p>}
 
         {adding && (
           <div className="mb-4">
-            <NewUserForm
-              authorityCode={code}
-              options={options}
-              optionsLoading={optionsLoading}
-              onScopeLevelChange={setNewUserLevel}
-              onCreated={async () => {
-                setAdding(false)
-                setNewUserLevel('council')
-                await reload()
-                setNotice('המשתמש נוצר. מסור לו את הסיסמה שרשמת.')
-              }}
-              onCancel={() => {
-                setAdding(false)
-                setNewUserLevel('council')
-              }}
-            />
+            <NewUserForm authorityCode={code} hasMatzevet={hasMatzevet} bagrutOptions={bagrutOptions}
+              onCreated={async () => { setAdding(false); await reload(); setNotice('המשתמש נוצר. מסור לו את הסיסמה שרשמת.') }}
+              onCancel={() => setAdding(false)} />
           </div>
         )}
 
         {inRashut.length === 0 && !adding && (
-          <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">
-            אין משתמשים משויכים לרשות זו.
-          </p>
+          <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400">אין משתמשים משויכים לרשות זו.</p>
         )}
 
         <div className="space-y-3">
-          {inRashut.map((user) => {
+          {rows.map((user) => {
+            const has = userProducts(user)[product]
             const isEditing = editing === user.id && draft
             return (
-              <div
-                key={user.id}
-                className="rounded-xl border border-slate-200 p-4 transition hover:border-sky-200"
-              >
+              <div key={user.id} className={`rounded-xl border p-4 transition ${has ? 'border-slate-200 hover:border-sky-200' : 'border-dashed border-slate-200 bg-slate-50/60'}`}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
+                  <div className={has ? '' : 'opacity-60'}>
                     <div className="flex items-center gap-2 font-medium text-slate-800">
                       {user.display_name || user.email}
                       {user.is_suspended && (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-normal text-amber-800">
-                          מושהה — אינו יכול להתחבר
-                        </span>
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-normal text-amber-800">מושהה — אינו יכול להתחבר</span>
                       )}
                     </div>
-                    <div className="font-mono text-xs text-slate-400" dir="ltr">
-                      {user.email}
-                    </div>
+                    <div className="font-mono text-xs text-slate-400" dir="ltr">{user.email}</div>
                     {(user.job_title || user.institution_name) && (
-                      <div className="text-xs text-slate-500">
-                        {[
-                          user.job_title,
-                          user.institution_name,
-                          user.institution_code,
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </div>
+                      <div className="text-xs text-slate-500">{[user.job_title, user.institution_name, user.institution_code].filter(Boolean).join(' · ')}</div>
                     )}
                   </div>
 
                   {!isEditing && (
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">
-                        {ROLE_LABELS[user.role]}
-                      </span>
-                      {user.role === 'viewer' && user.can_edit_extra && (
-                        <span
-                          title="רשאי למלא ערכים בעמודות שהמשתמש הוסיף"
-                          className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700"
-                        >
-                          עריכת עמודות
-                        </span>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <AccessChips user={user} product={product} bagrutOptions={bagrutOptions} />
+                      {!has && user.role !== 'super_admin' && !productBlocked && (
+                        <button onClick={() => startEdit(user, true)}
+                          className="rounded-lg bg-sky-600 px-3 py-1 text-white transition hover:bg-sky-700">מתן גישה</button>
                       )}
-                      {user.role !== 'super_admin' && (
-                        <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-700">
-                          {user.scope_level === 'council'
-                            ? 'מועצתי'
-                            : `${user.scope_level === 'locality' ? 'יישובי' : 'בית-ספרי'} · ${user.scope_values.length}`}
-                        </span>
+                      {(has || productBlocked) && (
+                        <button onClick={() => startEdit(user)}
+                          className="rounded-lg border border-slate-300 px-3 py-1 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700">עריכה</button>
                       )}
-                      <button
-                        onClick={() => startEdit(user)}
-                        className="rounded-lg border border-slate-300 px-3 py-1 transition hover:border-sky-400 hover:bg-sky-50 hover:text-sky-700"
-                      >
-                        עריכה
-                      </button>
-                      <button
-                        onClick={() => toggleSuspended(user)}
-                        title={user.is_suspended ? 'החזרה לפעילות' : 'חסימת כניסה למערכת'}
-                        className={
-                          'rounded-lg border px-3 py-1 transition ' +
-                          (user.is_suspended
-                            ? 'border-amber-400 bg-amber-100 font-medium text-amber-800 hover:bg-amber-200'
-                            : 'border-slate-300 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700')
-                        }
-                      >
+                      <button onClick={() => toggleSuspended(user)} title={user.is_suspended ? 'החזרה לפעילות' : 'חסימת כניסה למערכת'}
+                        className={'rounded-lg border px-3 py-1 transition ' + (user.is_suspended
+                          ? 'border-amber-400 bg-amber-100 font-medium text-amber-800 hover:bg-amber-200'
+                          : 'border-slate-300 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700')}>
                         {user.is_suspended ? 'מושהה' : 'השהייה'}
                       </button>
-                      <button
-                        onClick={() => removeUser(user)}
-                        title="מחיקת משתמש"
-                        className="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                      >
-                        ✕
-                      </button>
+                      <button onClick={() => removeUser(user)} title="מחיקת משתמש"
+                        className="rounded-lg px-2 py-1 text-slate-400 transition hover:bg-red-50 hover:text-red-600">✕</button>
                     </div>
                   )}
                 </div>
 
                 {isEditing && draft && (
                   <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-sky-800">עריכת הרשאות</span>
-                      <button
-                        onClick={() => {
-                          setEditing(null)
-                          setDraft(null)
-                        }}
-                        title="סגירת העריכה"
-                        className="rounded-lg px-2 py-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                      >
-                        ▲
-                      </button>
-                    </div>
-                    {/* תפקיד ומוסד — תיאוריים בלבד, לתצוגה בכותרת המסך
-                        (הערות 1 ו-4). אינם משפיעים על ההרשאות. */}
-                    {hasProfileFields && (
-                      <div className="grid gap-4 sm:grid-cols-3">
-                        <label className="block">
-                          <span className="mb-1 block text-sm text-slate-600">
-                            תפקיד <span className="text-xs text-slate-400">(לתצוגה)</span>
-                          </span>
-                          <input
-                            value={draft.job_title ?? ''}
-                            onChange={(e) => setDraft({ ...draft, job_title: e.target.value })}
-                            placeholder="מזכירת בית ספר"
-                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
-                          />
-                        </label>
-                        <label className="block">
-                          <span className="mb-1 block text-sm text-slate-600">שם מוסד</span>
-                          <input
-                            value={draft.institution_name ?? ''}
-                            onChange={(e) =>
-                              setDraft({ ...draft, institution_name: e.target.value })
-                            }
-                            placeholder="מקיף גוונים"
-                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
-                          />
-                        </label>
-                        <label className="block">
-                          <span className="mb-1 block text-sm text-slate-600">סמל מוסד</span>
-                          <input
-                            dir="ltr"
-                            value={draft.institution_code ?? ''}
-                            onChange={(e) =>
-                              setDraft({ ...draft, institution_code: e.target.value })
-                            }
-                            placeholder="440386"
-                            className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-sky-400 focus:outline-none"
-                          />
-                        </label>
-                      </div>
-                    )}
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="block">
-                        <span className="mb-1 block text-sm text-slate-600">תפקיד במערכת</span>
-                        <select
-                          value={draft.role}
-                          onChange={(e) =>
-                            setDraft({ ...draft, role: e.target.value as UserRole })
-                          }
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
-                        >
-                          {Object.entries(ROLE_LABELS).map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      {draft.role === 'super_admin' ? (
-                        <div className="flex items-end">
-                          <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                            מנהל־על רואה את כל המועצות — אין מה להגביל.
-                          </p>
-                        </div>
+                    <ProductBox title={`גישה ל${PRODUCT_LABELS[product]}`}
+                      checked={product === 'matzevet' && draft.role === 'super_admin' ? true : access}
+                      onToggle={setAccess}
+                      disabledReason={product === 'bagrut' && draft.role === 'super_admin' ? 'מנהל־על רואה ממילא את שני המוצרים' : productBlocked}>
+                      {product === 'matzevet' ? (
+                        <MatzevetFields code={code} showEditExtra={hasProfileFields}
+                          value={{ role: draft.role, scope_level: draft.scope_level === 'none' ? 'council' : draft.scope_level, scope_values: draft.scope_values, can_edit_extra: draft.can_edit_extra }}
+                          onChange={(v) => setDraft({ ...draft, ...v })} />
                       ) : (
-                        <label className="block">
-                          <span className="mb-1 block text-sm text-slate-600">היקף הצפייה</span>
-                          <select
-                            value={draft.scope_level}
-                            onChange={(e) =>
-                              setDraft({
-                                ...draft,
-                                scope_level: e.target.value as ScopeLevel,
-                                scope_values: [],
-                              })
-                            }
-                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
-                          >
-                            {Object.entries(SCOPE_LABELS).map(([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                        <BagrutFields options={bagrutOptions}
+                          value={{ bagrut_role: draft.bagrut_role ?? 'coordinator', bagrut_schools: draft.bagrut_schools, bagrut_grades: draft.bagrut_grades, bagrut_classes: draft.bagrut_classes, bagrut_subject_keys: draft.bagrut_subject_keys }}
+                          onChange={(v) => setDraft({ ...draft, ...v })} />
                       )}
-                    </div>
+                    </ProductBox>
 
-                    {/*
-                      רלוונטי ל-viewer בלבד. מנהל רשות ומעלה רשאי ממילא
-                      (may_edit_extra), ולכן תיבה אצלו הייתה מבלבלת —
-                      נראית כאילו אפשר לשלול ממנו משהו.
-                    */}
-                    {hasProfileFields && draft.role === 'viewer' && (
-                      <label className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(draft.can_edit_extra)}
-                          onChange={(e) =>
-                            setDraft({ ...draft, can_edit_extra: e.target.checked })
-                          }
-                          className="mt-0.5 accent-sky-600"
-                        />
-                        <span className="text-sm">
-                          <span className="font-medium text-slate-700">
-                            עריכת עמודות שהמשתמש הוסיף
-                          </span>
-                          <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
-                            מאפשר למלא ערכים בעמודות התוספתיות — לסמן תיבות ולכתוב
-                            הערות. <strong>אינו</strong> מאפשר ליצור או למחוק עמודות,
-                            ואינו משנה אילו תלמידים המשתמש רואה.
-                          </span>
-                        </span>
-                      </label>
-                    )}
-
-                    {draft.role !== 'super_admin' && draft.scope_level !== 'council' && (
-                      <div>
-                        <div className="mb-2 flex items-center justify-between gap-2">
-                          <span className="text-sm text-slate-600">
-                            {draft.scope_level === 'locality' ? 'יישובים מותרים' : 'מוסדות מותרים'}
-                            {draft.scope_values.length > 0 && (
-                              <strong className="mr-1 text-sky-700">
-                                ({draft.scope_values.length} נבחרו)
-                              </strong>
-                            )}
-                          </span>
-                          <input
-                            value={scopeQuery}
-                            onChange={(e) => setScopeQuery(e.target.value)}
-                            placeholder="חיפוש…"
-                            className="w-40 rounded-lg border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
-                          />
-                        </div>
-
-                        {optionsLoading ? (
-                          <p className="text-sm text-slate-400">טוען רשימה…</p>
-                        ) : (
-                          <div className="thin-scrollbar max-h-56 overflow-y-auto rounded-xl border border-slate-200">
-                            {filteredOptions.map((o) => (
-                              <label
-                                key={o.value}
-                                className="flex cursor-pointer items-center gap-2 border-b border-slate-50 px-3 py-1.5 text-sm last:border-0 hover:bg-sky-50"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={draft.scope_values.includes(o.value)}
-                                  onChange={() => toggleScopeValue(o.value)}
-                                  className="accent-sky-600"
-                                />
-                                <span className="flex-1 truncate">{o.label}</span>
-                                <span className="font-mono text-xs text-slate-400" dir="ltr">
-                                  {o.value}
-                                </span>
-                                <span className="w-12 text-left text-xs text-slate-400">
-                                  {o.count}
-                                </span>
+                    {/* פרטים משותפים לשני המוצרים — תיאוריים בלבד, וסיסמה */}
+                    <details className="rounded-xl border border-slate-200 p-3">
+                      <summary className="cursor-pointer text-sm font-medium text-slate-600">פרטים וסיסמה (משותפים לשני המוצרים)</summary>
+                      <div className="mt-3 space-y-4">
+                        {hasProfileFields && (
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            {([['job_title', 'תפקיד (לתצוגה)', 'מזכירת בית ספר'], ['institution_name', 'שם מוסד', 'מקיף גוונים'], ['institution_code', 'סמל מוסד', '440386']] as const).map(([k, label, ph]) => (
+                              <label key={k} className="block">
+                                <span className="mb-1 block text-sm text-slate-600">{label}</span>
+                                <input value={draft[k] ?? ''} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} placeholder={ph}
+                                  dir={k === 'institution_code' ? 'ltr' : undefined}
+                                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-sky-400 focus:outline-none" />
                               </label>
                             ))}
-                            {filteredOptions.length === 0 && (
-                              <p className="p-4 text-center text-sm text-slate-400">
-                                לא נמצאו תוצאות
-                              </p>
-                            )}
                           </div>
                         )}
-
-                        {draft.scope_values.length === 0 && (
-                          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                            ⚠ לא נבחר אף ערך — המשתמש לא יראה אף תלמיד.
+                        <div>
+                          <label htmlFor={`pw-${draft.id}`} className="mb-1 block text-sm text-slate-600">
+                            סיסמה חדשה <span className="text-xs text-slate-400">(השאר ריק כדי לא לשנות · 8 תווים לפחות)</span>
+                          </label>
+                          <div className="flex max-w-sm gap-2">
+                            <input id={`pw-${draft.id}`} dir="ltr" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
+                              placeholder="ללא שינוי" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-sky-400 focus:outline-none" />
+                            <button type="button" onClick={() => setNewPassword(suggestPassword())} title="הצע סיסמה"
+                              className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-slate-50">🎲</button>
+                          </div>
+                          {newPassword.length > 0 && newPassword.length < 8 && <p className="mt-1 text-xs text-amber-700">עוד {8 - newPassword.length} תווים לפחות</p>}
+                          <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-slate-500">
+                            את הסיסמה הנוכחית אי אפשר להציג — המערכת שומרת רק גיבוב שלה, לא את הסיסמה עצמה.
+                            אם המשתמש שכח אותה, קובעים כאן חדשה; היא תוצג אחרי השמירה כדי למסור לו.
                           </p>
-                        )}
+                        </div>
                       </div>
-                    )}
-
-                    <div className="border-t border-slate-100 pt-4">
-                      <label
-                        htmlFor={`pw-${draft.id}`}
-                        className="mb-1 block text-sm text-slate-600"
-                      >
-                        סיסמה חדשה{' '}
-                        <span className="text-xs text-slate-400">
-                          (השאר ריק כדי לא לשנות · 8 תווים לפחות)
-                        </span>
-                      </label>
-                      <div className="flex max-w-sm gap-2">
-                        <input
-                          id={`pw-${draft.id}`}
-                          dir="ltr"
-                          autoComplete="new-password"
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="ללא שינוי"
-                          className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setNewPassword(suggestPassword())}
-                          title="הצע סיסמה"
-                          className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-slate-50"
-                        >
-                          🎲
-                        </button>
-                      </div>
-                      {newPassword.length > 0 && newPassword.length < 8 && (
-                        <p className="mt-1 text-xs text-amber-700">
-                          עוד {8 - newPassword.length} תווים לפחות
-                        </p>
-                      )}
-                      {newPassword.length >= 8 && (
-                        <p className="mt-1 text-xs text-emerald-700">
-                          הסיסמה תוחלף בשמירה — רשום אותה למסירה למשתמש
-                        </p>
-                      )}
-                    </div>
+                    </details>
 
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={save}
-                        disabled={busy || (newPassword.length > 0 && newPassword.length < 8)}
-                        className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:opacity-50"
-                      >
+                      <button onClick={save} disabled={busy || (newPassword.length > 0 && newPassword.length < 8)}
+                        className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-700 disabled:opacity-50">
                         {busy ? 'שומר…' : 'שמירה'}
                       </button>
-                      <button
-                        onClick={() => {
-                          setEditing(null)
-                          setDraft(null)
-                        }}
-                        className="rounded-lg px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100"
-                      >
-                        ביטול
-                      </button>
+                      <button onClick={() => { setEditing(null); setDraft(null) }}
+                        className="rounded-lg px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100">ביטול</button>
+                      {!access && userProducts(user)[product] && draft.role !== 'super_admin' && (
+                        <span className="mr-auto text-xs text-amber-700">בשמירה תוסר הגישה ל{PRODUCT_LABELS[product]}</span>
+                      )}
                     </div>
                   </div>
                 )}
@@ -559,22 +328,42 @@ export default function PermissionsTab({ code }: Props) {
           })}
         </div>
       </section>
-
-      {others.length > 0 && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="mb-3 font-bold text-slate-600">משתמשים אחרים במערכת</h3>
-          <ul className="space-y-1 text-sm text-slate-500">
-            {others.map((u) => (
-              <li key={u.id} className="flex justify-between gap-2">
-                <span dir="ltr" className="font-mono text-xs">
-                  {u.email}
-                </span>
-                <span>{ROLE_LABELS[u.role]}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </div>
+  )
+}
+
+/** ההרשאה של המשתמש במוצר שבלשונית — או "אין גישה" */
+function AccessChips({ user, product, bagrutOptions }: { user: ManagedUser; product: Product; bagrutOptions: BagrutScopeOptions | null }) {
+  const chip = 'rounded-full px-3 py-1'
+  if (user.role === 'super_admin') return <span className={`${chip} bg-slate-100 text-slate-600`}>מנהל־על — גישה מלאה</span>
+  if (!userProducts(user)[product]) return <span className={`${chip} text-slate-400`}>— אין גישה ל{PRODUCT_LABELS[product]} —</span>
+
+  if (product === 'matzevet') {
+    return (
+      <>
+        <span className={`${chip} bg-slate-100 text-slate-600`}>{ROLE_LABELS[user.role]}</span>
+        {user.role === 'viewer' && user.can_edit_extra && <span className={`${chip} bg-emerald-50 text-emerald-700`} title="רשאי למלא ערכים בעמודות שהמשתמש הוסיף">עריכת עמודות</span>}
+        <span className={`${chip} bg-sky-50 text-sky-700`}>
+          {user.scope_level === 'council' ? 'מועצתי' : `${user.scope_level === 'locality' ? 'יישובי' : 'בית-ספרי'} · ${user.scope_values.length}`}
+        </span>
+      </>
+    )
+  }
+
+  const name = (list: { value: string; label: string }[] | undefined, v: string) => list?.find((o) => o.value === v)?.label ?? v
+  const role = user.bagrut_role!
+  const scope =
+    role === 'council' ? 'כל בתי הספר'
+      : [
+          user.bagrut_schools.map((s) => name(bagrutOptions?.schools, s)).join(', ') || 'לא נבחר בית ספר',
+          role === 'grade_coordinator' && (user.bagrut_grades.join(', ') || 'בלי שכבות'),
+          role === 'homeroom' && (user.bagrut_classes.join(', ') || 'בלי כיתות'),
+          role === 'subject_coordinator' && user.bagrut_subject_keys.length > 0 && user.bagrut_subject_keys.map((k) => name(bagrutOptions?.subjects, k)).join(', '),
+        ].filter(Boolean).join(' · ')
+  return (
+    <>
+      <span className={`${chip} bg-violet-50 text-violet-800`}>{BAGRUT_ROLE_LABELS[role]}</span>
+      <span className={`${chip} max-w-xs truncate bg-sky-50 text-sky-700`} title={scope}>{scope}</span>
+    </>
   )
 }

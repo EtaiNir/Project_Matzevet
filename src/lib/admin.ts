@@ -40,13 +40,46 @@ export interface ClientDocument {
   uploaded_at: string
 }
 
-/** רמת ההיקף של משתמש בתוך הרשות (מיגרציה 004). */
-export type ScopeLevel = 'council' | 'locality' | 'school'
+/**
+ * רמת ההיקף של משתמש במצבת (מיגרציה 004). 'none' = אין גישה למצבת
+ * (מיגרציה 032) — וזו ברירת המחדל של משתמש חדש: כל מוצר מוענק במפורש.
+ */
+export type ScopeLevel = 'none' | 'council' | 'locality' | 'school'
 
-export const SCOPE_LABELS: Record<ScopeLevel, string> = {
+/** ההיקפים שיש בהם גישה — "אין גישה" הוא מתג נפרד, לא אפשרות ברשימה */
+export const SCOPE_LABELS: Record<Exclude<ScopeLevel, 'none'>, string> = {
   council: 'מועצתי — כל תלמידי הרשות',
   locality: 'יישובי — יישובים נבחרים בלבד',
   school: 'בית-ספרי — מוסדות נבחרים בלבד',
+}
+
+/** תפקיד בזכאות לבגרות (מיגרציות 026, 030). null = אין גישה לבגרות. */
+export type BagrutRole = 'council' | 'coordinator' | 'grade_coordinator' | 'subject_coordinator' | 'homeroom'
+
+export const BAGRUT_ROLE_LABELS: Record<BagrutRole, string> = {
+  council: 'צפייה מועצתית',
+  coordinator: 'רכז/ת בגרויות',
+  grade_coordinator: 'רכז/ת שכבה',
+  subject_coordinator: 'רכז/ת מקצוע',
+  homeroom: 'מחנך/ת',
+}
+
+/** מה כל תפקיד בגרות רואה — מוצג ליד הבחירה, כדי שיהיה ברור מה ניתן */
+export const BAGRUT_ROLE_HINTS: Record<BagrutRole, string> = {
+  council: 'רואה את כל בתי הספר ברשות. צפייה בלבד — אינו עורך מעקב.',
+  coordinator: 'רואה את כל תלמידי בתי הספר שנבחרו, עורך מעקב ואת תוכנית בית הספר.',
+  grade_coordinator: 'רואה ועורך מעקב לתלמידי השכבות שנבחרו.',
+  subject_coordinator: 'רואה ועורך מעקב לכל תלמידי בית הספר; המקצועות שלו מופיעים ראשונים.',
+  homeroom: 'רואה ועורך מעקב לתלמידי הכיתות שנבחרו.',
+}
+
+/** לאיזה מוצר יש למשתמש גישה — נגזר מהשדות; האכיפה עצמה ב-RLS */
+export function userProducts(u: Pick<ManagedUser, 'role' | 'scope_level' | 'bagrut_role'>) {
+  const superAdmin = u.role === 'super_admin'
+  return {
+    matzevet: superAdmin || (u.scope_level ?? 'none') !== 'none',
+    bagrut: superAdmin || Boolean(u.bagrut_role),
+  }
 }
 
 export type UserRole = 'viewer' | 'admin' | 'super_admin'
@@ -78,6 +111,12 @@ export interface ManagedUser {
   job_title?: string | null
   institution_name?: string | null
   institution_code?: string | null
+  /** זכאות לבגרות — תפקיד והיקף (026, 030). null = אין גישה */
+  bagrut_role: BagrutRole | null
+  bagrut_schools: string[]
+  bagrut_grades: string[]
+  bagrut_classes: string[]
+  bagrut_subject_keys: string[]
 }
 
 export interface MoeUpload {
@@ -358,7 +397,8 @@ export async function documentUrl(doc: ClientDocument): Promise<string | null> {
 // ─────────────────────────── הרשאות ───────────────────────────
 
 const USER_BASE_COLUMNS =
-  'id, email, display_name, role, authority_codes, scope_level, scope_values, is_suspended'
+  'id, email, display_name, role, authority_codes, scope_level, scope_values, is_suspended, ' +
+  'bagrut_role, bagrut_schools, bagrut_grades, bagrut_classes, bagrut_subject_keys'
 const USER_PROFILE_COLUMNS =
   'job_title, institution_name, institution_code, can_edit_extra'
 
@@ -379,7 +419,7 @@ export async function fetchUsers(): Promise<{
     .order('email')
 
   if (!extended.error) {
-    return { users: (extended.data ?? []) as ManagedUser[], hasProfileFields: true }
+    return { users: (extended.data ?? []) as unknown as ManagedUser[], hasProfileFields: true }
   }
 
   const { data, error } = await supabase
@@ -387,7 +427,7 @@ export async function fetchUsers(): Promise<{
     .select(USER_BASE_COLUMNS)
     .order('email')
   if (error) throw error
-  return { users: (data ?? []) as ManagedUser[], hasProfileFields: false }
+  return { users: (data ?? []) as unknown as ManagedUser[], hasProfileFields: false }
 }
 
 /**
@@ -425,8 +465,14 @@ export interface NewUserInput {
   display_name: string
   role: UserRole
   authority_codes: string[]
+  /** 'none' = בלי מצבת. מוצר אחד לפחות — נאכף גם ב-admin-users */
   scope_level: ScopeLevel
   scope_values: string[]
+  bagrut_role: BagrutRole | null
+  bagrut_schools: string[]
+  bagrut_grades: string[]
+  bagrut_classes: string[]
+  bagrut_subject_keys: string[]
 }
 
 export async function createUser(input: NewUserInput) {
@@ -463,11 +509,84 @@ export async function updateUserPermissions(
       | 'institution_name'
       | 'institution_code'
       | 'can_edit_extra'
+      | 'bagrut_role'
+      | 'bagrut_schools'
+      | 'bagrut_grades'
+      | 'bagrut_classes'
+      | 'bagrut_subject_keys'
     >
   >,
 ) {
-  const { error } = await supabase.from('users').update(patch).eq('id', id)
+  // RLS שחוסם עדכון אינו זורק (מלכודת 21) — שורה שלא חזרה = לא נשמר
+  const { data, error } = await supabase.from('users').update(patch).eq('id', id).select('id')
   if (error) throw error
+  if (!data?.length) throw new Error('העדכון נחסם — נדרשת הרשאת מנהל־על')
+}
+
+/** שדות הבגרות לשמירה — רק מה שרלוונטי לתפקיד; השאר מתאפס, כדי שלא יישארו שאריות */
+export function bagrutPatch(role: BagrutRole | null, d: Pick<ManagedUser, 'bagrut_schools' | 'bagrut_grades' | 'bagrut_classes' | 'bagrut_subject_keys'>) {
+  return {
+    bagrut_role: role,
+    bagrut_schools: role && role !== 'council' ? d.bagrut_schools : [],
+    bagrut_grades: role === 'grade_coordinator' ? d.bagrut_grades : [],
+    bagrut_classes: role === 'homeroom' ? d.bagrut_classes : [],
+    bagrut_subject_keys: role === 'subject_coordinator' ? d.bagrut_subject_keys : [],
+  }
+}
+
+/** האפשרויות להיקף בבגרות — מהסבב האחרון של כל בית ספר ברשות */
+export interface BagrutScopeOptions {
+  schools: ScopeOption[]
+  grades: ScopeOption[]
+  classes: ScopeOption[]
+  subjects: ScopeOption[]
+}
+
+export async function fetchBagrutScopeOptions(code: string): Promise<BagrutScopeOptions> {
+  const { data: rounds, error } = await supabase
+    .from('bagrut_rounds')
+    .select('id, school_code, school_name, created_at')
+    .eq('authority_code', code)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  const latest = new Map<string, { id: string; school_name: string | null }>()
+  for (const r of rounds ?? []) if (!latest.has(r.school_code)) latest.set(r.school_code, r)
+  const ids = [...latest.values()].map((r) => r.id)
+  if (!ids.length) return { schools: [], grades: [], classes: [], subjects: [] }
+
+  const [students, subjects] = await Promise.all([
+    supabase.from('bagrut_students').select('round_id, grade, class_name').in('round_id', ids).range(0, 9999),
+    supabase.from('bagrut_round_subjects').select('round_id, subject_key, subject_name, subject_group').in('round_id', ids).range(0, 9999),
+  ])
+  if (students.error) throw students.error
+  if (subjects.error) throw subjects.error
+
+  const count = (values: (string | null)[], label: (v: string) => string = (v) => v) => {
+    const m = new Map<string, number>()
+    for (const v of values) if (v) m.set(v, (m.get(v) ?? 0) + 1)
+    return [...m.entries()].map(([value, n]) => ({ value, label: label(value), count: n }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'he', { numeric: true }))
+  }
+  const perSchool = new Map<string, number>()
+  const schoolOf = new Map([...latest.entries()].map(([school, r]) => [r.id, school]))
+  for (const s of students.data ?? []) {
+    const sc = schoolOf.get(s.round_id)
+    if (sc) perSchool.set(sc, (perSchool.get(sc) ?? 0) + 1)
+  }
+  return {
+    schools: [...latest.entries()].map(([value, r]) => ({ value, label: r.school_name ?? value, count: perSchool.get(value) ?? 0 })),
+    grades: count((students.data ?? []).map((s) => s.grade)),
+    classes: count((students.data ?? []).map((s) => s.class_name)),
+    // מקצועות בלי הפנימיים; המפתח הוא subject_key של הסבב (014 §4)
+    subjects: count((subjects.data ?? []).filter((s) => s.subject_group !== 'פנימי').map((s) => s.subject_key),
+      (k) => (subjects.data ?? []).find((s) => s.subject_key === k)?.subject_name ?? k),
+  }
+}
+
+/** האם לרשות יש מצבת (טבלת students_{code}) — לרשות בלי מצבת אין מה להעניק */
+export async function authorityHasMatzevet(code: string): Promise<boolean> {
+  const { error } = await supabase.from(`students_${code}`).select('*', { count: 'exact', head: true })
+  return !error
 }
 
 /**
@@ -476,7 +595,7 @@ export async function updateUserPermissions(
  */
 export async function fetchScopeOptions(
   code: string,
-  level: Exclude<ScopeLevel, 'council'>,
+  level: Exclude<ScopeLevel, 'council' | 'none'>,
 ): Promise<ScopeOption[]> {
   const [valueCol, labelCol] =
     level === 'locality'

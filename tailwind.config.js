@@ -15,6 +15,16 @@ export default {
           700: '#1d4ed8',
         },
       },
+      keyframes: {
+        // כניסה עדינה של כרטיסים באזור האישי
+        'fade-up': {
+          from: { opacity: '0', transform: 'translateY(12px)' },
+          to: { opacity: '1', transform: 'none' },
+        },
+      },
+      animation: {
+        'fade-up': 'fade-up 0.5s ease-out backwards',
+      },
     },
   },
   plugins: [],

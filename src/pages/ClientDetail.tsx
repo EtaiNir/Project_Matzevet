@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { fetchAuthorities, type Authority } from '@/lib/admin'
+import HomeLink from '@/components/HomeLink'
 import BusinessTab from '@/components/admin/BusinessTab'
 import PermissionsTab from '@/components/admin/PermissionsTab'
 import DataTab from '@/components/admin/DataTab'
@@ -29,12 +30,15 @@ export default function ClientDetail() {
   return (
     <div className="min-h-full bg-slate-100">
       <header className="border-b border-slate-200 bg-white px-6 pt-3 shadow-sm">
-        <Link
-          to="/admin"
-          className="text-sm text-slate-500 transition hover:text-sky-700"
-        >
-          → חזרה לרשימת הלקוחות
-        </Link>
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            to="/admin"
+            className="text-sm text-slate-500 transition hover:text-sky-700"
+          >
+            → חזרה לרשימת הלקוחות
+          </Link>
+          <HomeLink />
+        </div>
 
         <h1 className="mt-1 flex flex-wrap items-center gap-2 text-xl font-bold text-sky-800">
           {authority?.name ?? 'מועצה'}

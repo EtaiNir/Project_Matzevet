@@ -24,7 +24,13 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 
 /** תפקידים והיקפים מותרים — נאכפים גם כאן, לא רק ב-UI. */
 const ROLES = ['viewer', 'admin', 'super_admin']
-const SCOPES = ['council', 'locality', 'school']
+// 'none' = אין גישה למצבת (מיגרציה 032). כל מוצר מוענק בנפרד, במפורש.
+const SCOPES = ['none', 'council', 'locality', 'school']
+// תפקידי הבגרות (026, 030). null = אין גישה לבגרות.
+const BAGRUT_ROLES = ['council', 'coordinator', 'grade_coordinator', 'subject_coordinator', 'homeroom']
+
+const strArray = (v: unknown): string[] =>
+  Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []
 
 /** שגיאות Supabase מגיעות באנגלית — מתרגמים את הנפוצות לממשק עברי. */
 function translate(message: string): string {
@@ -103,14 +109,21 @@ Deno.serve(async (req) => {
       const email = String(body.email ?? '').trim()
       const password = String(body.password ?? '')
       const role = String(body.role ?? 'viewer')
-      const scopeLevel = String(body.scope_level ?? 'council')
-      const authorityCodes = (body.authority_codes ?? []) as string[]
-      const scopeValues = (body.scope_values ?? []) as string[]
+      // ברירת המחדל: בלי גישה. מצבת מוענקת רק כשנשלח היקף במפורש.
+      const scopeLevel = String(body.scope_level ?? 'none')
+      const authorityCodes = strArray(body.authority_codes)
+      const scopeValues = scopeLevel === 'none' || scopeLevel === 'council' ? [] : strArray(body.scope_values)
+      const bagrutRole = body.bagrut_role ? String(body.bagrut_role) : null
 
       if (!email || !password) return json({ error: 'חסרים מייל או סיסמה' }, 400)
       if (password.length < 8) return json({ error: 'הסיסמה חייבת להיות באורך 8 תווים לפחות' }, 400)
       if (!ROLES.includes(role)) return json({ error: 'תפקיד לא מוכר' }, 400)
       if (!SCOPES.includes(scopeLevel)) return json({ error: 'היקף לא מוכר' }, 400)
+      if (bagrutRole && !BAGRUT_ROLES.includes(bagrutRole)) return json({ error: 'תפקיד בגרות לא מוכר' }, 400)
+      // מנהל־על רואה הכול ממילא; לכל השאר — מוצר אחד לפחות, אחרת המשתמש לא יראה כלום
+      if (role !== 'super_admin' && scopeLevel === 'none' && !bagrutRole) {
+        return json({ error: 'יש לבחור מוצר אחד לפחות: מצבת תלמידים או זכאות לבגרות' }, 400)
+      }
 
       const { data, error } = await admin.auth.admin.createUser({
         email,
@@ -124,10 +137,19 @@ Deno.serve(async (req) => {
       })
       if (error) return json({ error: translate(error.message) }, 400)
 
-      // הטריגר handle_new_auth_user יצר את הרשומה; משלימים את שדות ההיקף
+      // הטריגר handle_new_auth_user יצר את הרשומה; משלימים את שני המוצרים
       const { error: updErr } = await admin
         .from('users')
-        .update({ scope_level: scopeLevel, scope_values: scopeValues })
+        .update({
+          // מנהל־על — כל הרשות במצבת, כמו שאר מנהלי־העל
+          scope_level: role === 'super_admin' ? 'council' : scopeLevel,
+          scope_values: role === 'super_admin' ? [] : scopeValues,
+          bagrut_role: bagrutRole,
+          bagrut_schools: bagrutRole ? strArray(body.bagrut_schools) : [],
+          bagrut_grades: bagrutRole === 'grade_coordinator' ? strArray(body.bagrut_grades) : [],
+          bagrut_classes: bagrutRole === 'homeroom' ? strArray(body.bagrut_classes) : [],
+          bagrut_subject_keys: bagrutRole === 'subject_coordinator' ? strArray(body.bagrut_subject_keys) : [],
+        })
         .eq('id', data.user.id)
       if (updErr) return json({ error: translate(updErr.message) }, 400)
 
