@@ -6,6 +6,7 @@ import ModuleSwitch from '@/components/ModuleSwitch'
 import { fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
   buildIndex,
+  classSortKey,
   eligibilityKind,
   fetchRounds,
   isOnTheEdge,
@@ -299,9 +300,15 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
   const location = useLocation()
   const counts = useMemo(() => {
     const t2 = data.students.filter((s) => s.in_t2)
+    // כיתות של קבוצת תלמידים, עם מספר התלמידים בכל אחת — במיון טבעי (יב-2 לפני יב-10)
+    const classesOf = (students: typeof data.students): [string, number][] =>
+      [...students.reduce((m, s) => (s.class_name ? m.set(s.class_name, (m.get(s.class_name) ?? 0) + 1) : m), new Map<string, number>())]
+        .sort((a, b) => classSortKey(a[0]).localeCompare(classSortKey(b[0])))
     return {
       all: data.students.length,
       graduating: t2.length,
+      graduatingClasses: classesOf(t2),
+      classesByGrade: (g: string) => classesOf(data.students.filter((s) => s.grade === g)),
       notEligible: t2.filter((s) => eligibilityKind(s) === 'not_eligible').length,
       edge: t2.filter(isOnTheEdge).length,
       fighting: data.students.filter((s) => data.tracking.get(s.student_id)?.fighting).length,
@@ -332,6 +339,46 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
     }`
   const count = (n: number) => <span className="mr-auto text-xs tabular-nums text-slate-400">{n}</span>
 
+  // קישור פעיל לפי הפרמטרים עצמם ולא לפי סדרם — תמונת המצב והרשימה בונות את אותה כתובת בסדר שונה
+  const norm = (q: string) => [...new URLSearchParams(q)].map(([k, v]) => `${k}=${v}`).sort().join('&')
+  const here = location.pathname === `${base}/students` ? norm(location.search) : null
+  const isHere = (q: string) => here === norm(q)
+
+  // שכבה נפתחת לכיתות שלה בלחיצה על החץ, ונשארת פתוחה כשעומדים על אחת מהן
+  const [openGrades, setOpenGrades] = useState<Set<string>>(new Set())
+  const toggleGrade = (key: string) =>
+    setOpenGrades((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
+  interface StudentLink {
+    q: string
+    label: string
+    n: number
+    classes?: { q: string; label: string; n: number }[]
+  }
+  const gradQ = '?view=graduating'
+  const studentLinks: StudentLink[] = [
+    { q: '', label: 'כל התלמידים', n: counts.all },
+    {
+      q: gradQ,
+      label: `שכבה ${ctx.round.graduating_grade ?? ''} (מסיימת)`,
+      n: counts.graduating,
+      classes: counts.graduatingClasses.map(([c, n]) => ({ q: `${gradQ}&class=${encodeURIComponent(c)}`, label: c, n })),
+    },
+    ...counts.otherGrades.map(([g, n]): StudentLink => {
+      const q = `?grade=${encodeURIComponent(g)}`
+      return { q, label: `שכבה ${g}`, n, classes: counts.classesByGrade(g).map(([c, cn]) => ({ q: `${q}&class=${encodeURIComponent(c)}`, label: c, n: cn })) }
+    }),
+    { q: '?view=edge', label: 'על הסף', n: counts.edge },
+    { q: '?kind=not_eligible', label: 'אין זכאות', n: counts.notEligible },
+    { q: '?flag=fighting', label: 'נלחמים על הזכאות', n: counts.fighting },
+    { q: '?view=followup', label: 'מעקב השבוע', n: counts.followup },
+  ]
+
   return (
     <aside className="thin-scrollbar flex w-60 shrink-0 flex-col gap-4 overflow-y-auto border-l border-slate-200 bg-white p-3">
       <div>
@@ -350,20 +397,40 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
 
       <div>
         <div className="px-3 pb-1 text-xs font-bold text-slate-400">תלמידים</div>
-        {[
-          ['', 'כל התלמידים', counts.all],
-          ['?view=graduating', `שכבה ${ctx.round.graduating_grade ?? ''} (מסיימת)`, counts.graduating],
-          ...counts.otherGrades.map(([g, n]) => [`?grade=${encodeURIComponent(g)}`, `שכבה ${g}`, n]),
-          ['?view=edge', '⚡ על הסף', counts.edge],
-          ['?kind=not_eligible', 'אין זכאות', counts.notEligible],
-          ['?flag=fighting', '🚩 נלחמים על הזכאות', counts.fighting],
-          ['?view=followup', '📅 מעקב השבוע', counts.followup],
-        ].map(([q, label, n]) => {
-          const active = location.pathname === `${base}/students` && location.search === q
+        {studentLinks.map(({ q, label, n, classes }) => {
+          if (!classes?.length) {
+            return (
+              <Link key={q} to={`${base}/students${q}`} className={link({ isActive: isHere(q) })}>
+                {label} {count(n)}
+              </Link>
+            )
+          }
+          const open = openGrades.has(q) || classes.some((c) => isHere(c.q))
           return (
-            <Link key={q as string} to={`${base}/students${q}`} className={link({ isActive: active })}>
-              {label} {count(n as number)}
-            </Link>
+            <div key={q}>
+              <div className="flex items-center">
+                <Link to={`${base}/students${q}`} className={`${link({ isActive: isHere(q) })} min-w-0 flex-1`}>
+                  {label} {count(n)}
+                </Link>
+                <button
+                  onClick={() => toggleGrade(q)}
+                  aria-expanded={open}
+                  title={open ? 'הסתרת הכיתות' : 'הצגת הכיתות'}
+                  className="flex h-7 w-6 shrink-0 items-center justify-center rounded-md text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <span aria-hidden className={`transition-transform ${open ? '' : 'rotate-90'}`}>▾</span>
+                </button>
+              </div>
+              {open && (
+                <div className="mr-4 border-r border-slate-200 pr-1">
+                  {classes.map((c) => (
+                    <Link key={c.q} to={`${base}/students${c.q}`} className={link({ isActive: isHere(c.q) })}>
+                      {c.label} {count(c.n)}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
           )
         })}
       </div>

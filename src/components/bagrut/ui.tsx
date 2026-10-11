@@ -139,7 +139,6 @@ export function Kpi({
         <div className="mt-1.5 text-sm font-semibold text-slate-700">{label}</div>
         {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
       </div>
-      {onClick && <span className="mr-auto text-slate-300 transition group-hover:text-sky-500">←</span>}
     </Tag>
   )
 }

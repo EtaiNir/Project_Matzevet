@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { downloadWorkbook, type CellValue } from '@/lib/xlsx'
 import ColumnFilterMenu from '@/components/ColumnFilterMenu'
 import CellActionMenu from '@/components/CellActionMenu'
+import BagrutFilterBar, { type FilterField } from '@/components/bagrut/BagrutFilterBar'
 import { BLANK_LABEL, type ColumnValue } from '@/lib/columnValues'
+import { isConditionReady, type FilterCondition } from '@/lib/filters'
 
 /**
  * הטבלה של מודול הבגרות.
@@ -40,6 +42,38 @@ export interface Column<T> {
 }
 
 const ROW = 42
+const MIN_WIDTH = 44
+const WIDTHS_KEY = 'bagrut:widths:'
+
+function headerText<T>(c: Column<T>): string {
+  return c.exportHeader ?? (typeof c.header === 'string' ? c.header : c.key)
+}
+
+/**
+ * תנאי של "+ הוסף סינון" מול ערכי השורה בעמודה. לעמודה יכולים להיות כמה
+ * ערכים לשורה (חסמים): תנאי חיובי — מספיק שאחד מתאים; שלילי — שאף אחד לא.
+ */
+function matchesCondition(vals: string[], cond: FilterCondition, numeric: boolean): boolean {
+  const needle = cond.value ?? ''
+  const filled = vals.filter((v) => v !== '')
+  const cmp = (v: string, n: string) => (numeric ? Number(v) - Number(n) : v.localeCompare(n, 'he'))
+  const eq = (v: string) => (numeric && v !== '' ? Number(v) === Number(needle) : v === needle)
+  switch (cond.operator) {
+    case 'equals': return vals.some(eq)
+    case 'not_equals': return !vals.some(eq)
+    case 'contains': return vals.some((v) => v.includes(needle))
+    case 'not_contains': return !vals.some((v) => v.includes(needle))
+    case 'starts_with': return vals.some((v) => v.startsWith(needle))
+    case 'ends_with': return vals.some((v) => v.endsWith(needle))
+    case 'gt': return filled.some((v) => cmp(v, needle) > 0)
+    case 'lt': return filled.some((v) => cmp(v, needle) < 0)
+    case 'between': return filled.some((v) => cmp(v, needle) >= 0 && cmp(v, cond.value2 ?? '') <= 0)
+    case 'empty': return filled.length === 0
+    case 'not_empty': return filled.length > 0
+    case 'one_of': return vals.some((v) => (cond.values ?? []).includes(v))
+    default: return true
+  }
+}
 
 /** הערכים של שורה בעמודה, כמחרוזות. ריק = '' (מוצג כ"(ריק)"). */
 function valuesOf<T>(c: Column<T>, row: T): string[] {
@@ -66,6 +100,7 @@ export default function BagrutTable<T>({
   initialSort,
   countLabel = 'שורות',
   rowTitle,
+  storageKey,
 }: {
   rows: T[]
   columns: Column<T>[]
@@ -78,8 +113,52 @@ export default function BagrutTable<T>({
   countLabel?: string
   /** כותרת חלון התא (לחיצה ימנית) — שם התלמיד שבשורה */
   rowTitle?: (row: T) => string
+  /** שם הטבלה לשמירת רוחב העמודות בדפדפן. בלעדיו הרוחב נשמר עד שעוזבים את המסך */
+  storageKey?: string
 }) {
   const [sort, setSort] = useState(initialSort ?? null)
+
+  // ── רוחב עמודות: גרירת הקצה השמאלי של הכותרת. נשמרים שמות עמודות ורוחב בלבד
+  const [widths, setWidths] = useState<Record<string, number>>(() => {
+    if (!storageKey) return {}
+    try {
+      return JSON.parse(localStorage.getItem(WIDTHS_KEY + storageKey) ?? '{}') as Record<string, number>
+    } catch {
+      return {}
+    }
+  })
+  useEffect(() => {
+    if (!storageKey) return
+    try {
+      localStorage.setItem(WIDTHS_KEY + storageKey, JSON.stringify(widths))
+    } catch {
+      /* מצב פרטי — הרוחב נשאר לסשן הזה */
+    }
+  }, [widths, storageKey])
+  const widthOf = (c: Column<T>) => widths[c.key] ?? c.width
+  const resizing = useRef<{ key: string; x: number; width: number; scale: number } | null>(null)
+  const onResizeDown = (c: Column<T>, e: ReactPointerEvent<HTMLSpanElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    // הדף עשוי להיות מוגדל (zoom במעטפת) — תזוזת העכבר נמדדת בפיקסלי מסך
+    const cell = e.currentTarget.parentElement
+    const scale = cell && cell.offsetWidth ? cell.getBoundingClientRect().width / cell.offsetWidth : 1
+    resizing.current = { key: c.key, x: e.clientX, width: widthOf(c), scale: scale || 1 }
+  }
+  const onResizeMove = (e: ReactPointerEvent<HTMLSpanElement>) => {
+    const r = resizing.current
+    if (!r) return
+    // RTL: הקצה הנגרר הוא השמאלי, ולכן תזוזה שמאלה מרחיבה
+    const next = Math.max(MIN_WIDTH, Math.round(r.width + (r.x - e.clientX) / r.scale))
+    setWidths((w) => (w[r.key] === next ? w : { ...w, [r.key]: next }))
+  }
+  const resetWidth = (key: string) =>
+    setWidths((w) => {
+      const next = { ...w }
+      delete next[key]
+      return next
+    })
 
   // ── סינון בעמודה: מפתח עמודה → הערכים שנבחרו. עמודה שאינה כאן = הכול
   const [filters, setFilters] = useState<Record<string, string[]>>({})
@@ -88,27 +167,48 @@ export default function BagrutTable<T>({
   const [cellMenu, setCellMenu] = useState<{ index: number; key: string; anchor: DOMRect } | null>(null)
   const colByKey = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns])
 
-  /** עובר את כל סינוני העמודות — חוץ מאחת (לספירות בתפריט שלה, כמו באקסל) */
-  const passes = (row: T, skip?: string) =>
+  // ── "+ הוסף סינון": תנאים עם אופרטור (מכיל, גדול מ, בין…), כמו במצבת
+  const [conds, setConds] = useState<FilterCondition[]>([])
+  // עמודה מספרית = הערך הגולמי שלה מספר (ת"ז היא מחרוזת, ולכן נשארת טקסט עם "מכיל")
+  const filterFields = useMemo((): FilterField[] => {
+    return columns.filter(isFilterable).map((c) => {
+      let numeric = false
+      if (!c.filterValues) {
+        for (const r of rows) {
+          const v = c.exportValue ? c.exportValue(r) : c.sortValue?.(r)
+          if (v == null || v === '') continue
+          numeric = typeof v === 'number'
+          break
+        }
+      }
+      return { key: c.key, label: headerText(c), type: numeric ? 'number' : 'text' }
+    })
+  }, [columns, rows])
+  const numericKeys = useMemo(() => new Set(filterFields.filter((f) => f.type === 'number').map((f) => f.key)), [filterFields])
+  // תנאי על עמודה שאינה מוצגת כרגע (עמודות הזכאות בשכבה שאינה מסיימת) אינו פעיל ואינו מוצג
+  const shownConds = useMemo(() => conds.filter((c) => colByKey.has(c.field)), [conds, colByKey])
+  const readyConds = useMemo(() => shownConds.filter(isConditionReady), [shownConds])
+
+  /** עובר את כל הסינונים — חוץ מעמודה או מתנאי אחד (לספירות בתפריט שלו, כמו באקסל) */
+  const passes = (row: T, skip?: { col?: string; cond?: string }) =>
     Object.entries(filters).every(([k, sel]) => {
-      if (k === skip) return true
+      if (k === skip?.col) return true
       const c = colByKey.get(k)
       if (!c) return true
       return valuesOf(c, row).some((v) => sel.includes(v))
-    })
+    }) &&
+    readyConds.every((cd) => cd.id === skip?.cond || matchesCondition(valuesOf(colByKey.get(cd.field)!, row), cd, numericKeys.has(cd.field)))
 
   const filtered = useMemo(
-    () => (Object.keys(filters).length ? rows.filter((r) => passes(r)) : rows),
+    () => (Object.keys(filters).length || readyConds.length ? rows.filter((r) => passes(r)) : rows),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, filters, colByKey],
+    [rows, filters, readyConds, numericKeys, colByKey],
   )
 
-  const menuValues = useMemo((): ColumnValue[] => {
-    const c = menu && colByKey.get(menu.key)
-    if (!c) return []
+  const listValues = (c: Column<T>, skip: { col?: string; cond?: string }): ColumnValue[] => {
     const counts = new Map<string, number>()
     for (const r of rows) {
-      if (!passes(r, c.key)) continue
+      if (!passes(r, skip)) continue
       for (const v of new Set(valuesOf(c, r))) counts.set(v, (counts.get(v) ?? 0) + 1)
     }
     const entries = [...counts.entries()]
@@ -116,8 +216,13 @@ export default function BagrutTable<T>({
     entries.sort(([a], [b]) =>
       a === '' ? 1 : b === '' ? -1 : numeric ? Number(a) - Number(b) : a.localeCompare(b, 'he'))
     return entries.map(([value, count]) => ({ value, label: value === '' ? BLANK_LABEL : value, count }))
+  }
+
+  const menuValues = useMemo((): ColumnValue[] => {
+    const c = menu && colByKey.get(menu.key)
+    return c ? listValues(c, { col: c.key }) : []
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, rows, filters, colByKey])
+  }, [menu, rows, filters, readyConds, numericKeys, colByKey])
 
   const setColumnFilter = (key: string, sel: string[] | null) =>
     setFilters((f) => {
@@ -126,7 +231,7 @@ export default function BagrutTable<T>({
       else next[key] = sel
       return next
     })
-  const activeFilters = Object.keys(filters).length
+  const activeFilters = Object.keys(filters).length + readyConds.length
 
   const sorted = useMemo(() => {
     if (!sort) return filtered
@@ -151,19 +256,20 @@ export default function BagrutTable<T>({
     overscan: 12,
   })
 
-  const totalWidth = columns.reduce((s, c) => s + c.width, 0)
+  const totalWidth = columns.reduce((s, c) => s + widthOf(c), 0)
   const hasGroups = columns.some((c) => c.group)
 
   // קבוצות כותרת רצופות
   const groups = useMemo(() => {
     const out: { key: string; title: ReactNode; width: number; sticky: boolean }[] = []
     for (const c of columns) {
+      const w = widths[c.key] ?? c.width
       const last = out[out.length - 1]
-      if (c.group && last && last.key === c.group) last.width += c.width
-      else out.push({ key: c.group ?? `_${c.key}`, title: c.group ? (c.groupTitle ?? c.group) : '', width: c.width, sticky: Boolean(c.sticky) })
+      if (c.group && last && last.key === c.group) last.width += w
+      else out.push({ key: c.group ?? `_${c.key}`, title: c.group ? (c.groupTitle ?? c.group) : '', width: w, sticky: Boolean(c.sticky) })
     }
     return out
-  }, [columns])
+  }, [columns, widths])
 
   const stickyStyle = (c: { sticky?: boolean }, bg = 'white') =>
     c.sticky ? ({ position: 'sticky', right: 0, zIndex: 2, background: bg } as const) : undefined
@@ -190,7 +296,7 @@ export default function BagrutTable<T>({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       {/* ── מונה: תמיד גלוי, כדי שבכל רשימה מסוננת יראו כמה יש בה ── */}
-      <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2 text-sm">
         <span className="font-semibold tabular-nums text-slate-700">
           {sorted.length.toLocaleString('he-IL')} {countLabel}
         </span>
@@ -198,14 +304,26 @@ export default function BagrutTable<T>({
           <>
             <span className="tabular-nums text-slate-400">מתוך {rows.length.toLocaleString('he-IL')}</span>
             <button
-              onClick={() => setFilters({})}
+              onClick={() => {
+                setFilters({})
+                setConds([])
+              }}
               className="rounded-md px-2 py-0.5 text-xs text-sky-700 hover:bg-sky-50"
-              title="ניקוי הסינון בכל העמודות"
+              title="ניקוי כל הסינונים שבטבלה — בעמודות ובתנאים"
             >
-              ↺ ניקוי סינון עמודות ({activeFilters})
+              ↺ ניקוי סינון ({activeFilters})
             </button>
           </>
         )}
+        <BagrutFilterBar
+          fields={filterFields}
+          conditions={shownConds}
+          onChange={setConds}
+          valuesFor={(cond) => {
+            const c = colByKey.get(cond.field)
+            return c ? listValues(c, { cond: cond.id }) : []
+          }}
+        />
         <span className="mr-auto" />
         {exportName && (
           <button onClick={doExport} className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white shadow-sm hover:bg-emerald-700">
@@ -236,8 +354,8 @@ export default function BagrutTable<T>({
                 return (
                   <div
                     key={c.key}
-                    style={{ width: c.width, ...stickyStyle(c, '#f8fafc') }}
-                    className={`group/h flex shrink-0 items-stretch border-l border-slate-200 ${active ? 'bg-sky-100/70' : ''}`}
+                    style={{ width: widthOf(c), ...stickyStyle(c, '#f8fafc') }}
+                    className={`group/h flex shrink-0 items-stretch border-l border-slate-200 ${c.sticky ? '' : 'relative'} ${active ? 'bg-sky-100/70' : ''}`}
                   >
                     <button
                       onClick={() => onHeader(c)}
@@ -259,6 +377,15 @@ export default function BagrutTable<T>({
                         {active ? '▼' : '▾'}
                       </button>
                     )}
+                    <span
+                      onPointerDown={(e) => onResizeDown(c, e)}
+                      onPointerMove={onResizeMove}
+                      onPointerUp={() => (resizing.current = null)}
+                      onPointerCancel={() => (resizing.current = null)}
+                      onDoubleClick={() => resetWidth(c.key)}
+                      title="גרירה לשינוי רוחב העמודה · לחיצה כפולה לחזרה לרוחב המקורי"
+                      className="absolute inset-y-0 left-0 z-[3] w-1.5 cursor-col-resize touch-none hover:bg-sky-400/70 active:bg-sky-500"
+                    />
                   </div>
                 )
               })}
@@ -289,7 +416,7 @@ export default function BagrutTable<T>({
                           e.preventDefault()
                           setCellMenu({ index: v.index, key: c.key, anchor: new DOMRect(e.clientX, e.clientY, 0, 0) })
                         }}
-                        style={{ width: c.width, ...stickyStyle(c) }}
+                        style={{ width: widthOf(c), ...stickyStyle(c) }}
                         className={`flex shrink-0 items-center overflow-hidden border-l border-slate-100 px-2 text-sm ${
                           c.align === 'center' ? 'justify-center' : ''
                         } ${c.sticky ? 'group-hover:!bg-sky-50' : ''}`}
