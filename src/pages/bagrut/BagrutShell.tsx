@@ -11,9 +11,11 @@ import {
   fetchRounds,
   isOnTheEdge,
   loadRound,
+  schoolsOf,
   SUBJECT_GROUPS,
   type ActionCounts,
   type BagrutRound,
+  type BagrutSchool,
   type RoundData,
   type Tracking,
 } from '@/lib/bagrut'
@@ -78,15 +80,14 @@ function ZoomBar({ zoom, onChange }: { zoom: number; onChange: (z: number) => vo
  */
 export default function BagrutShell() {
   const { profile, signOut } = useAuth()
-  const { code: codeFromUrl } = useParams()
+  const { code: codeFromUrl, school: schoolFromUrl } = useParams()
   const navigate = useNavigate()
   const isSuperAdmin = profile?.role === 'super_admin'
-  // מסך הקליטה עומד בפני עצמו: לרשות חדשה עוד אין סבב, ובלי זה לא היה
-  // אפשר להגיע אליו כדי לקלוט את הראשון.
-  const isUpload = Boolean(useMatch('/bagrut/:code/upload'))
-  const isHome = Boolean(useMatch('/bagrut/:code'))
-  // הגדלה והקטנה — בכל דף חוץ מתמונת המצב וקליטת הסבב
-  const zoomable = !isUpload && !isHome
+  // מסך הקליטה עומד בפני עצמו, בלי לחכות לטעינת הסבב
+  const isUpload = Boolean(useMatch('/bagrut/:code/:school/upload'))
+  const isHome = Boolean(useMatch('/bagrut/:code/:school'))
+  // הגדלה והקטנה — בכל דף חוץ מתמונת המצב, קליטת הסבב ובחירת בית הספר
+  const zoomable = Boolean(schoolFromUrl) && !isUpload && !isHome
   const [zoom, setZoom] = useZoom()
 
   const [allAuthorities, setAllAuthorities] = useState<Authority[]>([])
@@ -122,10 +123,22 @@ export default function BagrutShell() {
       .catch((e: Error) => setError(e.message))
   }, [authorityCode])
 
+  // ── בתי הספר (החלטה 016): כל בית ספר נצפה בנפרד. מי שרואה בית ספר אחד בלבד
+  // (מחנכת, רכז מקצוע, רכז בגרויות) נכנס אליו ישר; רשות עם כמה — בוחרים.
+  // מנהל־על מקבל תמיד את מסך הבחירה, גם כשיש בית ספר אחד (אייל, 11.10).
+  const schools = useMemo(() => schoolsOf(rounds ?? []), [rounds])
+  const school = schools.find((s) => s.code === schoolFromUrl) ?? null
+  useEffect(() => {
+    if (!rounds || !authorityCode) return
+    if (!schoolFromUrl && schools.length === 1 && !isSuperAdmin) navigate(`/bagrut/${authorityCode}/${schools[0].code}`, { replace: true })
+    // בית ספר שלא קיים או לא גלוי למשתמש (וגם כתובות ישנות בלי בית ספר)
+    if (schoolFromUrl && !school) navigate(`/bagrut/${authorityCode}`, { replace: true })
+  }, [rounds, schools, school, schoolFromUrl, authorityCode, isSuperAdmin, navigate])
+
   const round = useMemo(() => {
-    if (!rounds?.length) return null
-    return rounds.find((r) => r.id === roundId) ?? rounds[0]
-  }, [rounds, roundId])
+    if (!school) return null
+    return school.rounds.find((r) => r.id === roundId) ?? school.rounds[0]
+  }, [school, roundId])
 
   // ── נתוני הסבב
   const [data, setData] = useState<RoundData | null>(null)
@@ -176,7 +189,7 @@ export default function BagrutShell() {
           canEditTracking: isSuperAdmin || (Boolean(profile?.bagrut_role) && profile?.bagrut_role !== 'council'),
           applyTracking,
           applyActionCounts,
-          base: `/bagrut/${authorityCode}`,
+          base: `/bagrut/${authorityCode}/${round.school_code}`,
         }
       : null
 
@@ -219,20 +232,44 @@ export default function BagrutShell() {
         <ModuleSwitch authorityCode={authorityCode} />
         <HomeLink />
 
-        {rounds && rounds.length > 0 && round && (
+        {/* בית הספר — בחירה רק כשיש יותר מאחד */}
+        {school && (schools.length > 1 ? (
+          <select
+            value={school.code}
+            onChange={(e) => navigate(`/bagrut/${authorityCode}/${e.target.value}`)}
+            className="rounded-lg border border-violet-300 bg-violet-50 px-2 py-1 text-sm font-semibold text-violet-900"
+            title="בית הספר"
+          >
+            {schools.map((s) => (
+              <option key={s.code} value={s.code}>{s.name}</option>
+            ))}
+          </select>
+        ) : isSuperAdmin ? (
+          // בית ספר יחיד — למנהל־על הכפתור מחזיר למסך הבחירה
+          <Link to={`/bagrut/${authorityCode}`} title="לבחירת בית ספר"
+            className="rounded-lg bg-violet-50 px-3 py-1 text-sm font-bold text-violet-900 transition hover:bg-violet-100">
+            {school.name}
+          </Link>
+        ) : (
+          <span className="rounded-lg bg-violet-50 px-3 py-1 text-sm font-bold text-violet-900">{school.name}</span>
+        ))}
+
+        {school && round && (school.rounds.length > 1 ? (
           <select
             value={round.id}
             onChange={(e) => setRoundId(e.target.value)}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm"
-            title="סבב: בית ספר · מועד · שנה"
+            title="סבב: מועד · שנה"
           >
-            {rounds.map((r) => (
+            {school.rounds.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.school_name ?? r.school_code} · {r.season} {r.school_year}
+                {r.season} {r.school_year}
               </option>
             ))}
           </select>
-        )}
+        ) : (
+          <span className="text-sm text-slate-500">{round.season} {round.school_year}</span>
+        ))}
 
         <span className="mr-auto" />
         <div className="flex items-center gap-1 text-sm">
@@ -240,7 +277,7 @@ export default function BagrutShell() {
           {isSuperAdmin && (
             <>
               <span className="text-slate-300">|</span>
-              <Link to={`/admin/client/${authorityCode}`} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-sky-50 hover:text-sky-700">
+              <Link to={`/admin/client/${authorityCode}?tab=data&product=bagrut${school ? `&school=${school.code}` : ''}`} className="rounded-lg px-2 py-1 text-slate-500 hover:bg-sky-50 hover:text-sky-700">
                 ניהול
               </Link>
             </>
@@ -270,11 +307,13 @@ export default function BagrutShell() {
                 <Empty title="אין עדיין נתוני בגרות לרשות הזו">
                   סבב נטען לכל בית ספר אחרי כל מועד (קיץ / חורף): הציונים, ניתוח הזכאות והמצפן של בית הספר.
                   {isSuperAdmin && (
-                    <Link to={`/bagrut/${authorityCode}/upload`} className="mt-3 block font-semibold text-sky-700 hover:underline">
+                    <Link to={`/admin/client/${authorityCode}?tab=data&product=bagrut`} className="mt-3 block font-semibold text-sky-700 hover:underline">
                       ⬆ קליטת הסבב הראשון
                     </Link>
                   )}
                 </Empty>
+              ) : rounds && !schoolFromUrl && (schools.length > 1 || isSuperAdmin) ? (
+                <SchoolPicker authorityCode={authorityCode} authorityName={authorityName} schools={schools} isSuperAdmin={isSuperAdmin} />
               ) : ctx ? (
                 <BagrutContext.Provider value={ctx}>
                   <Outlet />
@@ -285,6 +324,64 @@ export default function BagrutShell() {
             </div>
           </div>
         </main>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * בחירת בית ספר — לרשות עם כמה בתי ספר, ולמנהל־על תמיד. כל כרטיס פותח את
+ * בית הספר בנפרד; מנהל־על מקבל גם כרטיס לקליטת בית ספר חדש.
+ */
+function SchoolPicker({ authorityCode, authorityName, schools, isSuperAdmin }: {
+  authorityCode: string
+  authorityName: string
+  schools: BagrutSchool[]
+  isSuperAdmin: boolean
+}) {
+  return (
+    <div className="mx-auto w-full max-w-5xl p-6">
+      <h1 className="text-2xl font-extrabold text-slate-800">בחירת בית ספר</h1>
+      <p className="mt-1 text-sm text-slate-500">
+        {authorityName ? `${authorityName} — ` : ''}{schools.length === 1 ? 'בית ספר אחד' : `${schools.length} בתי ספר`}.
+        {' '}הנתונים של כל בית ספר נקלטים ונצפים בנפרד.
+      </p>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {schools.map((s) => {
+          const last = s.rounds[0]
+          return (
+            <Link
+              key={s.code}
+              to={`/bagrut/${authorityCode}/${s.code}`}
+              className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg"
+            >
+              <div className="h-1.5 bg-gradient-to-l from-violet-400 to-indigo-600" />
+              <div className="flex flex-1 flex-col p-5">
+                <div className="text-lg font-bold text-slate-800 group-hover:text-violet-800">{s.name}</div>
+                <div className="font-mono text-xs text-slate-400" dir="ltr">{s.code}</div>
+                <dl className="mt-4 flex gap-4 text-sm">
+                  <div>
+                    <dd className="font-bold tabular-nums text-slate-700">{last.stats?.students?.toLocaleString('he-IL') ?? '—'}</dd>
+                    <dt className="text-xs text-slate-500">תלמידים</dt>
+                  </div>
+                  <div>
+                    <dd className="font-bold text-slate-700">{last.season} {last.school_year}</dd>
+                    <dt className="text-xs text-slate-500">{s.rounds.length > 1 ? `הסבב האחרון מתוך ${s.rounds.length}` : 'סבב'}</dt>
+                  </div>
+                </dl>
+                <span className="mt-4 text-sm font-bold text-violet-700 transition group-hover:-translate-x-1">כניסה ←</span>
+              </div>
+            </Link>
+          )
+        })}
+        {isSuperAdmin && (
+          <Link
+            to={`/admin/client/${authorityCode}?tab=data&product=bagrut`}
+            className="flex min-h-[10rem] items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 text-sm font-semibold text-sky-700 transition hover:border-sky-400 hover:bg-sky-50"
+          >
+            + בית ספר חדש
+          </Link>
+        )}
       </div>
     </div>
   )

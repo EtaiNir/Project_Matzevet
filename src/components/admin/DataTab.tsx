@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import BagrutData from '@/components/admin/BagrutData'
 import {
+  countStudents,
   fetchUploads,
   uploadMoeFiles,
   classifyMoeFile,
@@ -19,8 +21,64 @@ const STATUS_LABELS: Record<MoeUpload['status'], { text: string; tone: string }>
   failed: { text: 'נכשל', tone: 'bg-red-100 text-red-800' },
 }
 
-/** מסך 3 — צפייה בנתוני המועצה והעלאת קבצי מצב"ת חדשים. */
+type Product = 'matzevet' | 'bagrut'
+const PRODUCT_LABELS: Record<Product, string> = { matzevet: 'מצבת תלמידים', bagrut: 'זכאות לבגרות' }
+
+/**
+ * מסך 3 — נתוני הלקוח, מוצר מוצר. המצבת היא ברמת הרשות; הבגרות — ברמת בית
+ * הספר (החלטה 016): בוחרים בית ספר, ורואים ומעלים רק לו.
+ *
+ * המוצר ובית הספר נשמרים בכתובת (`?product=bagrut&school=…`), כך שאפשר לקשר
+ * לכאן ישר ממסכי הבגרות.
+ */
 export default function DataTab({ code }: Props) {
+  const [params, setParams] = useSearchParams()
+  const [hasMatzevet, setHasMatzevet] = useState<boolean | null>(null)
+  useEffect(() => {
+    // טבלה נוצרת לכל לקוח, גם לבית ספר בלי מצבת — לכן לפי מספר התלמידים
+    countStudents(code).then((n) => setHasMatzevet(n > 0)).catch(() => setHasMatzevet(true))
+  }, [code])
+
+  // ברירת המחדל: מצבת — אלא אם ללקוח אין מצבת (בית ספר שקנה רק בגרות)
+  const product: Product | null =
+    (params.get('product') as Product | null) ?? (hasMatzevet == null ? null : hasMatzevet ? 'matzevet' : 'bagrut')
+
+  const select = (p: Product) =>
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('product', p)
+      next.delete('school')
+      return next
+    }, { replace: true })
+
+  return (
+    <div className="space-y-6">
+      <div className="flex w-fit items-center gap-0.5 rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
+        {(Object.keys(PRODUCT_LABELS) as Product[]).map((p) => (
+          <button key={p} onClick={() => select(p)}
+            className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${product === p ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-500 hover:text-sky-700'}`}>
+            {PRODUCT_LABELS[p]}
+          </button>
+        ))}
+      </div>
+
+      {product === 'matzevet' && (
+        <>
+          {hasMatzevet === false && (
+            <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              ללקוח הזה עוד אין נתוני מצבת. אם הוא לא רכש את המצבת — אין צורך להעלות כאן דבר.
+            </p>
+          )}
+          <MatzevetData code={code} />
+        </>
+      )}
+      {product === 'bagrut' && <BagrutData code={code} />}
+    </div>
+  )
+}
+
+/** המצבת — צפייה בנתוני המועצה והעלאת קבצי מצב"ת חדשים. */
+function MatzevetData({ code }: Props) {
   const [uploads, setUploads] = useState<MoeUpload[]>([])
   const [selected, setSelected] = useState<File[]>([])
   const [busy, setBusy] = useState(false)

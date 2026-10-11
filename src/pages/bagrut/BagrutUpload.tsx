@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
   BAGRUT_ROLE_LABELS,
@@ -27,13 +27,26 @@ const STATUS: Record<BagrutUpload['status'], { label: string; cls: string }> = {
  * אישור; הבדיקה רצה בסוכן, ומה שמצאה מוצג כאן בהיסטוריה.
  *
  * מנהל-על בלבד בשלב זה — נאכף במדיניות bagrut_uploads ובבאקט, לא רק כאן.
+ *
+ * כל קליטה שייכת לבית ספר אחד (החלטה 016). מתוך בית ספר (`/bagrut/:code/:school/upload`)
+ * או מכרטיס הלקוח — סמל המוסד קבוע; בלי בית ספר (בית ספר חדש) — מקלידים אותו.
  */
 export default function BagrutUpload() {
-  const { code = '' } = useParams()
+  const { code = '', school } = useParams()
+  return <BagrutUploadPanel code={code} school={school} />
+}
+
+export function BagrutUploadPanel({ code, school: fixedSchool, embedded = false }: {
+  code: string
+  /** בית הספר שהקליטה שייכת לו — כשקבוע, אי אפשר לשנות אותו כאן */
+  school?: string
+  /** בתוך כרטיס הלקוח — בלי כותרת הדף ובלי ריווח חיצוני */
+  embedded?: boolean
+}) {
   const { profile } = useAuth()
   const isSuperAdmin = profile?.role === 'super_admin'
 
-  const [school, setSchool] = useState('')
+  const [school, setSchool] = useState(fixedSchool ?? '')
   const [season, setSeason] = useState<'קיץ' | 'חורף'>('קיץ')
   const [year, setYear] = useState('')
   const [picked, setPicked] = useState<{ file: File; role: BagrutRole | null }[]>([])
@@ -41,20 +54,21 @@ export default function BagrutUpload() {
   const [error, setError] = useState<string | null>(null)
   const [uploads, setUploads] = useState<BagrutUpload[]>([])
 
-  // ברירות מחדל מהסבב האחרון של הרשות
+  // ברירות מחדל מהסבב האחרון — של בית הספר הזה, או של הרשות כשאין בית ספר קבוע
   useEffect(() => {
+    if (fixedSchool) setSchool(fixedSchool)
     fetchRounds(code)
       .then((rs) => {
-        const last = rs[0]
-        setSchool((s) => s || last?.school_code || code)
+        const last = fixedSchool ? rs.find((r) => r.school_code === fixedSchool) ?? rs[0] : rs[0]
+        if (!fixedSchool) setSchool((s) => s || last?.school_code || code)
         setYear((y) => y || last?.school_year || '')
       })
-      .catch(() => setSchool((s) => s || code))
-  }, [code])
+      .catch(() => setSchool((s) => s || fixedSchool || code))
+  }, [code, fixedSchool])
 
   const reload = useCallback(() => {
-    fetchBagrutUploads(code).then(setUploads).catch((e: Error) => setError(e.message))
-  }, [code])
+    fetchBagrutUploads(code, fixedSchool).then(setUploads).catch((e: Error) => setError(e.message))
+  }, [code, fixedSchool])
   useEffect(reload, [reload])
 
   // בזמן שיש עבודה בתור — רענון כל 5 שניות, כמו במסך הגנים
@@ -101,21 +115,25 @@ export default function BagrutUpload() {
   const input = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm'
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 p-6">
-      <div>
-        <h1 className="text-2xl font-extrabold text-slate-800">קליטת סבב בגרות</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          T1, T2 והמצפן של בית הספר. הסוכן בודק את הקבצים וטוען — סבב קיים של אותו מוסד, מועד ושנה מוחלף,
-          וסימוני המעקב של הצוות נשמרים.
-        </p>
-      </div>
+    <div className={embedded ? 'flex flex-col gap-5' : 'mx-auto flex w-full max-w-5xl flex-col gap-5 p-6'}>
+      {!embedded && (
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-800">קליטת סבב בגרות</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            T1, T2 והמצפן של בית הספר. הסוכן בודק את הקבצים וטוען — סבב קיים של אותו מוסד, מועד ושנה מוחלף,
+            וסימוני המעקב של הצוות נשמרים.
+          </p>
+        </div>
+      )}
 
       {/* ── 1. הסבב ── */}
       <Card title="1 · הסבב">
         <div className="flex flex-wrap items-end gap-3">
           <label className="text-sm font-semibold text-slate-600">
             סמל מוסד
-            <input value={school} onChange={(e) => setSchool(e.target.value.trim())} className={`${input} mt-1 block w-32 tabular-nums`} />
+            <input value={school} readOnly={Boolean(fixedSchool)} onChange={(e) => setSchool(e.target.value.trim())}
+              title={fixedSchool ? 'הקליטה שייכת לבית הספר שנבחר' : undefined}
+              className={`${input} mt-1 block w-32 tabular-nums ${fixedSchool ? 'bg-slate-100 text-slate-500' : ''}`} />
           </label>
           <label className="text-sm font-semibold text-slate-600">
             מועד
@@ -223,7 +241,7 @@ export default function BagrutUpload() {
                       {c.students} תלמידים · {c.t2} ניתוחי זכאות · {c.grades?.toLocaleString('he-IL')} ציונים · {c.subjects} מקצועות
                       {c.tracking ? ` · ${c.tracking} סימוני מעקב` : ''}
                       {u.round_id && (
-                        <a href={`/bagrut/${code}`} className="mr-2 font-semibold text-sky-700 hover:underline">לסבב ←</a>
+                        <Link to={`/bagrut/${code}/${u.school_code}`} className="mr-2 font-semibold text-sky-700 hover:underline">לסבב ←</Link>
                       )}
                     </div>
                   )}

@@ -308,6 +308,32 @@ export async function fetchRounds(authorityCode: string): Promise<BagrutRound[]>
   return (data ?? []) as BagrutRound[]
 }
 
+/** בית ספר בבגרות — כל הנתונים שלו נקלטים ונצפים בנפרד (החלטה 016) */
+export interface BagrutSchool {
+  code: string
+  name: string
+  /** הסבבים של בית הספר, החדש ראשון */
+  rounds: BagrutRound[]
+}
+
+/**
+ * בתי הספר מתוך הסבבים. אין רשימת בתי ספר נפרדת: בית ספר קיים מהסבב הראשון
+ * שנקלט לו, וה-RLS של bagrut_rounds כבר מחזיר רק את בתי הספר שהמשתמש רשאי
+ * לראות — כך שמחנכת או רכז מקצוע מקבלים בדיוק בית ספר אחד.
+ */
+export function schoolsOf(rounds: BagrutRound[]): BagrutSchool[] {
+  const by = new Map<string, BagrutSchool>()
+  for (const r of rounds) {
+    const s = by.get(r.school_code) ?? { code: r.school_code, name: '', rounds: [] }
+    s.rounds.push(r)
+    if (!s.name && r.school_name) s.name = r.school_name
+    by.set(r.school_code, s)
+  }
+  return [...by.values()]
+    .map((s) => ({ ...s, name: s.name || `מוסד ${s.code}` }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'he'))
+}
+
 const cache = new Map<string, Promise<RoundData>>()
 
 export function clearRoundCache(roundId?: string) {
@@ -685,11 +711,13 @@ export interface BagrutUpload {
   error_message: string | null
 }
 
-export async function fetchBagrutUploads(authorityCode: string): Promise<BagrutUpload[]> {
-  const { data, error } = await supabase
+export async function fetchBagrutUploads(authorityCode: string, school?: string): Promise<BagrutUpload[]> {
+  let q = supabase
     .from('bagrut_uploads')
     .select('id, school_code, season, school_year, status, file_count, files, uploaded_at, processed_at, round_id, rows_loaded, report, error_message')
     .eq('authority_code', authorityCode)
+  if (school) q = q.eq('school_code', school)
+  const { data, error } = await q
     .order('uploaded_at', { ascending: false })
     .limit(30)
   if (error) throw new Error(`טעינת היסטוריית הקליטות נכשלה: ${error.message}`)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { fetchAuthorities, type Authority } from '@/lib/admin'
 import HomeLink from '@/components/HomeLink'
 import BusinessTab from '@/components/admin/BusinessTab'
@@ -9,7 +9,7 @@ import DataTab from '@/components/admin/DataTab'
 const TABS = [
   { id: 'business', label: 'התנהלות עסקית' },
   { id: 'permissions', label: 'ניהול הרשאות' },
-  { id: 'data', label: 'נתוני המועצה' },
+  { id: 'data', label: 'נתונים' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -18,7 +18,9 @@ type TabId = (typeof TABS)[number]['id']
 export default function ClientDetail() {
   const { code = '' } = useParams()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<TabId>('business')
+  // ?tab=data — קישור ישיר ממסכי הבגרות לקליטה של בית ספר
+  const [params] = useSearchParams()
+  const [tab, setTab] = useState<TabId>(() => TABS.find((t) => t.id === params.get('tab'))?.id ?? 'business')
   const [authority, setAuthority] = useState<Authority | null>(null)
 
   useEffect(() => {

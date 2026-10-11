@@ -78,13 +78,17 @@ export default function App() {
 
       {/* מודול זכאות לבגרות — המעטפת טוענת את הסבב פעם אחת לכל המסכים */}
       <Route path="/bagrut" element={bagrut(<BagrutShell />)} />
+      {/* כל בית ספר בנפרד (החלטה 016): /bagrut/:code — בחירת בית ספר, או כניסה
+          ישירה כשיש רק אחד; /bagrut/:code/:school — המסכים של בית הספר */}
       <Route path="/bagrut/:code" element={bagrut(<BagrutShell />)}>
-        <Route index element={<BagrutHome />} />
-        <Route path="students" element={<BagrutStudents />} />
-        <Route path="subject/:key" element={<BagrutSubject />} />
-        <Route path="student/:id" element={<BagrutStudent />} />
-        <Route path="program" element={<BagrutProgram />} />
-        <Route path="upload" element={<BagrutUpload />} />
+        <Route path=":school">
+          <Route index element={<BagrutHome />} />
+          <Route path="students" element={<BagrutStudents />} />
+          <Route path="subject/:key" element={<BagrutSubject />} />
+          <Route path="student/:id" element={<BagrutStudent />} />
+          <Route path="program" element={<BagrutProgram />} />
+          <Route path="upload" element={<BagrutUpload />} />
+        </Route>
       </Route>
 
       <Route
