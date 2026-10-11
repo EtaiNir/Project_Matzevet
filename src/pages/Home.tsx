@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { productAccess, useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
-import { IconBadge, IconCard, IconLayers, IconLock } from '@/components/brand/Icons'
 import { supabase } from '@/lib/supabase'
 import { fetchAuthorities, ROLE_LABELS, BAGRUT_ROLE_LABELS, type Authority } from '@/lib/admin'
 
@@ -126,13 +125,12 @@ export default function Home() {
   const none = !access.matzevet && !access.bagrut
 
   // מספרים מרכזיים לפס העליון — רק ממה שכבר נטען, ורק למוצרים שיש גישה אליהם
-  // כל מספר עם שורת הסבר — מה בדיוק נספר (כמו בקוביות של תמונת המצב בבגרות)
-  const stats: { label: string; sub: string; value: number | null }[] = []
-  if (access.matzevet) stats.push({ label: 'תלמידים במצבת', sub: 'בכל הרשויות שלך', value: matzevet ? matzevet.reduce((s, m) => s + m.students, 0) : null })
-  if (access.superAdmin) stats.push({ label: 'רשויות במערכת', sub: 'רשויות פעילות', value: codes ? codes.length : null })
+  const stats: { label: string; value: number | null }[] = []
+  if (access.matzevet) stats.push({ label: 'תלמידים במצבת', value: matzevet ? matzevet.reduce((s, m) => s + m.students, 0) : null })
+  if (access.superAdmin) stats.push({ label: 'רשויות במערכת', value: codes ? codes.length : null })
   if (access.bagrut) {
-    stats.push({ label: 'בתי ספר בבגרות', sub: 'עם סבב שנקלט', value: bagrut ? bagrut.reduce((s, b) => s + b.rounds.length, 0) : null })
-    stats.push({ label: 'תלמידים למעקב השבוע', sub: 'מעקב שמועדו עד 7 ימים, כולל באיחור', value: bagrut ? bagrut.reduce((s, b) => s + b.followups, 0) : null })
+    stats.push({ label: 'בתי ספר בבגרות', value: bagrut ? bagrut.reduce((s, b) => s + b.rounds.length, 0) : null })
+    stats.push({ label: 'למעקב השבוע', value: bagrut ? bagrut.reduce((s, b) => s + b.followups, 0) : null })
   }
 
   return (
@@ -179,7 +177,6 @@ export default function Home() {
                     <div key={s.label} className="rounded-2xl bg-white/10 px-4 py-2.5 ring-1 ring-white/15 backdrop-blur-sm sm:min-w-[8.5rem]">
                       <dd className="text-2xl font-extrabold tabular-nums">{s.value == null ? '…' : fmt(s.value)}</dd>
                       <dt className="text-xs text-sky-100">{s.label}</dt>
-                      <dt className="text-[11px] text-sky-200/80">{s.sub}</dt>
                     </div>
                   ))}
                 </dl>
@@ -189,7 +186,7 @@ export default function Home() {
 
           {none ? (
             <section className="mt-8 rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
-              <IconLock className="mx-auto h-10 w-10 text-slate-400" />
+              <div className="text-4xl">🔒</div>
               <h2 className="mt-3 text-xl font-bold text-slate-800">עדיין לא הוגדרה לך גישה</h2>
               <p className="mx-auto mt-2 max-w-md text-slate-600">
                 החשבון שלך פעיל, אבל עוד לא ניתנה לך גישה לאף מוצר. מנהל המערכת ברשות שלך יכול להעניק אותה.
@@ -201,7 +198,7 @@ export default function Home() {
               <h2 className="mb-3 mt-10 text-sm font-bold text-slate-500">המוצרים שלך</h2>
               <div className="grid gap-5 md:grid-cols-2">
                 {access.matzevet ? (
-                  <ProductCard icon={IconCard} title="מצבת תלמידים" tone="sky" delay={1}
+                  <ProductCard icon="📋" title="מצבת תלמידים" tone="sky" delay={1}
                     description="נתוני התלמידים מהמצבת החודשית של משרד החינוך — סינון, כרטיס תלמיד וייצוא לאקסל."
                     loading={matzevet == null}
                     rows={(matzevet ?? []).map((m) => ({
@@ -210,25 +207,25 @@ export default function Home() {
                     }))}
                     empty="אין עדיין נתוני מצבת ברשויות שלך." />
                 ) : (
-                  <LockedCard icon={IconCard} title="מצבת תלמידים" />
+                  <LockedCard icon="📋" title="מצבת תלמידים" />
                 )}
 
                 {access.bagrut ? (
-                  <ProductCard icon={IconBadge} title="זכאות לבגרות" tone="violet" delay={2}
+                  <ProductCard icon="🎓" title="זכאות לבגרות" tone="violet" delay={2}
                     description="תמונת הזכאות של השכבה המסיימת, כרטיס תלמיד, מעקב ותוכנית התערבות."
                     loading={bagrut == null}
                     rows={(bagrut ?? []).map((b) => ({
                       key: b.code, to: `/bagrut/${b.code}`, title: nameOf(b.code),
                       detail: b.rounds.map((r) => [b.rounds.length > 1 ? r.school : null, r.label, ago(r.created)].filter(Boolean).join(' · ')).join(' | '),
-                      badge: b.followups ? `${b.followups} למעקב השבוע` : undefined,
+                      badge: b.followups ? `📅 ${b.followups} למעקב השבוע` : undefined,
                     }))}
                     empty="אין עדיין סבב בגרות ברשויות שלך." />
                 ) : (
-                  <LockedCard icon={IconBadge} title="זכאות לבגרות" />
+                  <LockedCard icon="🎓" title="זכאות לבגרות" />
                 )}
 
                 {access.superAdmin && (
-                  <ProductCard icon={IconLayers} title="ניהול לקוחות" tone="slate" delay={3}
+                  <ProductCard icon="⚙️" title="ניהול לקוחות" tone="slate" delay={3}
                     description="רשויות, משתמשים והרשאות, העלאת נתונים והיסטוריית עדכונים."
                     rows={[{
                       key: 'admin', to: '/admin', title: 'לכל הלקוחות',
@@ -287,8 +284,8 @@ const TONES = {
   slate: { ring: 'hover:border-slate-300 hover:shadow-slate-200', stripe: 'from-slate-300 to-slate-500', icon: 'bg-slate-100', link: 'text-slate-700' },
 }
 
-function ProductCard({ icon: Icon, title, description, tone, rows, loading = false, empty, delay = 0 }: {
-  icon: ComponentType<{ className?: string }>
+function ProductCard({ icon, title, description, tone, rows, loading = false, empty, delay = 0 }: {
+  icon: string
   title: string
   description: string
   tone: keyof typeof TONES
@@ -307,7 +304,7 @@ function ProductCard({ icon: Icon, title, description, tone, rows, loading = fal
       <div className={`h-1.5 bg-gradient-to-l ${t.stripe}`} />
       <div className="flex flex-1 flex-col p-6">
         <div className="flex items-center gap-3">
-          <span className={`flex h-11 w-11 items-center justify-center rounded-2xl ${t.icon} ${t.link}`}><Icon className="h-6 w-6" /></span>
+          <span className={`flex h-11 w-11 items-center justify-center rounded-2xl text-2xl ${t.icon}`}>{icon}</span>
           <h3 className="text-lg font-extrabold text-slate-800">{title}</h3>
         </div>
         <p className="mt-2 text-sm leading-relaxed text-slate-500">{description}</p>
@@ -324,7 +321,7 @@ function ProductCard({ icon: Icon, title, description, tone, rows, loading = fal
                   {r.detail && <div className="truncate text-xs text-slate-500">{r.detail}</div>}
                 </div>
                 {r.badge && <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800">{r.badge}</span>}
-                <span className={`shrink-0 text-sm font-bold ${t.link}`}>כניסה</span>
+                <span className={`shrink-0 text-sm font-bold ${t.link} transition group-hover:-translate-x-1`}>כניסה ←</span>
               </Link>
             ))
           )}
@@ -335,14 +332,14 @@ function ProductCard({ icon: Icon, title, description, tone, rows, loading = fal
 }
 
 /** מוצר שאין גישה אליו — כדי שידעו שהוא קיים ואיך מבקשים */
-function LockedCard({ icon: Icon, title }: { icon: ComponentType<{ className?: string }>; title: string }): ReactNode {
+function LockedCard({ icon, title }: { icon: string; title: string }): ReactNode {
   return (
     <section className="flex flex-col rounded-3xl border border-dashed border-slate-300 bg-white/50 p-6 backdrop-blur motion-safe:animate-fade-up">
       <div className="flex items-center gap-3 opacity-50">
-        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-200 text-slate-500"><Icon className="h-6 w-6" /></span>
+        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-200 text-2xl grayscale">{icon}</span>
         <h3 className="text-lg font-extrabold text-slate-700">{title}</h3>
       </div>
-      <p className="mt-2 text-sm text-slate-500">אין לך גישה למוצר הזה. לבקשת גישה — מנהל המערכת ברשות שלך.</p>
+      <p className="mt-2 text-sm text-slate-500">🔒 אין לך גישה למוצר הזה. לבקשת גישה — מנהל המערכת ברשות שלך.</p>
     </section>
   )
 }

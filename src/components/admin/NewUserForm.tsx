@@ -87,7 +87,7 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
           <div className="flex gap-2">
             <input dir="ltr" value={password} onChange={(e) => setPassword(e.target.value)} className={inputClass + ' font-mono'} />
             <button type="button" onClick={() => setPassword(suggestPassword())} title="הצע סיסמה אחרת"
-              className="shrink-0 whitespace-nowrap rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-white">סיסמה אחרת</button>
+              className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-white">🎲</button>
           </div>
         </label>
       </div>
