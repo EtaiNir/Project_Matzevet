@@ -1,17 +1,17 @@
 import { NavLink } from 'react-router-dom'
-import { useAuth } from '@/context/AuthContext'
+import { productAccess, useAuth } from '@/context/AuthContext'
 
 /**
  * מחליף המודולים של הפורטל — "מצבת | זכאות לבגרות".
  *
- * יושב בשורה הראשונה של הכותרת בכל מודול. מודול שאין למשתמש תפקיד בו
- * אינו מוצג — אבל זו נוחות בלבד: הגישה לנתונים עצמם נאכפת ב-RLS
- * (מלכודת 16 — הסתרה בתצוגה אינה הרשאה).
+ * יושב בשורה הראשונה של הכותרת בכל מודול, ומוצג רק למי שיש לו את שני
+ * המוצרים (מי שיש לו אחד — עובר דרך האזור האישי). נוחות בלבד: הגישה לנתונים
+ * עצמם נאכפת ב-RLS (מלכודת 16 — הסתרה בתצוגה אינה הרשאה).
  */
 export default function ModuleSwitch({ authorityCode }: { authorityCode: string }) {
   const { profile } = useAuth()
-  const hasBagrut = profile?.role === 'super_admin' || Boolean(profile?.bagrut_role)
-  if (!hasBagrut) return null
+  const access = productAccess(profile)
+  if (!access.matzevet || !access.bagrut) return null
 
   const item = ({ isActive }: { isActive: boolean }) =>
     `whitespace-nowrap rounded-md px-3 py-1 text-sm font-semibold transition ${

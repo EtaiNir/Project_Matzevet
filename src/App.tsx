@@ -18,6 +18,8 @@ import BagrutSubject from './pages/bagrut/BagrutSubject'
 import BagrutStudent from './pages/bagrut/BagrutStudent'
 import BagrutProgram from './pages/bagrut/BagrutProgram'
 import BagrutUpload from './pages/bagrut/BagrutUpload'
+import Home from './pages/Home'
+import RequireProduct from './components/RequireProduct'
 
 export default function App() {
   const { session, profile, loading } = useAuth()
@@ -44,11 +46,13 @@ export default function App() {
   }
 
   // ───────────── אחרי כניסה ─────────────
-  // מנהל־על מגיע ישירות לניהול הלקוחות, משתמש רגיל ישירות לנתוני התלמידים.
-  // אין מסך ביניים: סבא ביקש שהכניסה תוביל למקום העבודה עצמו.
-  // ההרשאות נאכפות ב-RLS ולא בניתוב.
+  // כל משתמש פוגש קודם את האזור האישי — "שלום, <שם>" — וממנו עובר למוצרים
+  // שלו (אייל, 11.10). כל מוצר עטוף ב-RequireProduct: מי שמגיע בלי גישה
+  // מקבל הסבר במקום מסך ריק. ההרשאות עצמן נאכפות ב-RLS ולא בניתוב.
   const isSuperAdmin = profile?.role === 'super_admin'
-  const home = isSuperAdmin ? '/admin' : '/students'
+  const home = '/home'
+  const matzevet = (el: JSX.Element) => <RequireProduct product="matzevet">{el}</RequireProduct>
+  const bagrut = (el: JSX.Element) => <RequireProduct product="bagrut">{el}</RequireProduct>
 
   return (
     <Routes>
@@ -58,21 +62,23 @@ export default function App() {
       <Route path="/about" element={<About />} />
       <Route path="/contact" element={<Contact />} />
 
-      <Route path="/students" element={<Dashboard />} />
-      <Route path="/students/:code" element={<Dashboard />} />
-      <Route path="/pivot" element={<Pivot />} />
-      <Route path="/pivot/:code" element={<Pivot />} />
+      <Route path="/home" element={<Home />} />
+
+      <Route path="/students" element={matzevet(<Dashboard />)} />
+      <Route path="/students/:code" element={matzevet(<Dashboard />)} />
+      <Route path="/pivot" element={matzevet(<Pivot />)} />
+      <Route path="/pivot/:code" element={matzevet(<Pivot />)} />
       {/* רשימת הטבלאות הייעודיות, ופתיחת אחת מהן בטבלה הראשית */}
-      <Route path="/views/:code" element={<SavedViews />} />
-      <Route path="/views/:code/:viewId" element={<Dashboard />} />
+      <Route path="/views/:code" element={matzevet(<SavedViews />)} />
+      <Route path="/views/:code/:viewId" element={matzevet(<Dashboard />)} />
       {/* עדכון מצב"ת — מנהל רשות וגם מנהל־על; ההרשאה נאכפת ב-RLS */}
-      <Route path="/upload/:code" element={<UpdateData />} />
+      <Route path="/upload/:code" element={matzevet(<UpdateData />)} />
       {/* קליטת דרג ב' (גנים) — אותה הרשאה, טבלה אחרת לגמרי */}
-      <Route path="/upload-ganim/:code" element={<UpdateGanim />} />
+      <Route path="/upload-ganim/:code" element={matzevet(<UpdateGanim />)} />
 
       {/* מודול זכאות לבגרות — המעטפת טוענת את הסבב פעם אחת לכל המסכים */}
-      <Route path="/bagrut" element={<BagrutShell />} />
-      <Route path="/bagrut/:code" element={<BagrutShell />}>
+      <Route path="/bagrut" element={bagrut(<BagrutShell />)} />
+      <Route path="/bagrut/:code" element={bagrut(<BagrutShell />)}>
         <Route index element={<BagrutHome />} />
         <Route path="students" element={<BagrutStudents />} />
         <Route path="subject/:key" element={<BagrutSubject />} />

@@ -17,6 +17,8 @@ export interface UserProfile {
   role: 'viewer' | 'admin' | 'super_admin'
   /** קודי הרשויות שהמשתמש משויך אליהן (אפיון: "רשות = עולם") */
   authority_codes: string[]
+  /** היקף במצבת; 'none' = אין גישה למצבת (מיגרציה 032) */
+  scope_level: 'none' | 'council' | 'locality' | 'school'
   /** תפקיד בעברית — "מזכירת בית ספר", "מנהל אגף החינוך" (הערה 1) */
   job_title?: string | null
   /** שם המוסד, למשתמש שהוא בית-ספרי ולא רשותי (הערה 1) */
@@ -31,7 +33,20 @@ export interface UserProfile {
   bagrut_subject_keys?: string[]
 }
 
-const BASE_COLUMNS = 'id, email, display_name, role, authority_codes'
+const BASE_COLUMNS = 'id, email, display_name, role, authority_codes, scope_level'
+
+/**
+ * לאיזה מוצר יש למשתמש גישה — לניתוב ולתצוגה בלבד. האכיפה עצמה ב-RLS
+ * (מלכודת 16): מצבת — scope_level ≠ 'none'; בגרות — bagrut_role.
+ */
+export function productAccess(p: UserProfile | null) {
+  const superAdmin = p?.role === 'super_admin'
+  return {
+    superAdmin,
+    matzevet: Boolean(p) && (superAdmin || (p!.scope_level ?? 'council') !== 'none'),
+    bagrut: Boolean(p) && (superAdmin || Boolean(p!.bagrut_role)),
+  }
+}
 /**
  * שדות התפקיד והמוסד תלויים במיגרציה שטרם הורצה על המסד.
  * הבקשה מנסה אותם קודם, ואם העמודות אינן קיימות היא נופלת בחזרה לבסיסיות —

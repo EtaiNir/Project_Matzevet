@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useMatch, useNavigate, useParams } 
 import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import ModuleSwitch from '@/components/ModuleSwitch'
-import { fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
+import { BAGRUT_ROLE_LABELS, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
   buildIndex,
   eligibilityKind,
@@ -68,14 +68,6 @@ function ZoomBar({ zoom, onChange }: { zoom: number; onChange: (z: number) => vo
       </div>
     </div>
   )
-}
-
-const BAGRUT_ROLE_LABELS: Record<string, string> = {
-  council: 'צפייה מועצתית',
-  coordinator: 'רכז/ת בגרויות',
-  grade_coordinator: 'רכז/ת שכבה',
-  subject_coordinator: 'רכז/ת מקצוע',
-  homeroom: 'מחנך/ת',
 }
 
 /**
@@ -199,7 +191,10 @@ export default function BagrutShell() {
     <div className="flex h-full flex-col overflow-hidden bg-slate-50">
       {/* ── כותרת ── */}
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-        <Logo className="h-7 w-7 shrink-0" />
+        {/* הלוגו מוביל לאזור האישי — משם עוברים בין המוצרים */}
+        <Link to="/home" title="לאזור האישי" className="shrink-0 rounded-lg transition hover:opacity-80">
+          <Logo className="h-7 w-7" />
+        </Link>
         {authorities.length > 1 ? (
           <select
             value={authorityCode}
