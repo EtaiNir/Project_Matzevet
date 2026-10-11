@@ -49,6 +49,8 @@ export default function BagrutStudents() {
     missing: params.get('missing') ?? '',
     weak: params.get('weak') ?? '',
     nogrades: params.get('nogrades') ?? '',
+    // בלי תוכנית התערבות (אף פעולה) — מהאזור האישי: "על הסף בלי תוכנית"
+    noplan: params.get('noplan') ?? '',
   }
   // שכבה שאינה מסיימת — אין לה T2, ועמודות הזכאות היו ריקות לגמרי
   const hideT2 = Boolean(f.grade && round.graduating_grade && f.grade !== round.graduating_grade)
@@ -92,10 +94,14 @@ export default function BagrutStudents() {
       // weak=1 — יש ציון מתחת ל-55; weak=0 — אין (הצד הירוק של הפס בתמונת המצב)
       if (f.weak && Boolean(summaries.get(s.student_id)?.weakGrades) !== (f.weak !== '0')) return false
       if (f.nogrades && summaries.get(s.student_id)?.subjects) return false
+      if (f.noplan) {
+        const c = data.actionCounts.get(s.student_id)
+        if (c && c.active + c.done) return false
+      }
       if (q && !(displayName(s).includes(q) || s.student_id.includes(q))) return false
       return true
     })
-  }, [data, summaries, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades])
+  }, [data, summaries, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades, f.noplan])
 
   const toggle = async (s: BagrutStudent, flag: TrackingFlag) => {
     const cur = data.tracking.get(s.student_id)
@@ -265,6 +271,7 @@ export default function BagrutStudents() {
     f.grade ? `שכבה ${f.grade}` : '',
     f.weak ? (f.weak === '0' ? 'בלי ציון מתחת ל-55' : 'ציון מתחת ל-55') : '',
     f.nogrades ? 'בלי ציונים' : '',
+    f.noplan ? 'בלי תוכנית התערבות' : '',
     f.kind ? (f.kind === 'eligible_any' ? 'זכאים' : ELIGIBILITY_META[f.kind as EligibilityKind]?.short) : '',
     f.cls,
     f.blocker ? BLOCKER_LABELS[f.blocker as BlockerKind] : '',
