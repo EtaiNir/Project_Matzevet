@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import AuditLog from '@/components/admin/AuditLog'
+import HomeLink from '@/components/HomeLink'
 import {
   fetchAuthorities,
   fetchClients,
@@ -103,6 +104,7 @@ export default function Admin() {
           >
             + הוספת מועצה
           </button>
+          <HomeLink />
           <span className="text-slate-500">{profile?.display_name ?? profile?.email}</span>
           <button
             onClick={signOut}

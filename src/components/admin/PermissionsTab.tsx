@@ -47,6 +47,9 @@ export default function PermissionsTab({ code }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  // הסיסמה שנקבעה זה עתה — מוצגת עד שסוגרים, כדי למסור אותה למשתמש. היא אינה
+  // נשמרת בשום מקום: המערכת שומרת רק גיבוב, ואת הסיסמה הנוכחית אי אפשר לשחזר.
+  const [setPw, setSetPw] = useState<{ who: string; password: string } | null>(null)
 
   async function reload() {
     const r = await fetchUsers()
@@ -67,7 +70,6 @@ export default function PermissionsTab({ code }: Props) {
   }, [product])
 
   const inRashut = users.filter((u) => u.authority_codes.includes(code))
-  const others = users.filter((u) => !u.authority_codes.includes(code))
   // מי שיש לו גישה למוצר — קודם; מי שאין — אחריו, מעומעם
   const rows = useMemo(
     () => [...inRashut].sort((a, b) => Number(userProducts(b)[product]) - Number(userProducts(a)[product])),
@@ -118,7 +120,10 @@ export default function PermissionsTab({ code }: Props) {
       } else {
         await updateUserPermissions(draft.id, { ...shared, ...bagrutPatch(access ? draft.bagrut_role ?? 'coordinator' : null, draft) })
       }
-      if (newPassword) await setUserPassword(draft.id, newPassword)
+      if (newPassword) {
+        await setUserPassword(draft.id, newPassword)
+        setSetPw({ who: draft.display_name || draft.email, password: newPassword })
+      }
       await reload()
       setEditing(null)
       setDraft(null)
@@ -163,6 +168,15 @@ export default function PermissionsTab({ code }: Props) {
     <div className="space-y-6">
       {error && <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">שגיאה: {error}</p>}
       {notice && <p className="rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{notice}</p>}
+      {setPw && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <span>הסיסמה החדשה של <strong>{setPw.who}</strong>:</span>
+          <code dir="ltr" className="rounded bg-white px-2 py-1 font-mono text-base ring-1 ring-emerald-200">{setPw.password}</code>
+          <button onClick={() => navigator.clipboard?.writeText(setPw.password)} className="rounded-lg border border-emerald-300 bg-white px-3 py-1 hover:bg-emerald-100">העתקה</button>
+          <span className="text-xs text-emerald-700">מוצגת רק עכשיו — אחרי סגירה אי אפשר לראות אותה שוב.</span>
+          <button onClick={() => setSetPw(null)} className="mr-auto text-emerald-700 hover:text-emerald-900" title="סגירה">✕</button>
+        </div>
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -288,6 +302,10 @@ export default function PermissionsTab({ code }: Props) {
                               className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-slate-50">🎲</button>
                           </div>
                           {newPassword.length > 0 && newPassword.length < 8 && <p className="mt-1 text-xs text-amber-700">עוד {8 - newPassword.length} תווים לפחות</p>}
+                          <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-slate-500">
+                            את הסיסמה הנוכחית אי אפשר להציג — המערכת שומרת רק גיבוב שלה, לא את הסיסמה עצמה.
+                            אם המשתמש שכח אותה, קובעים כאן חדשה; היא תוצג אחרי השמירה כדי למסור לו.
+                          </p>
                         </div>
                       </div>
                     </details>
@@ -310,20 +328,6 @@ export default function PermissionsTab({ code }: Props) {
           })}
         </div>
       </section>
-
-      {others.length > 0 && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h3 className="mb-3 font-bold text-slate-600">משתמשים אחרים במערכת</h3>
-          <ul className="space-y-1 text-sm text-slate-500">
-            {others.map((u) => (
-              <li key={u.id} className="flex justify-between gap-2">
-                <span dir="ltr" className="font-mono text-xs">{u.email}</span>
-                <span>{ROLE_LABELS[u.role]}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </div>
   )
 }

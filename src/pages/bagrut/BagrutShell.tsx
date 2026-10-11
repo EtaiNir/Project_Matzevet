@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation, useMatch, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
+import HomeLink from '@/components/HomeLink'
 import ModuleSwitch from '@/components/ModuleSwitch'
 import { BAGRUT_ROLE_LABELS, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
@@ -216,6 +217,7 @@ export default function BagrutShell() {
           </span>
         )}
         <ModuleSwitch authorityCode={authorityCode} />
+        <HomeLink />
 
         {rounds && rounds.length > 0 && round && (
           <select

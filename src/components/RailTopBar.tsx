@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import Logo from '@/components/brand/Logo'
+import HomeLink from '@/components/HomeLink'
 import ModuleSwitch from '@/components/ModuleSwitch'
 import type { PivotNavState } from '@/lib/pivot'
 
@@ -113,6 +114,7 @@ export default function RailTopBar({
         )}
 
         <ModuleSwitch authorityCode={authorityCode} />
+        <HomeLink />
 
         <span className="mr-auto" />
 
