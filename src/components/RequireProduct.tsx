@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { productAccess, useAuth } from '@/context/AuthContext'
+import { IconLock } from '@/components/brand/Icons'
 
 const NAMES = { matzevet: 'מצבת תלמידים', bagrut: 'זכאות לבגרות' } as const
 
@@ -17,7 +18,7 @@ export default function RequireProduct({ product, children }: { product: keyof t
   return (
     <div className="flex min-h-full items-center justify-center bg-slate-50 p-6">
       <div className="max-w-md rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-        <div className="text-4xl">🔒</div>
+        <IconLock className="mx-auto h-10 w-10 text-slate-400" />
         <h1 className="mt-3 text-xl font-bold text-slate-800">אין לך גישה ל{NAMES[product]}</h1>
         <p className="mt-2 text-slate-600">לבקשת גישה — מנהל המערכת ברשות שלך.</p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">

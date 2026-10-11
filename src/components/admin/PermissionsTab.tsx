@@ -299,7 +299,7 @@ export default function PermissionsTab({ code }: Props) {
                             <input id={`pw-${draft.id}`} dir="ltr" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
                               placeholder="ללא שינוי" className="w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-sky-400 focus:outline-none" />
                             <button type="button" onClick={() => setNewPassword(suggestPassword())} title="הצע סיסמה"
-                              className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-slate-50">🎲</button>
+                              className="shrink-0 whitespace-nowrap rounded-lg border border-slate-300 px-3 text-sm transition hover:bg-slate-50">הצעת סיסמה</button>
                           </div>
                           {newPassword.length > 0 && newPassword.length < 8 && <p className="mt-1 text-xs text-amber-700">עוד {8 - newPassword.length} תווים לפחות</p>}
                           <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-slate-500">

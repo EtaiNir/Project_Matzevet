@@ -67,7 +67,7 @@ export function MultiPick({ label, options, selected, onChange, loading = false,
         </div>
       )}
       {!loading && options.length > 0 && selected.length === 0 && emptyWarning && (
-        <p className="mt-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-800">⚠ {emptyWarning}</p>
+        <p className="mt-1.5 rounded-lg bg-amber-50 px-3 py-1.5 text-xs text-amber-800">{emptyWarning}</p>
       )}
     </div>
   )
