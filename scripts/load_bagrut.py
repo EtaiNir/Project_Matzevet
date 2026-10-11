@@ -926,6 +926,24 @@ def main():
                     {', '.join(f'{k} = excluded.{k}' for k in cols if k != 'code')}, updated_at = now()""",
                     [tuple(q[k] for k in cols) for q in index.values()])
 
+            # רשימת בתי הספר (מיגרציה 033): שם שנקבע באתר גובר על השם שבקבצים.
+            # בית ספר שלא נרשם — נרשם כאן, עם השם מהקבצים. השמירה בנקודת ביניים:
+            # מסד שעוד אין בו את הטבלה לא מפיל את הקליטה.
+            c.execute("savepoint school_name")
+            try:
+                c.execute("""select school_name from public.bagrut_schools
+                             where authority_code=%s and school_code=%s""", (code, a.school))
+                row = c.fetchone()
+                if row:
+                    school_name = row[0]
+                else:
+                    c.execute("""insert into public.bagrut_schools (authority_code, school_code, school_name)
+                                 values (%s,%s,%s) on conflict do nothing""",
+                              (code, a.school, school_name or f"מוסד {a.school}"))
+                c.execute("release savepoint school_name")
+            except psycopg2.Error:
+                c.execute("rollback to savepoint school_name")
+
             # סבב קיים עם אותו מפתח נמחק על כל שורותיו (cascade). המעקב נשאר —
             # הוא לפי בית ספר + ת"ז, לא לפי סבב.
             c.execute("""delete from public.bagrut_rounds

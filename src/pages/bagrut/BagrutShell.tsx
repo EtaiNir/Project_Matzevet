@@ -9,6 +9,7 @@ import {
   buildIndex,
   eligibilityKind,
   fetchRounds,
+  fetchSchoolNames,
   isOnTheEdge,
   loadRound,
   schoolsOf,
@@ -105,6 +106,7 @@ export default function BagrutShell() {
 
   // ── סבבים
   const [rounds, setRounds] = useState<BagrutRound[] | null>(null)
+  const [schoolNames, setSchoolNames] = useState<Map<string, string>>(new Map())
   const [roundId, setRoundId] = useState<string>(() => {
     try {
       return sessionStorage.getItem(ROUND_KEY) ?? ''
@@ -118,15 +120,19 @@ export default function BagrutShell() {
     if (!authorityCode) return
     setRounds(null)
     setError(null)
-    fetchRounds(authorityCode)
-      .then(setRounds)
+    // שמות בתי הספר מהרשימה (033) — כשל בה לא חוסם; נופלים לשם שבקבצים
+    Promise.all([fetchRounds(authorityCode), fetchSchoolNames(authorityCode).catch(() => new Map<string, string>())])
+      .then(([rs, names]) => {
+        setSchoolNames(names)
+        setRounds(rs)
+      })
       .catch((e: Error) => setError(e.message))
   }, [authorityCode])
 
   // ── בתי הספר (החלטה 016): כל בית ספר נצפה בנפרד. מי שרואה בית ספר אחד בלבד
   // (מחנכת, רכז מקצוע, רכז בגרויות) נכנס אליו ישר; רשות עם כמה — בוחרים.
   // מנהל־על מקבל תמיד את מסך הבחירה, גם כשיש בית ספר אחד (אייל, 11.10).
-  const schools = useMemo(() => schoolsOf(rounds ?? []), [rounds])
+  const schools = useMemo(() => schoolsOf(rounds ?? [], schoolNames), [rounds, schoolNames])
   const school = schools.find((s) => s.code === schoolFromUrl) ?? null
   useEffect(() => {
     if (!rounds || !authorityCode) return

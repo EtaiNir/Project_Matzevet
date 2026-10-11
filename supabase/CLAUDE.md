@@ -44,6 +44,9 @@ secrets). פריסה: [server-migration.md](../docs/server-migration.md#פריס
 רכז מקצוע רואה את כל בית הספר — `bagrut_subject_keys` הוא מיקוד במסכים, לא
 הגבלה (מיגרציה 030). טבלאות הצוות (`bagrut_tracking`, `bagrut_actions`,
 `bagrut_log`, `bagrut_ai_analysis`) לעולם אינן נמחקות בקליטה.
+**כל בית ספר בנפרד** ([decisions/016](../docs/decisions/016-bagrut-per-school.md)) —
+`school_code` בכל שורה, לא טבלה לכל בית ספר. `bagrut_schools` (033) מחזיקה את
+שם בית הספר, והוא גובר על השם שבקבצים.
 **זכאות נקבעת רק לפי T2** — גם ב-`bagrut-ai` ([014 §8](../docs/decisions/014-bagrut-module.md)).
 
 ## מבנה מסד הנתונים

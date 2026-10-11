@@ -317,14 +317,15 @@ export interface BagrutSchool {
 }
 
 /**
- * בתי הספר מתוך הסבבים. אין רשימת בתי ספר נפרדת: בית ספר קיים מהסבב הראשון
- * שנקלט לו, וה-RLS של bagrut_rounds כבר מחזיר רק את בתי הספר שהמשתמש רשאי
- * לראות — כך שמחנכת או רכז מקצוע מקבלים בדיוק בית ספר אחד.
+ * בתי הספר שאפשר להיכנס אליהם — מתוך הסבבים. ה-RLS של bagrut_rounds כבר
+ * מחזיר רק את בתי הספר שהמשתמש רשאי לראות, כך שמחנכת או רכז מקצוע מקבלים
+ * בדיוק בית ספר אחד. השם — מרשימת בתי הספר (`names`, מיגרציה 033) כשיש,
+ * אחרת השם שהגיע בקבצים.
  */
-export function schoolsOf(rounds: BagrutRound[]): BagrutSchool[] {
+export function schoolsOf(rounds: BagrutRound[], names?: Map<string, string>): BagrutSchool[] {
   const by = new Map<string, BagrutSchool>()
   for (const r of rounds) {
-    const s = by.get(r.school_code) ?? { code: r.school_code, name: '', rounds: [] }
+    const s = by.get(r.school_code) ?? { code: r.school_code, name: names?.get(r.school_code) ?? '', rounds: [] }
     s.rounds.push(r)
     if (!s.name && r.school_name) s.name = r.school_name
     by.set(r.school_code, s)
@@ -332,6 +333,30 @@ export function schoolsOf(rounds: BagrutRound[]): BagrutSchool[] {
   return [...by.values()]
     .map((s) => ({ ...s, name: s.name || `מוסד ${s.code}` }))
     .sort((a, b) => a.name.localeCompare(b.name, 'he'))
+}
+
+/** רשימת בתי הספר של הרשות: סמל → שם (מיגרציה 033). RLS — רק בתי ספר גלויים */
+export async function fetchSchoolNames(authorityCode: string): Promise<Map<string, string>> {
+  const { data, error } = await supabase
+    .from('bagrut_schools')
+    .select('school_code, school_name')
+    .eq('authority_code', authorityCode)
+  if (error) throw new Error(`טעינת רשימת בתי הספר נכשלה: ${error.message}`)
+  return new Map((data ?? []).map((r) => [r.school_code as string, r.school_name as string]))
+}
+
+/**
+ * רישום בית ספר או שינוי שמו — מנהל־על בלבד (נאכף ב-RLS). השם כאן גובר על
+ * השם שבקבצים, בכל המסכים.
+ */
+export async function saveBagrutSchool(authorityCode: string, school: string, name: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('bagrut_schools')
+    .upsert({ authority_code: authorityCode, school_code: school, school_name: name.trim() })
+    .select('school_code')
+  if (error) throw new Error(`שמירת בית הספר נכשלה: ${error.message}`)
+  // RLS שחוסם עדכון לא זורק — מחזיר 0 שורות (מלכודת 21)
+  if (!data?.length) throw new Error('שמירת בית הספר נחסמה — רק מנהל־על רשאי')
 }
 
 const cache = new Map<string, Promise<RoundData>>()

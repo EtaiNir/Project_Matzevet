@@ -30,6 +30,9 @@ students_{code}_tier_b.
    מופיעה כ-29422003 ומשמעה 029422003. בלי ריפוד ל-9 זיהוי האחים מול
    הטבלה הראשית פשוט לא היה תופס.
 """
+# `dict | None` בחתימות — בלי זה נופל בפייתון 3.9 (המחשב של סבא, אם לא עודכן)
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json

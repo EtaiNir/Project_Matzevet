@@ -1,14 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { fetchBagrutUploads, fetchRounds, schoolsOf, type BagrutRound } from '@/lib/bagrut'
+import {
+  fetchBagrutUploads,
+  fetchRounds,
+  fetchSchoolNames,
+  saveBagrutSchool,
+  schoolsOf,
+  type BagrutRound,
+} from '@/lib/bagrut'
 import { BagrutUploadPanel } from '@/pages/bagrut/BagrutUpload'
 
 /**
  * נתוני הבגרות של לקוח — ברמת בית הספר (החלטה 016).
  *
  * כרטיס לכל בית ספר; בוחרים אחד ורואים את הסבבים שלו, נכנסים אליו במערכת
- * ומעלים לו סבב חדש. בית ספר חדש נוצר מהקליטה הראשונה שלו — מקלידים סמל
- * מוסד, והסוכן בודק שהוא תואם לקבצים.
+ * ומעלים לו סבב חדש. בית ספר חדש נרשם עם סמל ושם (מיגרציה 033) — והשם הזה
+ * גובר על השם שבקבצים. הסוכן בודק שסמל המוסד תואם לקבצים.
  *
  * בית הספר שנבחר נשמר בכתובת (`?school=`), כדי שאפשר יהיה לקשר אליו.
  */
@@ -17,35 +24,45 @@ interface SchoolRow {
   code: string
   name: string
   rounds: BagrutRound[]
-  /** קליטה שעוד לא הסתיימה או שנכשלה — בית ספר שעדיין אין לו סבב */
-  pendingOnly: boolean
 }
+
+const input = 'block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300'
 
 export default function BagrutData({ code }: { code: string }) {
   const [params, setParams] = useSearchParams()
   const selected = params.get('school')
   const [schools, setSchools] = useState<SchoolRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // בית ספר חדש
   const [adding, setAdding] = useState(false)
   const [newCode, setNewCode] = useState('')
+  const [newName, setNewName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // שינוי שם
+  const [renaming, setRenaming] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const [rounds, uploads, names] = await Promise.all([fetchRounds(code), fetchBagrutUploads(code), fetchSchoolNames(code)])
+    const rows: SchoolRow[] = schoolsOf(rounds, names)
+    const has = (c: string) => rows.some((r) => r.code === c)
+    // בית ספר שנרשם ועוד לא נקלט לו סבב
+    for (const [c, name] of names) if (!has(c)) rows.push({ code: c, name, rounds: [] })
+    // קליטה ישנה בלי רישום — שתופיע, כדי שיהיה אפשר לעקוב
+    for (const u of uploads) if (!has(u.school_code)) rows.push({ code: u.school_code, name: u.report?.school_name ?? `מוסד ${u.school_code}`, rounds: [] })
+    rows.sort((a, b) => a.name.localeCompare(b.name, 'he'))
+    setSchools(rows)
+  }, [code])
 
   useEffect(() => {
     setSchools(null)
-    Promise.all([fetchRounds(code), fetchBagrutUploads(code)])
-      .then(([rounds, uploads]) => {
-        const rows: SchoolRow[] = schoolsOf(rounds).map((s) => ({ ...s, pendingOnly: false }))
-        // בית ספר שנשלחה לו קליטה ועוד אין לו סבב — שיופיע, כדי שיהיה אפשר לעקוב
-        for (const u of uploads) {
-          if (rows.some((r) => r.code === u.school_code)) continue
-          rows.push({ code: u.school_code, name: u.report?.school_name ?? `מוסד ${u.school_code}`, rounds: [], pendingOnly: true })
-        }
-        setSchools(rows)
-      })
-      .catch((e: Error) => setError(e.message))
-  }, [code])
+    load().catch((e: Error) => setError(e.message))
+  }, [load])
 
   const choose = (school: string | null) => {
     setAdding(false)
+    setRenaming(null)
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('product', 'bagrut')
@@ -55,9 +72,44 @@ export default function BagrutData({ code }: { code: string }) {
     }, { replace: true })
   }
 
+  async function addSchool() {
+    setError(null)
+    if (schools?.some((s) => s.code === newCode)) {
+      setError(`בית ספר ${newCode} כבר קיים — בחרו אותו מהרשימה`)
+      return
+    }
+    setSaving(true)
+    try {
+      await saveBagrutSchool(code, newCode, newName)
+      await load()
+      choose(newCode)
+      setNewCode('')
+      setNewName('')
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function rename(school: string) {
+    if (!renaming?.trim()) return
+    setSaving(true)
+    setError(null)
+    try {
+      await saveBagrutSchool(code, school, renaming)
+      await load()
+      setRenaming(null)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const current = useMemo(() => {
     if (!selected) return null
-    return schools?.find((s) => s.code === selected) ?? { code: selected, name: `מוסד ${selected}`, rounds: [], pendingOnly: true }
+    return schools?.find((s) => s.code === selected) ?? { code: selected, name: `מוסד ${selected}`, rounds: [] }
   }, [schools, selected])
 
   return (
@@ -100,10 +152,7 @@ export default function BagrutData({ code }: { code: string }) {
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
-                  if (/^\d+$/.test(newCode)) {
-                    choose(newCode)
-                    setNewCode('')
-                  }
+                  if (newCode && newName.trim()) addSchool()
                 }}
                 className="flex flex-col gap-2 rounded-xl border-2 border-dashed border-sky-300 p-4"
               >
@@ -116,12 +165,21 @@ export default function BagrutData({ code }: { code: string }) {
                     value={newCode}
                     onChange={(e) => setNewCode(e.target.value.replace(/\D/g, ''))}
                     placeholder="610006"
-                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-1.5 font-mono text-sm focus:border-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-300"
+                    className={`${input} mt-1 font-mono`}
+                  />
+                </label>
+                <label className="text-sm font-semibold text-slate-600">
+                  שם בית הספר
+                  <input
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="אג'יאל"
+                    className={`${input} mt-1`}
                   />
                 </label>
                 <div className="flex gap-2">
-                  <button disabled={!newCode} className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
-                    המשך לקליטה
+                  <button disabled={!newCode || !newName.trim() || saving} className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+                    {saving ? 'שומר…' : 'הוספה וקליטה'}
                   </button>
                   <button type="button" onClick={() => setAdding(false)} className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100">
                     ביטול
@@ -144,14 +202,36 @@ export default function BagrutData({ code }: { code: string }) {
         <>
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="font-bold text-violet-900">
-                  {current.name} <span className="font-mono text-sm font-normal text-slate-400" dir="ltr">{current.code}</span>
-                </h3>
+              <div className="min-w-0">
+                {renaming != null ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      rename(current.code)
+                    }}
+                    className="flex flex-wrap items-center gap-2"
+                  >
+                    <input autoFocus value={renaming} onChange={(e) => setRenaming(e.target.value)} className={`${input} w-64`} />
+                    <button disabled={!renaming.trim() || saving} className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+                      {saving ? 'שומר…' : 'שמירה'}
+                    </button>
+                    <button type="button" onClick={() => setRenaming(null)} className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100">
+                      ביטול
+                    </button>
+                  </form>
+                ) : (
+                  <h3 className="flex flex-wrap items-center gap-2 font-bold text-violet-900">
+                    {current.name}
+                    <span className="font-mono text-sm font-normal text-slate-400" dir="ltr">{current.code}</span>
+                    <button onClick={() => setRenaming(current.name)} className="rounded-md px-1.5 py-0.5 text-xs font-medium text-sky-700 hover:bg-sky-50">
+                      שינוי שם
+                    </button>
+                  </h3>
+                )}
                 <p className="text-sm text-slate-500">
                   {current.rounds.length
                     ? 'תמונת המצב, רשימת התלמידים, המעקב ותוכנית ההתערבות של בית הספר.'
-                    : 'לבית הספר הזה עוד לא נקלט סבב. העלו את הקבצים למטה — בית הספר ייווצר מהקליטה.'}
+                    : 'לבית הספר הזה עוד לא נקלט סבב. העלו את הקבצים למטה.'}
                 </p>
               </div>
               {current.rounds.length > 0 && (
