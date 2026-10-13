@@ -189,6 +189,7 @@ export default function BagrutSubject() {
           initialSort={{ key: 'cum', dir: 'asc' }}
           countLabel="תלמידים"
           rowTitle={(r) => displayName(r.s)}
+          storageKey="subject"
           onRowClick={(r, _i, sorted) => {
             const state: CardNavState = { ids: sorted.map((x) => x.s.student_id), fromLabel: subject.subject_name, backTo: location.pathname }
             navigate(`${base}/student/${r.s.student_id}`, { state })

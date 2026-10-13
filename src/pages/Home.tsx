@@ -5,6 +5,8 @@ import Logo from '@/components/brand/Logo'
 import { IconGraduation, IconLandmark, IconLock, IconRoster } from '@/components/brand/Icons'
 import { supabase } from '@/lib/supabase'
 import { fetchAuthorities, ROLE_LABELS, BAGRUT_ROLE_LABELS, type Authority } from '@/lib/admin'
+import { loadAdminOverview, loadBagrutOverviews, loadManagerOverview, type AdminOverview, type BagrutOverview, type ManagerOverview, type Todo } from '@/lib/home'
+import { AuthoritiesSection, BagrutSection, ManagerSection, TodoSection } from '@/components/home/RoleBlocks'
 
 /**
  * האזור האישי — הדף שכל משתמש פוגש אחרי הכניסה (אייל, 11.10).
@@ -135,6 +137,40 @@ export default function Home() {
     })
   }, [access.bagrut, codes])
 
+  // ── תוכן לפי תפקיד: מנהל־על · מנהל רשות · רכז בגרויות / רכז שכבה / מחנך
+  const isManager = !access.superAdmin && profile?.role === 'admin' && access.matzevet
+  const bagrutWorker = !access.superAdmin && ['coordinator', 'grade_coordinator', 'homeroom'].includes(profile?.bagrut_role ?? '')
+  const [admin, setAdmin] = useState<AdminOverview | null>(null)
+  const [managers, setManagers] = useState<ManagerOverview[] | null>(null)
+  const [bagrutOv, setBagrutOv] = useState<BagrutOverview[] | null>(null)
+
+  useEffect(() => {
+    if (!access.superAdmin || !authorities || !matzevet) return
+    loadAdminOverview(authorities, new Map(matzevet.map((m) => [m.code, m.students])))
+      .then(setAdmin)
+      .catch(() => setAdmin({ todos: [], users: 0 }))
+  }, [access.superAdmin, authorities, matzevet])
+
+  useEffect(() => {
+    if (!isManager || codes == null) return
+    Promise.all(codes.map((c) => loadManagerOverview(c, nameOf(c)))).then(setManagers).catch(() => setManagers([]))
+    // nameOf תלוי ב-authorities; השם מתעדכן ברינדור, לא צריך לטעון מחדש
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isManager, codes])
+
+  useEffect(() => {
+    if (!bagrutWorker || codes == null) return
+    loadBagrutOverviews(codes, profile?.bagrut_role ?? '').then(setBagrutOv).catch(() => setBagrutOv([]))
+  }, [bagrutWorker, codes, profile?.bagrut_role])
+
+  const roleBased = access.superAdmin || isManager || bagrutWorker
+  const todos: Todo[] = [
+    ...(admin?.todos ?? []),
+    ...(managers ?? []).flatMap((m) => m.todos),
+    ...(bagrutOv ?? []).flatMap((o) => o.todos),
+  ]
+  const todosLoading = (access.superAdmin && !admin) || (isManager && !managers) || (bagrutWorker && !bagrutOv)
+
   const name = profile?.display_name || profile?.email?.split('@')[0] || ''
   const today = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const hebrew = hebrewDate()
@@ -144,13 +180,32 @@ export default function Home() {
   ].filter(Boolean)
   const none = !access.matzevet && !access.bagrut
 
-  // מספרים מרכזיים לפס העליון — רק ממה שכבר נטען, ורק למוצרים שיש גישה אליהם
-  const stats: { label: string; value: number | null }[] = []
-  if (access.matzevet) stats.push({ label: 'תלמידים במצבת', value: matzevet ? matzevet.reduce((s, m) => s + m.students, 0) : null })
-  if (access.superAdmin) stats.push({ label: 'רשויות במערכת', value: codes ? codes.length : null })
-  if (access.bagrut) {
-    stats.push({ label: 'בתי ספר בבגרות', value: bagrut ? bagrut.reduce((s, b) => s + b.rounds.length, 0) : null })
-    stats.push({ label: 'למעקב השבוע', value: bagrut ? bagrut.reduce((s, b) => s + b.followups, 0) : null })
+  // מספרים מרכזיים לפס העליון — בגודל העולם של המשתמש, לפי התפקיד
+  let stats: { label: string; value: number | string | null; sub?: string }[] = []
+  const totalStudents = matzevet ? matzevet.reduce((s, m) => s + m.students, 0) : null
+  const schools = bagrut ? bagrut.reduce((s, b) => s + b.rounds.length, 0) : null
+  if (access.superAdmin) {
+    stats = [
+      { label: 'רשויות פעילות', value: codes ? codes.length : null },
+      { label: 'משתמשים', value: admin ? admin.users : null, sub: 'בלי מנהלי־על' },
+      { label: 'תלמידים במצבת', value: totalStudents },
+      { label: 'בתי ספר בבגרות', value: schools },
+    ]
+  } else if (bagrutWorker && bagrutOv?.length) {
+    stats = bagrutOv[0].stats
+  } else if (isManager && managers?.length) {
+    const m = managers[0]
+    stats = [
+      { label: 'תלמידים משובצים', value: m.placed },
+      ...(m.ganim ? [{ label: 'ילדי גן', value: m.ganim }] : []),
+      { label: 'עדכון אחרון', value: m.lastUpdate ? new Date(m.lastUpdate).toLocaleDateString('he-IL') : '—' },
+    ]
+  } else {
+    if (access.matzevet) stats.push({ label: 'תלמידים במצבת', value: totalStudents })
+    if (access.bagrut) {
+      stats.push({ label: 'בתי ספר בבגרות', value: schools })
+      stats.push({ label: 'למעקב השבוע', value: bagrut ? bagrut.reduce((s, b) => s + b.followups, 0) : null })
+    }
   }
 
   return (
@@ -195,8 +250,9 @@ export default function Home() {
                 <dl className="mt-6 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap">
                   {stats.map((s) => (
                     <div key={s.label} className="rounded-2xl bg-white/10 px-4 py-2.5 ring-1 ring-white/15 backdrop-blur-sm sm:min-w-[8.5rem]">
-                      <dd className="text-2xl font-extrabold tabular-nums">{s.value == null ? '…' : fmt(s.value)}</dd>
+                      <dd className="text-2xl font-extrabold tabular-nums">{s.value == null ? '…' : typeof s.value === 'number' ? fmt(s.value) : s.value}</dd>
                       <dt className="text-xs text-sky-100">{s.label}</dt>
+                      {s.sub && <dt className="text-[11px] text-sky-200/80">{s.sub}</dt>}
                     </div>
                   ))}
                 </dl>
@@ -217,6 +273,24 @@ export default function Home() {
             </section>
           ) : (
             <>
+              {roleBased && <TodoSection todos={todos} loading={todosLoading} />}
+              {(managers ?? []).map((m) => (
+                <ManagerSection key={m.code} m={m} name={nameOf(m.code)} ago={ago(m.lastUpdate)} />
+              ))}
+              {(bagrutOv ?? []).map((o) => <BagrutSection key={o.round.id} o={o} />)}
+              {access.superAdmin && matzevet && bagrut && (
+                <AuthoritiesSection
+                  // גם רשות שיש בה רק בגרות (בית ספר בלי מצבת, כמו אבו רביע)
+                  rows={[...new Set([...matzevet.map((m) => m.code), ...bagrut.map((b) => b.code)])].map((code) => {
+                    const m = matzevet.find((x) => x.code === code)
+                    return {
+                      code, name: nameOf(code), students: m?.students ?? null, updated: m ? ago(m.updated) : '',
+                      schools: bagrut.find((b) => b.code === code)?.rounds.length ?? 0,
+                    }
+                  })}
+                />
+              )}
+
               <h2 className="mb-3 mt-10 text-sm font-bold text-slate-500">המוצרים שלך</h2>
               <div className="grid gap-5 md:grid-cols-2">
                 {access.matzevet ? (

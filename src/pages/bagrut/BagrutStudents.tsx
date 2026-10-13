@@ -49,6 +49,8 @@ export default function BagrutStudents() {
     missing: params.get('missing') ?? '',
     weak: params.get('weak') ?? '',
     nogrades: params.get('nogrades') ?? '',
+    // בלי תוכנית התערבות (אף פעולה) — מהאזור האישי: "על הסף בלי תוכנית"
+    noplan: params.get('noplan') ?? '',
   }
   // שכבה שאינה מסיימת — אין לה T2, ועמודות הזכאות היו ריקות לגמרי
   const hideT2 = Boolean(f.grade && round.graduating_grade && f.grade !== round.graduating_grade)
@@ -89,12 +91,17 @@ export default function BagrutStudents() {
         if (f.blocker && !bs.some((b) => b.kind === f.blocker)) return false
         if (f.missing && !bs.some((b) => b.subjects?.includes(f.missing))) return false
       }
-      if (f.weak && !summaries.get(s.student_id)?.weakGrades) return false
+      // weak=1 — יש ציון מתחת ל-55; weak=0 — אין (הצד הירוק של הפס בתמונת המצב)
+      if (f.weak && Boolean(summaries.get(s.student_id)?.weakGrades) !== (f.weak !== '0')) return false
       if (f.nogrades && summaries.get(s.student_id)?.subjects) return false
+      if (f.noplan) {
+        const c = data.actionCounts.get(s.student_id)
+        if (c && c.active + c.done) return false
+      }
       if (q && !(displayName(s).includes(q) || s.student_id.includes(q))) return false
       return true
     })
-  }, [data, summaries, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades])
+  }, [data, summaries, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades, f.noplan])
 
   const toggle = async (s: BagrutStudent, flag: TrackingFlag) => {
     const cur = data.tracking.get(s.student_id)
@@ -196,7 +203,7 @@ export default function BagrutStudents() {
     },
     ...TRACKING_FLAGS.map(
       (fl): Column<BagrutStudent> => ({
-        key: fl.key, group: 'track', groupTitle: 'מעקב הצוות', header: fl.short, exportHeader: fl.label, width: 62, align: 'center',
+        key: fl.key, group: 'track', groupTitle: 'מעקב הצוות', header: fl.short, exportHeader: fl.label, width: 76, align: 'center',
         render: (s) => {
           const on = Boolean(data.tracking.get(s.student_id)?.[fl.key])
           return (
@@ -262,8 +269,9 @@ export default function BagrutStudents() {
   const label = [
     f.view === 'edge' ? 'על הסף' : f.view === 'graduating' ? 'השכבה המסיימת' : f.view === 'followup' ? 'מעקב השבוע' : '',
     f.grade ? `שכבה ${f.grade}` : '',
-    f.weak ? 'ציון מתחת ל-55' : '',
+    f.weak ? (f.weak === '0' ? 'בלי ציון מתחת ל-55' : 'ציון מתחת ל-55') : '',
     f.nogrades ? 'בלי ציונים' : '',
+    f.noplan ? 'בלי תוכנית התערבות' : '',
     f.kind ? (f.kind === 'eligible_any' ? 'זכאים' : ELIGIBILITY_META[f.kind as EligibilityKind]?.short) : '',
     f.cls,
     f.blocker ? BLOCKER_LABELS[f.blocker as BlockerKind] : '',
@@ -286,14 +294,20 @@ export default function BagrutStudents() {
           placeholder="חיפוש שם או ת״ז"
           className="w-44 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
         />
-        <select value={f.grade} onChange={(e) => set('grade', e.target.value)} className={select}>
-          <option value="">כל השכבות</option>
-          {grades.map((g) => <option key={g} value={g}>שכבה {g}</option>)}
-        </select>
-        <select value={f.cls} onChange={(e) => set('class', e.target.value)} className={select}>
-          <option value="">כל הכיתות</option>
-          {classes.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+        {/* ברשימה של כיתה אחת (מהסרגל או מתמונת המצב) השכבה והכיתה כבר נקבעו —
+            הן בכותרת, ואין מה לבחור. «ניקוי» מחזיר לכל התלמידים */}
+        {!f.cls && (
+          <>
+            <select value={f.grade} onChange={(e) => set('grade', e.target.value)} className={select}>
+              <option value="">כל השכבות</option>
+              {grades.map((g) => <option key={g} value={g}>שכבה {g}</option>)}
+            </select>
+            <select value={f.cls} onChange={(e) => set('class', e.target.value)} className={select}>
+              <option value="">כל הכיתות</option>
+              {classes.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </>
+        )}
         <select value={f.kind} onChange={(e) => set('kind', e.target.value)} className={select}>
           <option value="">כל הסטטוסים</option>
           <option value="eligible_any">זכאים (כולם)</option>
@@ -328,6 +342,7 @@ export default function BagrutStudents() {
         initialSort={{ key: 'class', dir: 'asc' }}
         countLabel="תלמידים"
         rowTitle={displayName}
+        storageKey="students"
         onRowClick={(s, _i, sorted) => {
           const state: CardNavState = {
             ids: sorted.map((x) => x.student_id),

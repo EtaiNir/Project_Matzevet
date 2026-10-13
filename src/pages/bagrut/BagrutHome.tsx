@@ -141,30 +141,26 @@ function GraduatingView() {
 
       {/* ── מדדים ── */}
       <div className="flex flex-wrap gap-4">
-        <Kpi value={`${pct}%`} label="אחוז זכאות" sub={`${eligible} מתוך ${grad.length}`} tone="sky" onClick={() => go('?view=graduating')}>
+        <Kpi value={`${pct}%`} label="אחוז הזכאות בשכבה" sub={`${eligible} זכאים מתוך ${grad.length} תלמידים`} tone="sky" onClick={() => go('?view=graduating')}>
           <Donut
             segments={segments(byKind)}
             size={76}
             center={<span className="text-xs font-bold text-slate-500">{grad.length}</span>}
           />
         </Kpi>
-        <Kpi value={byKind.eligible + byKind.one_negative} label="זכאים" sub={byKind.one_negative ? `מתוכם ${byKind.one_negative} במסלול שלילי אחד` : undefined} tone="green" onClick={() => go('?kind=eligible_any')} />
-        <Kpi value={byKind.not_eligible} label="אין זכאות" tone="red" onClick={() => go('?kind=not_eligible')} />
-        <Kpi value={edge} label="⚡ על הסף" sub="אין זכאות — וחסם אחד בלבד" tone="amber" onClick={() => go('?view=edge')} />
-        {fighting > 0 && <Kpi value={fighting} label="🚩 נלחמים על הזכאות" onClick={() => go('?flag=fighting')} />}
+        <Kpi value={byKind.eligible + byKind.one_negative} label="תלמידים זכאים" sub={byKind.one_negative ? `מתוכם ${byKind.one_negative} במסלול שלילי אחד` : `מתוך ${grad.length} בשכבה`} tone="green" onClick={() => go('?kind=eligible_any')} />
+        <Kpi value={byKind.not_eligible} label="תלמידים ללא זכאות" sub={`מתוך ${grad.length} בשכבה`} tone="red" onClick={() => go('?kind=not_eligible')} />
+        <Kpi value={edge} label="תלמידים על הסף" sub="ללא זכאות, עם חסם אחד בלבד" tone="amber" onClick={() => go('?view=edge')} />
+        {fighting > 0 && <Kpi value={fighting} label="תלמידים שסומנו «נלחמים על הזכאות»" sub="סימון של הצוות, בכל השכבות" onClick={() => go('?flag=fighting')} />}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-5">
         {/* ── לפי כיתה ── */}
         <Card title="לפי כיתה" className="lg:col-span-3">
-          <div className="mb-3 flex flex-wrap gap-3 text-xs text-slate-500">
-            {KIND_ORDER.map((k) => (
-              <span key={k} className="flex items-center gap-1">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: TONE[ELIGIBILITY_META[k].tone].fill }} />
-                {ELIGIBILITY_META[k].short}
-              </span>
-            ))}
-          </div>
+          <Legend
+            items={KIND_ORDER.map((k) => [TONE[ELIGIBILITY_META[k].tone].fill, ELIGIBILITY_META[k].short])}
+            note="המספר בפס: תלמידים · האחוז בקצה: שיעור הזכאים בכיתה · לחיצה על קטע בפס או על שם הכיתה פותחת את רשימת התלמידים"
+          />
           <div className="flex flex-col gap-2.5">
             {classes.map(([cls, counts]) => {
               const n = Object.values(counts).reduce((a, b) => a + b, 0)
@@ -186,6 +182,10 @@ function GraduatingView() {
 
         {/* ── חסמים ── */}
         <Card title="מה חוסם את מי שאין לו זכאות" className="lg:col-span-2">
+          <Legend
+            items={[['#fb7185', 'תלמידים שיש להם החסם']]}
+            note="המספר: תלמידים; לתלמיד אחד יכולים להיות כמה חסמים · לחיצה על שורה פותחת את רשימת התלמידים"
+          />
           <div className="flex flex-col gap-2">
             {blockers.kinds.map(([k, n]) => (
               <button key={k} onClick={() => go(`?blocker=${k}`)} className="group text-right">
@@ -201,15 +201,19 @@ function GraduatingView() {
           </div>
           {blockers.required.length > 0 && (
             <div className="mt-4 border-t border-slate-100 pt-3">
-              <div className="mb-2 text-xs font-bold text-slate-400">מקצועות חובה שחסרים</div>
+              <div className="mb-2 text-xs font-bold text-slate-400">מקצועות חובה שחסרים — ולכמה תלמידים</div>
               <div className="flex flex-wrap gap-1.5">
                 {blockers.required.map(([sub, n]) => (
                   <button
                     key={sub}
                     onClick={() => go(`?blocker=missing_required&missing=${encodeURIComponent(sub)}`)}
-                    className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-800 ring-1 ring-inset ring-rose-200 hover:bg-rose-100"
+                    title={`${sub} חסר ל-${n} תלמידים`}
+                    className="flex items-center gap-1.5 rounded-full bg-rose-50 py-1 pl-1 pr-2.5 text-xs font-medium text-rose-800 ring-1 ring-inset ring-rose-200 hover:bg-rose-100"
                   >
-                    {sub} <span className="font-bold tabular-nums">{n}</span>
+                    {sub}
+                    <span className="rounded-full bg-white px-1.5 py-0.5 font-bold tabular-nums ring-1 ring-inset ring-rose-200">
+                      {n === 1 ? 'תלמיד אחד' : `${n} תלמידים`}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -220,10 +224,11 @@ function GraduatingView() {
 
       {/* ── מקצועות ── */}
       <Card title={`השלמת מקצועות — שכבה ${round.graduating_grade ?? ''}`}>
+        <ProgressLegend />
         <div className="grid gap-x-8 gap-y-2.5 md:grid-cols-2">
           {subjectProgress.map(({ sub, takers, c }) => (
-            <button key={sub.subject_key} onClick={() => navigate(`${base}/subject/${sub.subject_key}`)} className="group flex items-center gap-3 text-right">
-              <span className="w-40 shrink-0 truncate text-sm font-medium text-slate-700 group-hover:text-sky-700">{sub.subject_name}</span>
+            <div key={sub.subject_key} className="flex items-center gap-3">
+              <SubjectLink name={sub.subject_name} onClick={() => navigate(`${base}/subject/${sub.subject_key}`)} />
               <div className="flex-1">
                 <StackedBar
                   height="h-3"
@@ -235,7 +240,7 @@ function GraduatingView() {
                 />
               </div>
               <span className="w-10 shrink-0 text-left text-xs tabular-nums text-slate-500">{takers}</span>
-            </button>
+            </div>
           ))}
         </div>
       </Card>
@@ -271,18 +276,14 @@ function ProgressView({ grade }: { grade: string }) {
     { key: 'not_started', value: c.not_started, color: '#cbd5e1', label: 'טרם החל' },
   ]
 
-  // לפי כיתה: סך מצבי המקצועות של כל תלמידי הכיתה
+  // לפי כיתה: כמה תלמידים יש להם ציון חלש (מתחת ל-55) בשאלון כלשהו
   const classes = useMemo(() => {
-    const m = new Map<string, { done: number; progress: number; not_started: number; weak: number; n: number }>()
+    const m = new Map<string, { weak: number; n: number }>()
     for (const s of students) {
       const c = s.class_name ?? '—'
-      if (!m.has(c)) m.set(c, { done: 0, progress: 0, not_started: 0, weak: 0, n: 0 })
+      if (!m.has(c)) m.set(c, { weak: 0, n: 0 })
       const x = m.get(c)!
-      const t = summaries.get(s.student_id)!
-      x.done += t.done
-      x.progress += t.progress
-      x.not_started += t.notStarted
-      x.weak += t.weakGrades > 0 ? 1 : 0
+      x.weak += summaries.get(s.student_id)!.weakGrades > 0 ? 1 : 0
       x.n++
     }
     return [...m.entries()].sort((a, b) => classSortKey(a[0]).localeCompare(classSortKey(b[0])))
@@ -314,38 +315,47 @@ function ProgressView({ grade }: { grade: string }) {
       </p>
 
       <div className="flex flex-wrap gap-4">
-        <Kpi value={students.length} label={`תלמידי שכבה ${grade}`} tone="sky" onClick={() => go('')} />
+        <Kpi value={students.length} label={`תלמידי שכבה ${grade}`} sub="כל תלמידי השכבה בסבב" tone="sky" onClick={() => go('')} />
         <Kpi value={avgDone.toFixed(1)} label="מקצועות שהושלמו — ממוצע לתלמיד" sub={`מתוך ${avgSubjects.toFixed(1)} מקצועות בממוצע`} tone="green" />
         <Kpi value={withWeak} label="תלמידים עם ציון מתחת ל-55" sub="בשאלון אחד לפחות" tone="amber" onClick={() => go('&weak=1')} />
-        {noGrades > 0 && <Kpi value={noGrades} label="בלי אף ציון שאלון" tone="red" onClick={() => go('&nogrades=1')} />}
+        {noGrades > 0 && <Kpi value={noGrades} label="תלמידים בלי אף ציון שאלון" sub="רשומים בסבב, בלי ציונים" tone="red" onClick={() => go('&nogrades=1')} />}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-5">
-        <Card title="לפי כיתה — מצב המקצועות" className="lg:col-span-3">
-          <div className="mb-3 flex gap-3 text-xs text-slate-500">
-            {progressSegs({ done: 0, progress: 0, not_started: 0 }).map((s) => (
-              <span key={s.key} className="flex items-center gap-1">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
-                {s.label}
-              </span>
-            ))}
-          </div>
+        <Card title="לפי כיתה — תלמידים עם ציון חלש" className="lg:col-span-3">
+          <Legend
+            items={[
+              ['#f59e0b', 'עם ציון חלש'],
+              ['#10b981', 'בלי ציון חלש'],
+            ]}
+            note="ציון חלש = ציון מתחת ל-55 בשאלון אחד לפחות · המספר בפס: תלמידים · האחוז בקצה: שיעור התלמידים עם ציון חלש בכיתה · לחיצה על קטע בפס או על שם הכיתה פותחת את רשימת התלמידים"
+          />
           <div className="flex flex-col gap-2.5">
             {classes.map(([cls, x]) => (
               <div key={cls} className="flex items-center gap-3">
                 <button onClick={() => go(`&class=${encodeURIComponent(cls)}`)} className="w-14 shrink-0 text-right text-sm font-bold text-slate-700 hover:text-sky-700">
                   {cls}
                 </button>
-                <div className="flex-1"><StackedBar segments={progressSegs(x)} /></div>
-                <span className="w-20 shrink-0 text-left text-xs text-slate-500" title="תלמידים עם ציון מתחת ל-55">
-                  {x.weak ? <span className="font-bold text-amber-700">{x.weak} חלשים</span> : '—'} / {x.n}
-                </span>
+                <div className="flex-1">
+                  <StackedBar
+                    segments={[
+                      { key: 'weak', value: x.weak, color: '#f59e0b', label: 'עם ציון חלש' },
+                      { key: 'ok', value: x.n - x.weak, color: '#10b981', label: 'בלי ציון חלש' },
+                    ]}
+                    onSegment={(k) => go(`&class=${encodeURIComponent(cls)}&weak=${k === 'weak' ? 1 : 0}`)}
+                  />
+                </div>
+                <span className="w-12 shrink-0 text-left text-sm font-bold tabular-nums text-slate-600">{x.n ? Math.round((x.weak / x.n) * 100) : 0}%</span>
               </div>
             ))}
           </div>
         </Card>
 
         <Card title="איפה הציונים החלשים" className="lg:col-span-2">
+          <Legend
+            items={[['#fbbf24', 'תלמידים עם ציון חלש במקצוע']]}
+            note="ציון חלש = ציון מתחת ל-55 בשאלון · המספרים: תלמידים עם ציון חלש במקצוע, מתוך הלומדים אותו · לחיצה על שורה פותחת את מסך המקצוע"
+          />
           <div className="flex flex-col gap-2">
             {[...subjects].sort((a, b) => b.weak - a.weak).filter((x) => x.weak > 0).slice(0, 10).map(({ sub, weak, takers }) => (
               <button key={sub.subject_key} onClick={() => navigate(`${base}/subject/${sub.subject_key}`)} className="group text-right">
@@ -364,16 +374,63 @@ function ProgressView({ grade }: { grade: string }) {
       </div>
 
       <Card title={`השלמת מקצועות — שכבה ${grade}`}>
+        <ProgressLegend />
         <div className="grid gap-x-8 gap-y-2.5 md:grid-cols-2">
           {subjects.map(({ sub, takers, c }) => (
-            <button key={sub.subject_key} onClick={() => navigate(`${base}/subject/${sub.subject_key}`)} className="group flex items-center gap-3 text-right">
-              <span className="w-40 shrink-0 truncate text-sm font-medium text-slate-700 group-hover:text-sky-700">{sub.subject_name}</span>
+            <div key={sub.subject_key} className="flex items-center gap-3">
+              <SubjectLink name={sub.subject_name} onClick={() => navigate(`${base}/subject/${sub.subject_key}`)} />
               <div className="flex-1"><StackedBar height="h-3" segments={progressSegs(c)} /></div>
               <span className="w-10 shrink-0 text-left text-xs tabular-nums text-slate-500">{takers}</span>
-            </button>
+            </div>
           ))}
         </div>
       </Card>
     </>
+  )
+}
+
+/** שם המקצוע הוא הקישור למסך המקצוע — הפס שלידו אינו לחיץ. */
+function SubjectLink({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={`${name} — למסך המקצוע`}
+      className="w-40 shrink-0 truncate text-right text-sm font-medium text-slate-700 hover:text-sky-700 hover:underline"
+    >
+      {name}
+    </button>
+  )
+}
+
+const PROGRESS_ITEMS: [string, string][] = [
+  ['#10b981', 'הושלם'],
+  ['#f59e0b', 'בתהליך'],
+  ['#cbd5e1', 'טרם החל'],
+]
+
+/** מקרא אחיד לכל כרטיס בדף: נקודות צבע, ומתחתן שורה שמסבירה מה כל מספר. */
+function Legend({ items, note }: { items: [string, string][]; note: string }) {
+  return (
+    <div className="mb-3 text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-500">
+        {items.map(([color, label]) => (
+          <span key={label} className="flex items-center gap-1">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+            {label}
+          </span>
+        ))}
+      </div>
+      <p className="mt-1 leading-relaxed text-slate-400">{note}</p>
+    </div>
+  )
+}
+
+/** מקרא לכרטיס "השלמת מקצועות" — זהה בשתי השכבות. */
+function ProgressLegend() {
+  return (
+    <Legend
+      items={PROGRESS_ITEMS}
+      note="המספר בפס: תלמידים · המספר בקצה השורה: סך הלומדים את המקצוע בשכבה · לחיצה על שם המקצוע פותחת את מסך המקצוע"
+    />
   )
 }

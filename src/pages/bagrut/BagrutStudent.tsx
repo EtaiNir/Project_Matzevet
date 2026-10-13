@@ -354,7 +354,7 @@ function AllQuestionnaires({ sid }: { sid: string }) {
   ]
   return (
     <div className="flex h-[60vh] flex-col">
-      <BagrutTable rows={rows} columns={columns} rowKey={(g) => `${g.subject_key}:${g.questionnaire_code}`} initialSort={{ key: 'sub', dir: 'asc' }} countLabel="שאלונים" rowTitle={(g) => `${g.questionnaire_code} · ${index.subjectByKey.get(g.subject_key)?.subject_name ?? ''}`} />
+      <BagrutTable rows={rows} columns={columns} rowKey={(g) => `${g.subject_key}:${g.questionnaire_code}`} initialSort={{ key: 'sub', dir: 'asc' }} countLabel="שאלונים" storageKey="student-grades" rowTitle={(g) => `${g.questionnaire_code} · ${index.subjectByKey.get(g.subject_key)?.subject_name ?? ''}`} />
     </div>
   )
 }
