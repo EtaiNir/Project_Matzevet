@@ -4,7 +4,7 @@ import { productAccess, useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import { IconGraduation, IconLandmark, IconLock, IconRoster } from '@/components/brand/Icons'
 import { supabase } from '@/lib/supabase'
-import { fetchAuthorities, ROLE_LABELS, BAGRUT_ROLE_LABELS, type Authority } from '@/lib/admin'
+import { fetchAuthorities, fetchStudentCounts, ROLE_LABELS, BAGRUT_ROLE_LABELS, type Authority } from '@/lib/admin'
 import { loadAdminOverview, loadBagrutOverviews, loadManagerOverview, type AdminOverview, type BagrutOverview, type ManagerOverview, type Todo } from '@/lib/home'
 import { AuthoritiesSection, BagrutSection, ManagerSection, TodoSection } from '@/components/home/RoleBlocks'
 
@@ -76,6 +76,7 @@ export default function Home() {
   const access = productAccess(profile)
   const [authorities, setAuthorities] = useState<Authority[] | null>(null)
   const [matzevet, setMatzevet] = useState<MatzevetStat[] | null>(null)
+  const [countsFailed, setCountsFailed] = useState(false)
   const [bagrut, setBagrut] = useState<BagrutStat[] | null>(null)
 
   useEffect(() => {
@@ -92,20 +93,25 @@ export default function Home() {
   useEffect(() => {
     if (codes == null) return
     if (!access.matzevet || !codes.length) return setMatzevet([])
+    setCountsFailed(false)
     Promise.all([
-      Promise.all(codes.map(async (code) => {
-        const { count, error } = await supabase.from(`students_${code}`).select('*', { count: 'exact', head: true })
-        return { code, students: error ? null : count ?? 0 }
-      })),
+      // בקשה אחת לכל הרשויות (034). ספירה דרך ה-RLS לכל טבלה נכשלה לסירוגין
+      // בעומס, והסכום קפץ בין טעינות
+      fetchStudentCounts(codes),
       supabase.from('moe_uploads').select('authority_code, processed_at')
         .eq('status', 'done').in('authority_code', codes).order('processed_at', { ascending: false }),
     ]).then(([counts, { data: uploads }]) => {
       const updated = new Map<string, string>()
       for (const u of uploads ?? []) if (!updated.has(u.authority_code)) updated.set(u.authority_code, u.processed_at)
-      setMatzevet(counts
+      setMatzevet(codes
+        .filter((code) => counts.has(code))
+        .map((code) => ({ code, students: counts.get(code)!, updated: updated.get(code) ?? null }))
         // למנהל־על רשות בלי תלמידים היא רעש; משתמש רגיל רואה את שלו גם כשהיא ריקה
-        .filter((r): r is { code: string; students: number } => r.students != null && (r.students > 0 || !access.superAdmin))
-        .map((r) => ({ ...r, updated: updated.get(r.code) ?? null })))
+        .filter((r) => r.students > 0 || !access.superAdmin))
+    }).catch(() => {
+      // לא מציגים סכום חלקי כאילו הוא מלא — "—" במקום מספר
+      setCountsFailed(true)
+      setMatzevet([])
     })
   }, [access.matzevet, access.superAdmin, codes])
 
@@ -182,7 +188,8 @@ export default function Home() {
 
   // מספרים מרכזיים לפס העליון — בגודל העולם של המשתמש, לפי התפקיד
   let stats: { label: string; value: number | string | null; sub?: string }[] = []
-  const totalStudents = matzevet ? matzevet.reduce((s, m) => s + m.students, 0) : null
+  // כשהספירה נכשלה — "—" ולא סכום חלקי שנראה כמו מספר אמיתי
+  const totalStudents: number | string | null = countsFailed ? '—' : matzevet ? matzevet.reduce((s, m) => s + m.students, 0) : null
   const schools = bagrut ? bagrut.reduce((s, b) => s + b.rounds.length, 0) : null
   if (access.superAdmin) {
     stats = [

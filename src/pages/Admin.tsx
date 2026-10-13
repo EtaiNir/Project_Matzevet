@@ -6,7 +6,7 @@ import HomeLink from '@/components/HomeLink'
 import {
   fetchAuthorities,
   fetchClients,
-  countStudents,
+  fetchStudentCounts,
   createAuthority,
   type Authority,
   type Client,
@@ -54,14 +54,15 @@ export default function Admin() {
 
   async function load() {
     const [authorities, clients] = await Promise.all([fetchAuthorities(), fetchClients()])
-    const withCounts = await Promise.all(
-      authorities.map(async (a) => ({
+    // כל הספירות בבקשה אחת (034) — לא ספירה לכל רשות במקביל, שנכשלה בעומס
+    const counts = await fetchStudentCounts(authorities.map((a) => a.code))
+    setCards(
+      authorities.map((a) => ({
         authority: a,
         client: clients.find((c) => c.authority_code === a.code) ?? null,
-        students: await countStudents(a.code),
+        students: counts.get(a.code) ?? 0,
       })),
     )
-    setCards(withCounts)
   }
 
   useEffect(() => {

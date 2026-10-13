@@ -342,13 +342,23 @@ export async function saveClient(client: Partial<Client> & { authority_code: str
   if (error) throw error
 }
 
-/** כמה תלמידים בכל רשות — למספר על כרטיס הלקוח. */
+/**
+ * כמה תלמידי מצבת בכל רשות, בהרשאות המשתמש — בקשה אחת (מיגרציה 034).
+ *
+ * לא `count(*)` לכל טבלה: ה-RLS בודק הרשאה לכל שורה, 1–2 שניות לרשות, ושמונה
+ * ספירות במקביל עוברות את מגבלת 8 השניות ונכשלות לסירוגין — והסכום קפץ בין
+ * טעינות. רשות בלי טבלה או בלי גישה פשוט חסרה במפה. שגיאה — נזרקת, לא נבלעת.
+ */
+export async function fetchStudentCounts(codes: string[]): Promise<Map<string, number>> {
+  if (!codes.length) return new Map()
+  const { data, error } = await supabase.rpc('matzevet_student_counts', { codes })
+  if (error) throw new Error(`ספירת התלמידים נכשלה: ${error.message}`)
+  return new Map(((data ?? []) as { authority_code: string; students: number }[]).map((r) => [r.authority_code, Number(r.students)]))
+}
+
+/** כמה תלמידים ברשות אחת — למספר על כרטיס הלקוח. 0 כשאין טבלה. */
 export async function countStudents(code: string): Promise<number> {
-  const { count, error } = await supabase
-    .from(`students_${code}`)
-    .select('MISPAR_ZEHUT', { count: 'exact', head: true })
-  if (error) return 0 // אין טבלה לרשות הזו עדיין
-  return count ?? 0
+  return (await fetchStudentCounts([code])).get(code) ?? 0
 }
 
 // ─────────────────────────── מסמכים ───────────────────────────
