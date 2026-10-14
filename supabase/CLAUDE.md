@@ -41,8 +41,11 @@ secrets). פריסה: [server-migration.md](../docs/server-migration.md#פריס
 לכל רשות — ראה [decisions/014](../docs/decisions/014-bagrut-module.md).
 ההרשאה בעמודות `bagrut_role` + `bagrut_schools/grades/classes/subject_keys`,
 **נפרדת** מ-`scope_level` של המצבת. מערך היקף ריק = **כלום**, לא הכול.
-רכז מקצוע רואה את כל בית הספר — `bagrut_subject_keys` הוא מיקוד במסכים, לא
-הגבלה (מיגרציה 030). טבלאות הצוות (`bagrut_tracking`, `bagrut_actions`,
+רכז מקצוע רואה **רק את תלמידי המקצועות שלו** (מיגרציות 035–036, הופכות את
+030): מי שיש לו ציון שאלון באחד מהם — בדיוק מי שמופיע בדף המקצוע
+(`bagrut_subject_member`). T1 אינו אומר מי "רשום" למקצוע; מי שעוד לא ניגש
+אינו מופיע אצל הרכז, ורכז הבגרויות ורכז השכבה רואים אותו.
+טבלאות הצוות (`bagrut_tracking`, `bagrut_actions`,
 `bagrut_log`, `bagrut_ai_analysis`) לעולם אינן נמחקות בקליטה.
 **כל בית ספר בנפרד** ([decisions/016](../docs/decisions/016-bagrut-per-school.md)) —
 `school_code` בכל שורה, לא טבלה לכל בית ספר. `bagrut_schools` (033) מחזיקה את

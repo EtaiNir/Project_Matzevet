@@ -428,6 +428,7 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
   }, [index])
 
   const { profile } = useAuth()
+  const isSubjectCoordinator = profile?.bagrut_role === 'subject_coordinator'
   const mySubjects = useMemo(() => {
     const keys = profile?.bagrut_role === 'subject_coordinator' ? profile.bagrut_subject_keys ?? [] : []
     return data.subjects.filter((s) => keys.includes(s.subject_key))
@@ -535,7 +536,7 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
         })}
       </div>
 
-      {/* רכז מקצוע: המקצועות שלו בראש — מיקוד, לא הגבלה (הוא רואה את כל בית הספר) */}
+      {/* רכז מקצוע: רק המקצועות שלו (035 — גם התלמידים רק שלו). שאר המקצועות לא מוצגים */}
       {mySubjects.length > 0 && (
         <div className="rounded-xl bg-sky-50/60 py-1.5">
           <div className="px-3 pb-1 text-xs font-bold text-sky-700">המקצועות שלי</div>
@@ -548,7 +549,8 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
         </div>
       )}
 
-      {SUBJECT_GROUPS.map((g) => {
+      {/* מחנך ורכז שכבה רואים רק מקצועות שלתלמידים שלהם יש בהם ציון (takers נספר מה-RLS) */}
+      {!isSubjectCoordinator && SUBJECT_GROUPS.map((g) => {
         const subs = data.subjects.filter((s) => s.subject_group === g && takers.get(s.subject_key))
         if (!subs.length) return null
         return (

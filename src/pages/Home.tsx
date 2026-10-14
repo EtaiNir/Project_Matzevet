@@ -144,7 +144,8 @@ export default function Home() {
   }, [access.bagrut, codes])
 
   // ── תוכן לפי תפקיד: מנהל־על · מנהל רשות · רכז בגרויות / רכז שכבה / מחנך
-  const isManager = !access.superAdmin && profile?.role === 'admin' && access.matzevet
+  // רכז מקצוע לא מקבל את בלוק "הרשות שלי" גם כשיש לו גם תפקיד מנהל במצבת (אייל, 13.10)
+  const isManager = !access.superAdmin && profile?.role === 'admin' && access.matzevet && profile?.bagrut_role !== 'subject_coordinator'
   const bagrutWorker = !access.superAdmin && ['coordinator', 'grade_coordinator', 'homeroom'].includes(profile?.bagrut_role ?? '')
   const [admin, setAdmin] = useState<AdminOverview | null>(null)
   const [managers, setManagers] = useState<ManagerOverview[] | null>(null)
