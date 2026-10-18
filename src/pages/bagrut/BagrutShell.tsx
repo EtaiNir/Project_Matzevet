@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import HomeLink from '@/components/HomeLink'
 import LastStudentLink from '@/components/bagrut/LastStudentLink'
+import FollowupAlert from '@/components/bagrut/FollowupAlert'
 import ModuleSwitch from '@/components/ModuleSwitch'
 import { BAGRUT_ROLE_LABELS, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
@@ -301,6 +302,7 @@ export default function BagrutShell() {
       <div className="flex min-h-0 flex-1">
         {ctx && <Rail ctx={ctx} isSuperAdmin={isSuperAdmin} />}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {ctx && !isUpload && <FollowupAlert ctx={ctx} />}
           {zoomable && <ZoomBar zoom={zoom} onChange={setZoom} />}
           {/* גלילת הדף — ב-RTL הסרגל יושב בצד השמאלי של המסך */}
           <div className="min-h-0 flex-1 overflow-auto">

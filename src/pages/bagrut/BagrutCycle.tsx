@@ -766,8 +766,13 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
         next_followup: f.next_followup || null,
       })
       onLog([entry, ...log].sort((a, b) => b.happened_on.localeCompare(a.happened_on) || b.created_at.localeCompare(a.created_at)))
-      // מעקב הבא שנקבע בשיחה — הופך למעקב הבא של התלמיד
-      if (f.next_followup) applyTracking(await saveTracking(round, sid, { next_followup: f.next_followup }, data.tracking.get(sid)))
+      // מעקב הבא שנקבע בשיחה — הופך למעקב הבא של התלמיד. ובלי מועד חדש: רשומה
+      // מיום המעקב או אחריו **סוגרת** אותו — אחרת המועד נשאר "באיחור" לתמיד,
+      // והתראת שווא קבועה מלמדת להתעלם מכל ההתראות (משימה 5)
+      const cur = data.tracking.get(sid)
+      const happened = f.happened_on || todayIso()
+      if (f.next_followup) applyTracking(await saveTracking(round, sid, { next_followup: f.next_followup }, cur))
+      else if (cur?.next_followup && cur.next_followup <= happened) applyTracking(await saveTracking(round, sid, { next_followup: null }, cur))
       setF(empty)
     } catch (e) {
       setErr((e as Error).message)
@@ -801,6 +806,11 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
           <Field label="על מה הוסכם"><textarea value={f.agreements} onChange={(e) => set('agreements', e.target.value)} rows={2} className={input} /></Field>
           <Field label="הצעד הבא"><input value={f.next_step} onChange={(e) => set('next_step', e.target.value)} className={input} /></Field>
           <Field label="מעקב הבא"><input type="date" value={f.next_followup} onChange={(e) => set('next_followup', e.target.value)} className={input} /></Field>
+          {(() => {
+            const cur = data.tracking.get(sid)?.next_followup
+            if (!cur || f.next_followup || cur > (f.happened_on || todayIso())) return null
+            return <p className="mt-1 text-xs text-slate-500">בלי מועד חדש, הרשומה תסגור את המעקב שנקבע ל-{fmtDate(cur)}.</p>
+          })()}
           {err && <p className="mt-2 text-sm text-rose-700">{err}</p>}
           <button disabled={!valid || busy} onClick={submit} className="mt-3 rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-40">
             {busy ? 'שומר…' : 'שמירה ביומן'}
