@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
+import { clearSessionClock, remaining, sessionExpired, setLogoutReason, startSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
 
 export interface UserProfile {
@@ -106,6 +107,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return
+      // כרטיסייה ששוחזרה אחרי סגירה (Ctrl+Shift+T) מחזירה גם את הטוקן — לבדוק
+      // כמה זמן עבר. סשן שקדם לשעון (לפני השינוי) מתחיל אותו עכשיו.
+      if (data.session) {
+        const expired = sessionExpired()
+        if (expired) {
+          setLogoutReason(expired)
+          await supabase.auth.signOut()
+          setLoading(false)
+          return
+        }
+        if (!remaining()) startSession()
+      }
       setSession(data.session)
       if (data.session) {
         loadedFor.current = data.session.user.id
@@ -114,7 +127,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
     })
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (event === 'SIGNED_IN' && !remaining()) startSession()
+      if (event === 'SIGNED_OUT') clearSessionClock()
       setSession(newSession)
 
       const userId = newSession?.user.id ?? null

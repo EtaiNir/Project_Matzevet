@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { authStorage, purgeLegacyAuth } from './session'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -10,10 +11,14 @@ if (!url || !anonKey) {
   )
 }
 
+// הכניסה בכרטיסייה בלבד (sessionStorage) — נגמרת כשהיא נסגרת. lib/session.ts
+purgeLegacyAuth()
+
 export const supabase = createClient(url ?? '', anonKey ?? '', {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
+    storage: authStorage,
   },
 })
 
