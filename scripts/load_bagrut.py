@@ -70,6 +70,22 @@ POSITIONAL_ROLES = ["grade", "weight", "weighted"]
 # מפתח המקצוע = עמודת היחידות בלי הקידומת/סיומת שלה
 UNITS_AFFIX = re.compile(r"(?i)yechidot$|^יחידות ")
 FINAL_AFFIX = re.compile(r"(?i)t?ziunsofi$|^ציון סופי ")
+# סוג השאלון בסוף הכותרת המאוחדת: "<סמל> <מקצוע> <סוג> <פנימית|חיצונית> [ציון]".
+# הסוגים — כפי שמופיעים בקבצי T1 של אבו רביע (17.10, 19.10).
+Q_TYPE_TAIL = re.compile(
+    r"\s+(?:ציון פנימי|עבודת גמר|בחינה חיצונית|הערכה חלופית|בע[״\"]פ מתוקשב|"
+    r"תלקיט|בחינה בעל-פה|מטלת ביצוע|בוחן אנושי|מעבדת חקר|פרוייקט)"
+    r"\s+(?:פנימית|חיצונית)(?:\s+ציון)?$")
+
+
+def single_q_subject(col):
+    """מפתח המקצוע מכותרת שאלון בעמודה אחת — אותו מפתח שעמודת "יחידות …"
+    הייתה נותנת ("84083 חינוך גופני ציון פנימי פנימית" → "חינוך גופני").
+    None אם הסוג לא מוכר."""
+    rest = Q_COL.sub("", col, count=1).strip()
+    if not Q_TYPE_TAIL.search(rest):
+        return None
+    return Q_TYPE_TAIL.sub("", rest).strip() or None
 
 
 def alt_groups(pairs):
@@ -250,23 +266,56 @@ def parse_t1_table(names, rows, group):
     cur_block = None
     pending_q = []
 
+    def add_trio(trio):
+        codes = collections.Counter(int(Q_COL.match(c).group(1)) for c in trio)
+        code = codes.most_common(1)[0][0]
+        roles = {}
+        for pos, col in enumerate(trio):
+            role = next((r for r, rx in ROLE_BY_SUFFIX if rx.search(col)), None)
+            roles[role or POSITIONAL_ROLES[pos]] = col
+        if len(roles) != 3:            # שני "Tziun" בשלשה — חוזרים למיקום
+            roles = dict(zip(POSITIONAL_ROLES, trio))
+        cur_block["trios"].append((code, roles))
+
+    def add_single(col):
+        # שאלון בעמודה אחת — ציון בלבד, בלי משקל ומשוקלל (T1 "מעודכן להמשך
+        # עבודה" של אבו רביע, 19.10: המקצועות הפנימיים, בלי עמודות מדדים).
+        # המקצוע נגזר מהכותרת עצמה: "84083 חינוך גופני ציון פנימי פנימית".
+        code = int(Q_COL.match(col).group(1))
+        key = single_q_subject(col)
+        if key is None:
+            raise ValueError(f"שאלון בעמודה אחת שלא זוהה בו מקצוע: {col}")
+        roles = {"grade": col}
+        if key == cur_block["key"]:                    # שאלון נוסף של אותו מקצוע
+            cur_block["trios"].append((code, roles))
+            return
+        last = blocks[-1]
+        if last.get("single") and last["key"] == key:  # עוד שאלון של מקצוע בודד
+            last["trios"].append((code, roles))
+            return
+        blocks.append({"metrics": {}, "trios": [(code, roles)], "group": group,
+                       "key": key, "single": True})
+
     def flush_q():
-        # שלשות לפי הסדר. שארית שאינה שלשה = תקלה במבנה, לא מנחשים.
+        # עמודות שאלון בקבוצות לפי סמל השאלון: שלשה (ציון/משקל/משוקלל) או
+        # עמודה אחת (ציון בלבד). כל מבנה אחר = תקלה, לא מנחשים.
         if not pending_q:
             return
-        if len(pending_q) % 3:
+        runs = []
+        for col in pending_q:
+            code = Q_COL.match(col).group(1)
+            if runs and runs[-1][0] == code:
+                runs[-1][1].append(col)
+            else:
+                runs.append((code, [col]))
+        if all(len(cols) in (1, 3) for _, cols in runs):
+            for _, cols in runs:
+                add_trio(cols) if len(cols) == 3 else add_single(cols[0])
+        elif len(pending_q) % 3 == 0:                  # סמלים לא עקביים בשלשה — לפי המיקום
+            for i in range(0, len(pending_q), 3):
+                add_trio(pending_q[i:i + 3])
+        else:
             raise ValueError(f"שאלונים לא בשלשות בבלוק {cur_block['key']}: {pending_q}")
-        for i in range(0, len(pending_q), 3):
-            trio = pending_q[i:i + 3]
-            codes = collections.Counter(int(Q_COL.match(c).group(1)) for c in trio)
-            code = codes.most_common(1)[0][0]
-            roles = {}
-            for pos, col in enumerate(trio):
-                role = next((r for r, rx in ROLE_BY_SUFFIX if rx.search(col)), None)
-                roles[role or POSITIONAL_ROLES[pos]] = col
-            if len(roles) != 3:            # שני "Tziun" בשלשה — חוזרים למיקום
-                roles = dict(zip(POSITIONAL_ROLES, trio))
-            cur_block["trios"].append((code, roles))
         pending_q.clear()
 
     for col in names:
@@ -311,7 +360,7 @@ def parse_t1_table(names, rows, group):
                     "completion_status": txt(m.get("completion_status")),
                 })
             for code, roles in b["trios"]:
-                g, w, wd = (num(row.get(roles[r])) for r in POSITIONAL_ROLES)
+                g, w, wd = (num(row.get(roles[r])) if r in roles else None for r in POSITIONAL_ROLES)
                 if g is None and wd is None:
                     continue
                 grades.append({"student_id": student, "subject_key": b["key"],

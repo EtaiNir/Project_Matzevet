@@ -448,7 +448,10 @@ def process_bagrut(conn, job) -> None:
 
         if proc.returncode != 0:
             # שגיאה שהבדיקה זיהתה — הודעה קריאה; אחרת קריסה — זנב הפלט (מלכודת 15)
-            msg = " · ".join(report.get("errors") or []) or (proc.stderr or proc.stdout or "")[-800:]
+            # בקריסה — שורת החריגה עצמה, מתחילתה: זנב של 800 תווים חתך את
+            # תחילת ההודעה כשהיא ארוכה (רשימת עמודות, 19.10)
+            out = (proc.stderr or proc.stdout or "").strip().splitlines()
+            msg = " · ".join(report.get("errors") or []) or (out[-1][:800] if out else "")
             raise RuntimeError(msg)
 
         log.info("3/3 מעדכן סטטוס…")
