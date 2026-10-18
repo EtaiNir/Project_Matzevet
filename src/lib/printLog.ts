@@ -6,6 +6,11 @@
 //
 // 🔒 הדף נבנה בזיכרון ונמחק אחרי ההדפסה — שום דבר לא נשמר בדפדפן. ת"ז אינה
 // מודפסת: שם, כיתה ובית ספר מספיקים לזיהוי בתיק, ודף מודפס מסתובב.
+//
+// ⚠️ הדפדפן מוסיף לכל עמוד כותרת ותחתית משלו — ובתחתית **כתובת הדף, שבה ת"ז
+// של התלמיד** (/student/<ת"ז>). @page margin: 0 מבטל אותן: בלי שוליים אין להן
+// מקום. השוליים עצמם באים מ-padding בצדדים, ומשורות ריקות ב-thead/tfoot של
+// טבלה — שהדפדפן חוזר עליהן בראש ובתחתית **כל** עמוד.
 
 import { LOG_KIND_LABELS, type BagrutLogEntry } from '@/lib/bagrut'
 import { fmtDate } from '@/lib/bagrutCycle'
@@ -43,7 +48,13 @@ export function logHtml(p: PrintLogInput): string {
   const made = new Date().toLocaleDateString('he-IL', { day: 'numeric', month: 'long', year: 'numeric' })
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title>
 <style>
-  @page { size: A4; margin: 16mm 14mm; }
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; }
+  body { padding: 0 14mm; }
+  table.page { width: 100%; border-collapse: collapse; }
+  table.page > thead td { height: 14mm; }
+  table.page > tfoot td { height: 14mm; }
+  table.page td { padding: 0; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: "Segoe UI", Arial, "Noto Sans Hebrew", sans-serif; color: #1e293b; font-size: 11.5pt; line-height: 1.55; }
   header { border-bottom: 2px solid #0284c7; padding-bottom: 8px; margin-bottom: 14px; }
@@ -58,6 +69,7 @@ export function logHtml(p: PrintLogInput): string {
   .v { white-space: pre-wrap; }
   footer { margin-top: 16px; color: #94a3b8; font-size: 8.5pt; border-top: 1px solid #e2e8f0; padding-top: 6px; }
 </style></head><body>
+<table class="page"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>
 <header>
   <h1>${esc(title)}</h1>
   <div class="sub">${sub}</div>
@@ -65,6 +77,7 @@ export function logHtml(p: PrintLogInput): string {
 </header>
 ${p.entries.map(entryHtml).join('\n')}
 <footer>הופק מ${esc(SITE.name)} ב-${made} · זכאות לבגרות · יומן מעקב</footer>
+</td></tr></tbody></table>
 </body></html>`
 }
 
