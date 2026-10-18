@@ -6,6 +6,8 @@ import {
   CYCLE_FACTORS,
   LOG_KIND_LABELS,
   TRACKING_FLAGS,
+  T2_FIELDS,
+  type T2Field,
   createAction,
   createLogEntry,
   deleteAction,
@@ -187,13 +189,57 @@ function PlanView({ sid, actions, onActions, ai, onAi }: {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 lg:grid-cols-5">
-        <PictureCard sid={sid} analysis={ai.picture} onNew={(a) => onAi({ ...ai, picture: a })} className="lg:col-span-3" />
-        <StaffCard sid={sid} className="lg:col-span-2" />
+      {/* ניתוח הזכאות כפי שהגיע, ולצידו ניתוח ה-AI — שני החלקים זה לצד זה (סבא, 14.10) */}
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <T2Card sid={sid} />
+        <PictureCard sid={sid} analysis={ai.picture} onNew={(a) => onAi({ ...ai, picture: a })} />
       </div>
+      <StaffCard sid={sid} />
       <PlanCard sid={sid} actions={actions} onActions={onActions} intervention={s.intervention}
         plan={ai.plan} onNewPlan={(a) => onAi({ ...ai, plan: a })} />
     </div>
+  )
+}
+
+/**
+ * ניתוח הזכאות (T2) — כל השדות, בכותרות ובתוכן המקוריים, בלי AI ובלי עיבוד.
+ * סבא: "השקענו הרבה מאוד מחשבה ביצירה של 10 השדות האלה". שדה ריק נשאר ריק
+ * (מסומן "—"), לא ממלאים ולא מסכמים. הזכאות — רק לפי מה שכתוב כאן (014 §8).
+ */
+function T2Card({ sid }: { sid: string }) {
+  const { index } = useBagrut()
+  const s = index.studentById.get(sid)!
+  const value = (f: T2Field) => {
+    const v = s[f.key]
+    return v == null || String(v).trim() === '' ? null : String(v)
+  }
+  const short = T2_FIELDS.filter((f) => f.short)
+  const long = T2_FIELDS.filter((f) => !f.short)
+  return (
+    <Card title="ניתוח הזכאות" action={<span className="text-xs text-slate-400">כפי שהגיע, בלי עיבוד</span>}>
+      {!s.in_t2 ? (
+        <p className="text-sm text-slate-500">לתלמיד הזה אין ניתוח זכאות — הוא נעשה לשכבה המסיימת בלבד.</p>
+      ) : (
+        <>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-slate-50 px-4 py-3 sm:grid-cols-3">
+            {short.map((f) => (
+              <div key={f.key} className="min-w-0">
+                <dt className="text-[11px] font-semibold leading-tight text-slate-500">{f.label}</dt>
+                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
+              </div>
+            ))}
+          </dl>
+          <dl className="mt-4 flex flex-col gap-3">
+            {long.map((f) => (
+              <div key={f.key}>
+                <dt className="text-xs font-bold text-slate-500">{f.label}</dt>
+                <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      )}
+    </Card>
   )
 }
 
@@ -391,6 +437,8 @@ function StaffCard({ sid, className = '' }: { sid: string; className?: string })
 
 // ── תוכנית ההתערבות
 /** מפתח קבוע להצעת AI — כדי שהצעה שאושרה או נדחתה לא תוצע שוב */
+// התוכן כבר עבר plainTerms בטעינה, וגם המפתחות השמורים (plainAction) — כך הצעה
+// שטופלה לפני התרגום לא חוזרת להופיע
 const aiKey = (a: AiPlanAction) => `ai:${a.title.replace(/\s+/g, ' ').trim()}`
 
 function PlanCard({ sid, actions, onActions, intervention, plan, onNewPlan }: {
