@@ -31,7 +31,7 @@ import {
 } from '@/lib/bagrut'
 import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
-import { printLog } from '@/lib/printLog'
+import { saveLogPdf } from '@/lib/printLog'
 
 /**
  * לשונית המעקב כמחזור התערבות — מצב → תוכנית → מעקב
@@ -729,15 +729,25 @@ function ManualAction({ sid, onCancel, onSaved }: { sid: string; onCancel: () =>
 function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLog: (l: BagrutLogEntry[]) => void }) {
   const { round, data, index, canEditTracking, applyTracking } = useBagrut()
   const student = index.studentById.get(sid)
-  // ייצוא ל-PDF — רשומה בודדת או כל היומן (משימה 4). חלון ההדפסה: "שמירה כ-PDF"
-  const exportPdf = (entries: BagrutLogEntry[]) =>
-    printLog({
-      studentName: student ? displayName(student) : sid,
-      className: student?.class_name ?? null,
-      school: round.school_name ?? round.school_code,
-      roundLabel: `${round.season} ${round.school_year}`,
-      entries,
-    })
+  // ייצוא ל-PDF — רשומה בודדת או כל היומן (משימה 4): ישר לחלון "שמירה בשם"
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null)
+  const exportPdf = async (entries: BagrutLogEntry[], key: string) => {
+    setPdfBusy(key)
+    setErr(null)
+    try {
+      await saveLogPdf({
+        studentName: student ? displayName(student) : sid,
+        className: student?.class_name ?? null,
+        school: round.school_name ?? round.school_code,
+        roundLabel: `${round.season} ${round.school_year}`,
+        entries,
+      })
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setPdfBusy(null)
+    }
+  }
   const empty = { kind: 'student' as LogKind, happened_on: todayIso(), participants: '', summary: '', agreements: '', next_step: '', next_followup: '' }
   const [f, setF] = useState(empty)
   const [busy, setBusy] = useState(false)
@@ -803,14 +813,16 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-500">{log.length} רשומות</span>
             <button
-              onClick={() => exportPdf(log)}
-              title="פותח את חלון ההדפסה — שם בוחרים «שמירה כ-PDF» או מדפסת"
-              className="mr-auto rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-sky-400 hover:text-sky-800"
+              disabled={pdfBusy !== null}
+              onClick={() => exportPdf(log, 'all')}
+              title="שמירת כל היומן כקובץ PDF"
+              className="mr-auto rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-sky-400 hover:text-sky-800 disabled:opacity-50"
             >
-              ייצוא היומן ל-PDF
+              {pdfBusy === 'all' ? 'יוצר קובץ…' : 'ייצוא היומן ל-PDF'}
             </button>
           </div>
         )}
+        {err && !canEditTracking && <p className="text-sm text-rose-700">{err}</p>}
         {log.length === 0 ? (
           <Card><p className="text-sm text-slate-400">עוד אין רשומות ביומן. אחרי שיחה עם התלמיד — כתבו מה עלה, על מה הוסכם, ומתי המעקב הבא.</p></Card>
         ) : (
@@ -821,7 +833,7 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
                 <span className="text-xs text-slate-500">{fmtDate(e.happened_on)}</span>
                 {e.participants && <span className="text-xs text-slate-400">· {e.participants}</span>}
                 <span className="mr-auto" />
-                <button onClick={() => exportPdf([e])} title="הרשומה הזו בלבד — חלון ההדפסה, «שמירה כ-PDF»" className="text-xs text-slate-400 hover:text-sky-700">PDF</button>
+                <button disabled={pdfBusy !== null} onClick={() => exportPdf([e], e.id)} title="שמירת הרשומה הזו בלבד כקובץ PDF" className="text-xs text-slate-400 hover:text-sky-700 disabled:opacity-50">{pdfBusy === e.id ? 'יוצר…' : 'PDF'}</button>
                 {canEditTracking && <button onClick={() => remove(e)} className="text-xs text-slate-300 hover:text-rose-600">מחיקה</button>}
               </div>
               {e.summary && <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{e.summary}</p>}

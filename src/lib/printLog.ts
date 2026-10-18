@@ -1,16 +1,20 @@
 // ייצוא יומן המעקב ל-PDF — רשומה בודדת או היומן כולו (משימה 4, פגישת 14.10).
 //
-// בלי ספריית PDF: נבנה דף HTML מוכן להדפסה, ונפתח עליו חלון ההדפסה של הדפדפן
-// — שם בוחרים "שמירה כ-PDF" או מדפסת. כך העברית ויישור לימין נכונים מעצמם
-// (ספריית PDF הייתה דורשת להטמיע גופן עברי ולהפוך כיווני טקסט), ואין תלות חדשה.
+// לחיצה פותחת ישר את חלון "שמירה בשם" של המערכת — בלי חלון הדפסה (בקשה
+// מפורשת, 18.10). בכרום ובאדג' זה showSaveFilePicker; בדפדפן אחר הקובץ
+// פשוט יורד.
 //
-// 🔒 הדף נבנה בזיכרון ונמחק אחרי ההדפסה — שום דבר לא נשמר בדפדפן. ת"ז אינה
-// מודפסת: שם, כיתה ובית ספר מספיקים לזיהוי בתיק, ודף מודפס מסתובב.
+// איך נבנה הקובץ: דף ה-HTML (logHtml) מרונדר ב-iframe נסתר, וכל חלק בו —
+// הכותרת, כל רשומה, התחתית — מצולם בנפרד (html2canvas) ומונח על עמודי A4
+// (jsPDF). כך העברית והיישור לימין יוצאים בדיוק כמו בדפדפן, ורשומה לעולם
+// אינה נחתכת בין שני עמודים. המחיר: הטקסט בקובץ הוא תמונה — אי אפשר לסמן
+// אותו או לחפש בו. PDF עם טקסט אמיתי היה דורש להטמיע גופן עברי ולהפוך
+// כיווני טקסט בעצמנו.
 //
-// ⚠️ הדפדפן מוסיף לכל עמוד כותרת ותחתית משלו — ובתחתית **כתובת הדף, שבה ת"ז
-// של התלמיד** (/student/<ת"ז>). @page margin: 0 מבטל אותן: בלי שוליים אין להן
-// מקום. השוליים עצמם באים מ-padding בצדדים, ומשורות ריקות ב-thead/tfoot של
-// טבלה — שהדפדפן חוזר עליהן בראש ובתחתית **כל** עמוד.
+// שתי הספריות נטענות רק בלחיצה (import דינמי) — האתר עצמו אינו נעשה כבד.
+//
+// 🔒 הכול נבנה בזיכרון, ושום דבר לא נשמר בדפדפן. ת"ז אינה מודפסת: שם, כיתה
+// ובית ספר מספיקים לזיהוי בתיק, ודף מודפס מסתובב.
 
 import { LOG_KIND_LABELS, type BagrutLogEntry } from '@/lib/bagrut'
 import { fmtDate } from '@/lib/bagrutCycle'
@@ -81,24 +85,101 @@ ${p.entries.map(entryHtml).join('\n')}
 </body></html>`
 }
 
+const A4 = { w: 210, h: 297, margin: 14 }
+
+/** "יומן מעקב - שם התלמיד.pdf" — בלי תווים שאסורים בשם קובץ */
+function fileName(p: PrintLogInput): string {
+  const kind = p.entries.length === 1 ? 'רשומת מעקב' : 'יומן מעקב'
+  return `${kind} - ${p.studentName}`.replace(/[\\/:*?"<>|]/g, '').trim() + '.pdf'
+}
+
+type SaveTarget = { write: (blob: Blob) => Promise<void> } | null
+
 /**
- * פותח את חלון ההדפסה על הדף, בתוך iframe נסתר — לא חלון חדש, שחוסם חלונות
- * קופצים עלול לעצור. ה-iframe נמחק אחרי ההדפסה (או אחרי דקה, אם הדפדפן אינו
- * מודיע על סיומה).
+ * חלון "שמירה בשם" — חייב להיפתח מיד בלחיצה (הדפדפן מתיר אותו רק בתגובה
+ * ישירה למשתמש), ולכן לפני בניית הקובץ. null = המשתמש ביטל.
  */
-export function printLog(p: PrintLogInput) {
-  const frame = document.createElement('iframe')
-  frame.setAttribute('aria-hidden', 'true')
-  Object.assign(frame.style, { position: 'fixed', width: '0', height: '0', border: '0', left: '-9999px' })
-  const cleanup = () => frame.remove()
-  frame.onload = () => {
-    const w = frame.contentWindow
-    if (!w) return cleanup()
-    w.addEventListener('afterprint', () => setTimeout(cleanup, 500))
-    setTimeout(cleanup, 60_000)
-    w.focus()
-    w.print()
+async function pickTarget(name: string): Promise<SaveTarget | 'download'> {
+  const picker = (window as unknown as { showSaveFilePicker?: (o: unknown) => Promise<FileSystemFileHandle> }).showSaveFilePicker
+  if (!picker) return 'download'
+  try {
+    const handle = await picker({ suggestedName: name, types: [{ description: 'מסמך PDF', accept: { 'application/pdf': ['.pdf'] } }] })
+    return {
+      write: async (blob) => {
+        const w = await handle.createWritable()
+        await w.write(blob)
+        await w.close()
+      },
+    }
+  } catch (e) {
+    if ((e as DOMException).name === 'AbortError') return null
+    return 'download' // חסום (iframe, מדיניות) — נופלים להורדה רגילה
   }
-  frame.srcdoc = logHtml(p)
-  document.body.appendChild(frame)
+}
+
+function download(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/** מרנדר את הדף ב-iframe נסתר ברוחב A4, ומחזיר את המסמך שלו */
+function renderFrame(html: string): Promise<{ doc: Document; dispose: () => void }> {
+  return new Promise((resolve, reject) => {
+    const frame = document.createElement('iframe')
+    frame.setAttribute('aria-hidden', 'true')
+    // 794px = רוחב A4 ב-96dpi; מחוץ למסך, אבל בגודל אמיתי כדי שהפריסה תהיה נכונה
+    Object.assign(frame.style, { position: 'fixed', left: '-10000px', top: '0', width: '794px', height: '1123px', border: '0' })
+    frame.onload = async () => {
+      const doc = frame.contentDocument
+      if (!doc) return reject(new Error('בניית הקובץ נכשלה'))
+      await doc.fonts?.ready
+      resolve({ doc, dispose: () => frame.remove() })
+    }
+    frame.srcdoc = html
+    document.body.appendChild(frame)
+  })
+}
+
+/**
+ * שומר את היומן כקובץ PDF. מחזיר false אם המשתמש ביטל את חלון השמירה.
+ * זורק שגיאה עם הודעה קריאה אם הבנייה נכשלה (מלכודת 15 — לומר איפה).
+ */
+export async function saveLogPdf(p: PrintLogInput): Promise<boolean> {
+  const name = fileName(p)
+  const target = await pickTarget(name)
+  if (target === null) return false
+
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import('html2canvas'), import('jspdf')])
+  const { doc, dispose } = await renderFrame(logHtml(p))
+  try {
+    const blocks = [...doc.querySelectorAll<HTMLElement>('header, .entry, footer')]
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' })
+    const width = A4.w - A4.margin * 2
+    let y = A4.margin
+    for (const el of blocks) {
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', logging: false })
+      const h = (canvas.height / canvas.width) * width
+      // רשומה שלא נכנסת בשארית העמוד — לעמוד חדש (אלא אם העמוד ריק ממילא)
+      if (y + h > A4.h - A4.margin && y > A4.margin) {
+        pdf.addPage()
+        y = A4.margin
+      }
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', A4.margin, y, width, h)
+      y += h + 3
+    }
+    const blob = pdf.output('blob')
+    if (target === 'download') download(blob, name)
+    else await target.write(blob)
+    return true
+  } catch (e) {
+    throw new Error(`יצירת קובץ ה-PDF נכשלה: ${(e as Error).message}`)
+  } finally {
+    dispose()
+  }
 }
