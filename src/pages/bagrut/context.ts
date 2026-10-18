@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { ActionCounts, BagrutRound, RoundData, RoundIndex, Tracking } from '@/lib/bagrut'
+import type { ActionCounts, BagrutRound, EditRef, ManualEdit, RoundData, RoundIndex, Tracking } from '@/lib/bagrut'
 
 export interface BagrutContextValue {
   authorityCode: string
@@ -12,6 +12,8 @@ export interface BagrutContextValue {
   applyTracking: (t: Tracking) => void
   /** ספירות התוכנית של תלמיד אחרי שינוי בלשונית המעקב — לרשימה ולסרגל */
   applyActionCounts: (studentId: string, counts: ActionCounts) => void
+  /** עריכה ידנית שנשמרה (037) — מחילים את תשובת השרת על המסך (מלכודת 26) */
+  applyDataEdit: (ref: EditRef, value: string | null, edit: ManualEdit | null) => void
   /** נתיב בסיס למסכי המודול: /bagrut/:code */
   base: string
 }

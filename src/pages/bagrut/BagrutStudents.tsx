@@ -335,11 +335,14 @@ export default function BagrutStudents() {
       {saveError && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{saveError}</div>}
 
       <BagrutTable
+        // המיון ההתחלתי נקבע ברכיב פעם אחת — מעבר ל"מעקב השבוע" ובחזרה מתחיל אותו מחדש
+        key={f.view === 'followup' ? 'followup' : 'list'}
         rows={rows}
         columns={hideT2 ? columns.filter((c) => c.group !== 't2') : columns}
         rowKey={(s) => s.student_id}
         exportName={`בגרות_${round.school_name ?? round.school_code}_${label || 'תלמידים'}`}
-        initialSort={{ key: 'class', dir: 'asc' }}
+        // "מעקב השבוע" — לפי המועד: מה שעבר קודם, אחר כך היום, ואז השבוע
+        initialSort={f.view === 'followup' ? { key: 'followup', dir: 'asc' } : { key: 'class', dir: 'asc' }}
         countLabel="תלמידים"
         rowTitle={displayName}
         storageKey="students"

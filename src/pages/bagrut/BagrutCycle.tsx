@@ -6,6 +6,7 @@ import {
   CYCLE_FACTORS,
   LOG_KIND_LABELS,
   TRACKING_FLAGS,
+  displayName,
   T2_FIELDS,
   type T2Field,
   createAction,
@@ -30,6 +31,8 @@ import {
 } from '@/lib/bagrut'
 import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
+import { saveLogPdf } from '@/lib/printLog'
+import EditableField from '@/components/bagrut/EditableField'
 
 /**
  * לשונית המעקב כמחזור התערבות — מצב → תוכנית → מעקב
@@ -44,7 +47,9 @@ import { Card, StatusBadge } from '@/components/bagrut/ui'
 
 type AiState = { picture: AiAnalysis<AiPicture> | null; plan: AiAnalysis<AiPlan> | null }
 
-type Inner = 'plan' | 'log' | 'prep'
+// "הכנה לשיחה" הוסרה (משימה 6, פגישת 14.10): לשונית שלא עשתה דבר, עד שתגיע
+// תבנית השיחה מהשותפה של סבא. התכנון נשאר ב-docs/bagrut-intervention-design.md §5.
+type Inner = 'plan' | 'log'
 
 const SESSIONS = ['מועד חורף', 'מועד קיץ', 'סוף המחצית', 'עד סוף החודש']
 
@@ -91,7 +96,7 @@ export default function CycleTab({ sid }: { sid: string }) {
   if (error) return <Card><p className="text-sm text-rose-700">{error}</p></Card>
   if (!actions || !log || !ai) return <Card><p className="text-sm text-slate-400">טוען את המעקב…</p></Card>
 
-  const tabs: [Inner, string][] = [['plan', 'מצב ותוכנית'], ['log', `יומן מעקב${log.length ? ` (${log.length})` : ''}`], ['prep', '🗒 הכנה לשיחה']]
+  const tabs: [Inner, string][] = [['plan', 'מצב ותוכנית'], ['log', `יומן מעקב${log.length ? ` (${log.length})` : ''}`]]
 
   return (
     <div className="flex flex-col gap-4">
@@ -111,7 +116,6 @@ export default function CycleTab({ sid }: { sid: string }) {
       </div>
       {inner === 'plan' && <PlanView sid={sid} actions={actions} onActions={changeActions} ai={ai} onAi={setAi} />}
       {inner === 'log' && <LogView sid={sid} log={log} onLog={setLog} />}
-      {inner === 'prep' && <PrepView />}
     </div>
   )
 }
@@ -225,7 +229,9 @@ function T2Card({ sid }: { sid: string }) {
             {short.map((f) => (
               <div key={f.key} className="min-w-0">
                 <dt className="text-[11px] font-semibold leading-tight text-slate-500">{f.label}</dt>
-                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
+                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>
+                  <EditableField edit={{ target: 'student', studentId: sid, field: f.key }} value={value(f)} numeric={f.key === 'negatives_count' || f.key === 'core_units'}>{value(f) ?? '—'}</EditableField>
+                </dd>
               </div>
             ))}
           </dl>
@@ -233,7 +239,9 @@ function T2Card({ sid }: { sid: string }) {
             {long.map((f) => (
               <div key={f.key}>
                 <dt className="text-xs font-bold text-slate-500">{f.label}</dt>
-                <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
+                <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>
+                  <EditableField edit={{ target: 'student', studentId: sid, field: f.key }} value={value(f)} multiline className="w-full">{value(f) ?? '—'}</EditableField>
+                </dd>
               </div>
             ))}
           </dl>
@@ -725,7 +733,27 @@ function ManualAction({ sid, onCancel, onSaved }: { sid: string; onCancel: () =>
 // ─────────────────────────────── יומן מעקב ───────────────────────────────
 
 function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLog: (l: BagrutLogEntry[]) => void }) {
-  const { round, data, canEditTracking, applyTracking } = useBagrut()
+  const { round, data, index, canEditTracking, applyTracking } = useBagrut()
+  const student = index.studentById.get(sid)
+  // ייצוא ל-PDF — רשומה בודדת או כל היומן (משימה 4): ישר לחלון "שמירה בשם"
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null)
+  const exportPdf = async (entries: BagrutLogEntry[], key: string) => {
+    setPdfBusy(key)
+    setErr(null)
+    try {
+      await saveLogPdf({
+        studentName: student ? displayName(student) : sid,
+        className: student?.class_name ?? null,
+        school: round.school_name ?? round.school_code,
+        roundLabel: `${round.season} ${round.school_year}`,
+        entries,
+      })
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setPdfBusy(null)
+    }
+  }
   const empty = { kind: 'student' as LogKind, happened_on: todayIso(), participants: '', summary: '', agreements: '', next_step: '', next_followup: '' }
   const [f, setF] = useState(empty)
   const [busy, setBusy] = useState(false)
@@ -744,8 +772,13 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
         next_followup: f.next_followup || null,
       })
       onLog([entry, ...log].sort((a, b) => b.happened_on.localeCompare(a.happened_on) || b.created_at.localeCompare(a.created_at)))
-      // מעקב הבא שנקבע בשיחה — הופך למעקב הבא של התלמיד
-      if (f.next_followup) applyTracking(await saveTracking(round, sid, { next_followup: f.next_followup }, data.tracking.get(sid)))
+      // מעקב הבא שנקבע בשיחה — הופך למעקב הבא של התלמיד. ובלי מועד חדש: רשומה
+      // מיום המעקב או אחריו **סוגרת** אותו — אחרת המועד נשאר "באיחור" לתמיד,
+      // והתראת שווא קבועה מלמדת להתעלם מכל ההתראות (משימה 5)
+      const cur = data.tracking.get(sid)
+      const happened = f.happened_on || todayIso()
+      if (f.next_followup) applyTracking(await saveTracking(round, sid, { next_followup: f.next_followup }, cur))
+      else if (cur?.next_followup && cur.next_followup <= happened) applyTracking(await saveTracking(round, sid, { next_followup: null }, cur))
       setF(empty)
     } catch (e) {
       setErr((e as Error).message)
@@ -779,6 +812,11 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
           <Field label="על מה הוסכם"><textarea value={f.agreements} onChange={(e) => set('agreements', e.target.value)} rows={2} className={input} /></Field>
           <Field label="הצעד הבא"><input value={f.next_step} onChange={(e) => set('next_step', e.target.value)} className={input} /></Field>
           <Field label="מעקב הבא"><input type="date" value={f.next_followup} onChange={(e) => set('next_followup', e.target.value)} className={input} /></Field>
+          {(() => {
+            const cur = data.tracking.get(sid)?.next_followup
+            if (!cur || f.next_followup || cur > (f.happened_on || todayIso())) return null
+            return <p className="mt-1 text-xs text-slate-500">בלי מועד חדש, הרשומה תסגור את המעקב שנקבע ל-{fmtDate(cur)}.</p>
+          })()}
           {err && <p className="mt-2 text-sm text-rose-700">{err}</p>}
           <button disabled={!valid || busy} onClick={submit} className="mt-3 rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-sky-700 disabled:opacity-40">
             {busy ? 'שומר…' : 'שמירה ביומן'}
@@ -787,6 +825,20 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
       )}
 
       <div className={`flex flex-col gap-3 ${canEditTracking ? 'lg:col-span-3' : 'lg:col-span-5'}`}>
+        {log.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">{log.length} רשומות</span>
+            <button
+              disabled={pdfBusy !== null}
+              onClick={() => exportPdf(log, 'all')}
+              title="שמירת כל היומן כקובץ PDF"
+              className="mr-auto rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-sky-400 hover:text-sky-800 disabled:opacity-50"
+            >
+              {pdfBusy === 'all' ? 'יוצר קובץ…' : 'ייצוא היומן ל-PDF'}
+            </button>
+          </div>
+        )}
+        {err && !canEditTracking && <p className="text-sm text-rose-700">{err}</p>}
         {log.length === 0 ? (
           <Card><p className="text-sm text-slate-400">עוד אין רשומות ביומן. אחרי שיחה עם התלמיד — כתבו מה עלה, על מה הוסכם, ומתי המעקב הבא.</p></Card>
         ) : (
@@ -796,7 +848,9 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
                 <strong className="text-sm text-slate-800">{LOG_KIND_LABELS[e.kind]}</strong>
                 <span className="text-xs text-slate-500">{fmtDate(e.happened_on)}</span>
                 {e.participants && <span className="text-xs text-slate-400">· {e.participants}</span>}
-                {canEditTracking && <button onClick={() => remove(e)} className="mr-auto text-xs text-slate-300 hover:text-rose-600">מחיקה</button>}
+                <span className="mr-auto" />
+                <button disabled={pdfBusy !== null} onClick={() => exportPdf([e], e.id)} title="שמירת הרשומה הזו בלבד כקובץ PDF" className="text-xs text-slate-400 hover:text-sky-700 disabled:opacity-50">{pdfBusy === e.id ? 'יוצר…' : 'PDF'}</button>
+                {canEditTracking && <button onClick={() => remove(e)} className="text-xs text-slate-300 hover:text-rose-600">מחיקה</button>}
               </div>
               {e.summary && <p className="mt-2 whitespace-pre-line text-sm text-slate-700">{e.summary}</p>}
               {e.agreements && <p className="mt-2 text-sm"><span className="font-semibold text-slate-600">הוסכם: </span><span className="whitespace-pre-line text-slate-700">{e.agreements}</span></p>}
@@ -823,18 +877,3 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-// ─────────────────────────────── הכנה לשיחה ───────────────────────────────
-
-function PrepView() {
-  return (
-    <Card title="הכנה לשיחה">
-      <p className="text-sm text-slate-600">
-        כאן יהיה דף אחד להדפסה לפני שיחה עם התלמיד: המצב במשפט, על מה לבנות, הפעולות שבתוכנית עם הציון הנדרש,
-        מה סוכם בפעם הקודמת, ושאלות מוצעות לשיחה — וסיכום השיחה יישמר ישר ליומן.
-      </p>
-      <p className="mt-2 text-sm text-slate-500">
-        מבנה השיחה עצמו ממתין לתבנית מהשותפה של סבא (מומחית לשיחה הפדגוגית). עד אז — "מצב ותוכנית" ו"יומן מעקב" מכסים את רוב המידע.
-      </p>
-    </Card>
-  )
-}

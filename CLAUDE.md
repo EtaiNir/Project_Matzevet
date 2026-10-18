@@ -17,6 +17,8 @@
 - **Export:** כותב XLSX משלנו ([`lib/xlsx.ts`](src/lib/xlsx.ts)) — בלי
   תלויות. SheetJS הוסר: הגרסה החינמית אינה כותבת עיצוב, ו-`npm install`
   נכשל ברשת הזו ב-`SELF_SIGNED_CERT_IN_CHAIN`
+- **PDF:** יומן המעקב בבגרות — `jspdf` + `html2canvas` ([`lib/printLog.ts`](src/lib/printLog.ts)),
+  בגרסאות קבועות, נטענות רק בלחיצה. נוספו 18.10, כש-`npm install` כבר עבר
 - **Language:** TypeScript
 
 ## כללים קריטיים
@@ -33,6 +35,9 @@
   לא מנבאים ולא "מתקנים" זכאות בקוד או ב-AI, גם לא לפי חוקת הזכאות. הסטטוס,
   החסמים וההתערבות מוצגים כפי שהגיעו מ-T2. אושר בפגישת 5.10 ושוב ע"י אייל
   ב-6.10. ראה [decisions/014 §8](docs/decisions/014-bagrut-module.md)
+  **חריג אחד:** אדם מצוות בית הספר רשאי לתקן ידנית גם שדות ניתוח הזכאות —
+  רק דרך `bagrut_edit_field`, מסומן "נערך" במסך, ונמחק בסבב הבא
+  ([decisions/018](docs/decisions/018-bagrut-manual-edits.md)). הקוד וה-AI עדיין לא.
 
 ## ⚠️ שני ריפואים — לדחוף לשניהם
 
