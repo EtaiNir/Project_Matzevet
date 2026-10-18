@@ -32,6 +32,7 @@ import {
 import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
 import { saveLogPdf } from '@/lib/printLog'
+import EditableField from '@/components/bagrut/EditableField'
 
 /**
  * לשונית המעקב כמחזור התערבות — מצב → תוכנית → מעקב
@@ -228,7 +229,9 @@ function T2Card({ sid }: { sid: string }) {
             {short.map((f) => (
               <div key={f.key} className="min-w-0">
                 <dt className="text-[11px] font-semibold leading-tight text-slate-500">{f.label}</dt>
-                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
+                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>
+                  <EditableField edit={{ target: 'student', studentId: sid, field: f.key }} value={value(f)} numeric={f.key === 'negatives_count' || f.key === 'core_units'}>{value(f) ?? '—'}</EditableField>
+                </dd>
               </div>
             ))}
           </dl>
@@ -236,7 +239,9 @@ function T2Card({ sid }: { sid: string }) {
             {long.map((f) => (
               <div key={f.key}>
                 <dt className="text-xs font-bold text-slate-500">{f.label}</dt>
-                <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
+                <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>
+                  <EditableField edit={{ target: 'student', studentId: sid, field: f.key }} value={value(f)} multiline className="w-full">{value(f) ?? '—'}</EditableField>
+                </dd>
               </div>
             ))}
           </dl>

@@ -9,6 +9,10 @@ import ModuleSwitch from '@/components/ModuleSwitch'
 import { BAGRUT_ROLE_LABELS, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
   buildIndex,
+  clearRoundCache,
+  editKey,
+  type EditRef,
+  type ManualEdit,
   classSortKey,
   eligibilityKind,
   fetchRounds,
@@ -188,6 +192,35 @@ export default function BagrutShell() {
     })
   }, [])
 
+  const applyDataEdit = useCallback((ref: EditRef, value: string | null, edit: ManualEdit | null) => {
+    // המטמון של הסבב מחזיק את הנתונים מלפני העריכה — שכניסה הבאה למודול תטען מחדש
+    if (round) clearRoundCache(round.id)
+    const num = (v: string | null) => (v == null ? null : Number(v))
+    setData((d) => {
+      if (!d) return d
+      const next = { ...d }
+      if (ref.target === 'student') {
+        const numeric = ref.field === 'negatives_count' || ref.field === 'core_units'
+        next.students = d.students.map((s) => (s.student_id === ref.studentId ? { ...s, [ref.field]: numeric ? num(value) : value } : s))
+      } else if (ref.target === 'subject') {
+        const numeric = ref.field !== 'completion_status'
+        next.subjectRows = d.subjectRows.map((r) =>
+          r.student_id === ref.studentId && r.subject_key === ref.subjectKey ? { ...r, [ref.field]: numeric ? num(value) : value } : r)
+      } else {
+        next.grades = d.grades.map((g) =>
+          g.student_id === ref.studentId && g.subject_key === ref.subjectKey && g.questionnaire_code === ref.questionnaireCode
+            ? { ...g, [ref.field]: num(value) } : g)
+      }
+      if (edit) {
+        const edits = new Map(d.edits)
+        const prev = edits.get(editKey(ref))
+        edits.set(editKey(ref), prev ? { ...edit, old_value: prev.old_value } : edit)
+        next.edits = edits
+      }
+      return next
+    })
+  }, [round])
+
   const ctx: BagrutContextValue | null =
     round && data && index
       ? {
@@ -198,6 +231,7 @@ export default function BagrutShell() {
           canEditTracking: isSuperAdmin || (Boolean(profile?.bagrut_role) && profile?.bagrut_role !== 'council'),
           applyTracking,
           applyActionCounts,
+          applyDataEdit,
           base: `/bagrut/${authorityCode}/${round.school_code}`,
         }
       : null

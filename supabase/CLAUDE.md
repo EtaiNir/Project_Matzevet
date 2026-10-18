@@ -51,6 +51,12 @@ secrets). פריסה: [server-migration.md](../docs/server-migration.md#פריס
 `school_code` בכל שורה, לא טבלה לכל בית ספר. `bagrut_schools` (033) מחזיקה את
 שם בית הספר, והוא גובר על השם שבקבצים.
 **זכאות נקבעת רק לפי T2** — גם ב-`bagrut-ai` ([014 §8](../docs/decisions/014-bagrut-module.md)).
+**עריכה ידנית של נתוני הסבב** ([decisions/018](../docs/decisions/018-bagrut-manual-edits.md),
+מיגרציה 037) — **רק** דרך `bagrut_edit_field`, עם רשימה סגורה של שדות. אין
+מדיניות UPDATE על `bagrut_students/grades/subjects` למשתמשים, ואסור להוסיף:
+RLS מגביל שורות ולא עמודות, ורכז היה משנה כיתה ומזיז תלמיד מחוץ להיקף. שדה
+חדש לעריכה = שורה ב-`case` בפונקציה. `bagrut_manual_edits` נמחקת עם הסבב
+(cascade) — בכוונה.
 
 ## מבנה מסד הנתונים
 

@@ -228,6 +228,103 @@ export interface RoundData {
   tracking: Map<string, Tracking>
   /** תוכנית ההתערבות לכל תלמיד — ספירות בלבד, לרשימה ולפס המצב */
   actionCounts: Map<string, ActionCounts>
+  /** עריכות ידניות בסבב (מיגרציה 037) — האחרונה לכל שדה, לפי editKey */
+  edits: Map<string, ManualEdit>
+}
+
+// ─────────────────────────────── עריכה ידנית (משימה 7) ───────────────────────────────
+
+/** student = שדה בניתוח הזכאות · subject = מדד מקצוע · grade = ציון שאלון */
+export type EditTarget = 'student' | 'subject' | 'grade'
+
+export interface ManualEdit {
+  target: EditTarget
+  student_id: string
+  subject_key: string | null
+  questionnaire_code: number | null
+  field: string
+  old_value: string | null
+  new_value: string | null
+  edited_by_email: string | null
+  edited_at: string
+}
+
+export interface EditRef {
+  target: EditTarget
+  studentId: string
+  subjectKey?: string | null
+  questionnaireCode?: number | null
+  field: string
+}
+
+export const editKey = (e: EditRef) =>
+  `${e.target}|${e.studentId}|${e.subjectKey ?? ''}|${e.questionnaireCode ?? ''}|${e.field}`
+
+/**
+ * מי רשאי לערוך — לתצוגה בלבד (כפתור העריכה). האכיפה ב-may_edit_bagrut_data
+ * במסד (מלכודת 16). רכז מקצוע: רק שדה של מקצוע שלו; שדות ניתוח הזכאות — לא.
+ */
+export function canEditBagrutData(
+  profile: { role?: string; bagrut_role?: string | null; bagrut_subject_keys?: string[] } | null,
+  subjectKey: string | null,
+): boolean {
+  if (!profile) return false
+  if (profile.role === 'super_admin') return true
+  if (profile.bagrut_role === 'coordinator' || profile.bagrut_role === 'grade_coordinator') return true
+  return profile.bagrut_role === 'subject_coordinator' && subjectKey != null && (profile.bagrut_subject_keys ?? []).includes(subjectKey)
+}
+
+export interface EditResult {
+  changed: boolean
+  value: string | null
+  edit: ManualEdit | null
+}
+
+/** עריכת שדה אחד. העריכה נמחקת בקליטת הסבב הבא — כך במסך, כך במסד. */
+export async function editBagrutField(round: BagrutRound, ref: EditRef, value: string): Promise<EditResult> {
+  const { data, error } = await supabase.rpc('bagrut_edit_field', {
+    p_round: round.id, p_student: ref.studentId, p_target: ref.target,
+    p_subject: ref.target === 'student' ? null : ref.subjectKey ?? null,
+    p_questionnaire: ref.target === 'grade' ? ref.questionnaireCode ?? null : null,
+    p_field: ref.field, p_value: value,
+  })
+  if (error) {
+    // הפונקציה עוד לא במסד — אומרים את זה, לא "שגיאה" (מלכודת 15)
+    if (error.code === 'PGRST202' || /bagrut_edit_field/.test(error.message)) {
+      throw new Error('העריכה הידנית עדיין לא הופעלה במסד (מיגרציה 037)')
+    }
+    throw new Error(`השמירה נכשלה: ${error.message}`)
+  }
+  const d = data as { changed: boolean; value: string | null; old?: string | null; edited_by_email?: string | null; edited_at?: string }
+  return {
+    changed: d.changed,
+    value: d.value,
+    edit: d.changed
+      ? {
+          target: ref.target, student_id: ref.studentId,
+          subject_key: ref.target === 'student' ? null : ref.subjectKey ?? null,
+          questionnaire_code: ref.target === 'grade' ? ref.questionnaireCode ?? null : null,
+          field: ref.field, old_value: d.old ?? null, new_value: d.value,
+          edited_by_email: d.edited_by_email ?? null, edited_at: d.edited_at ?? new Date().toISOString(),
+        }
+      : null,
+  }
+}
+
+/** העריכות של הסבב. טבלה שעוד לא קיימת (לפני 037) = אין עריכות, לא שגיאה. */
+async function loadEdits(roundId: string): Promise<Map<string, ManualEdit>> {
+  const { data, error } = await supabase.from('bagrut_manual_edits')
+    .select('target, student_id, subject_key, questionnaire_code, field, old_value, new_value, edited_by_email, edited_at')
+    .eq('round_id', roundId).order('edited_at')
+  const m = new Map<string, ManualEdit>()
+  if (error) return m
+  for (const e of (data ?? []) as ManualEdit[]) {
+    const key = editKey({ target: e.target, studentId: e.student_id, subjectKey: e.subject_key, questionnaireCode: e.questionnaire_code, field: e.field })
+    const prev = m.get(key)
+    // כמה עריכות לאותו שדה: המוצג הוא האחרון, וה"היה" — הערך המקורי מהקובץ
+    m.set(key, prev ? { ...e, old_value: prev.old_value } : e)
+  }
+  return m
 }
 
 export interface ActionCounts {
@@ -494,6 +591,8 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     actionCounts.set(a.student_id, c)
   }
 
+  const edits = await loadEdits(rid)
+
   const codes = [...new Set([...program.map((p) => p.questionnaire_code), ...grades.map((g) => g.questionnaire_code)])]
   const qs = await step('אינדקס השאלונים', fetchAll<Questionnaire>((f, t) =>
     supabase.from('bagrut_questionnaires').select('code, subject_name, exam_form, exam_kind, units, relation')
@@ -509,6 +608,7 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     subjectRows,
     tracking: new Map(tracking.map((t) => [t.student_id, t])),
     actionCounts,
+    edits,
   }
 }
 
