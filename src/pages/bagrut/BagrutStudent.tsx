@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useBagrut, type CardNavState } from './context'
 import {
@@ -66,6 +66,19 @@ export default function BagrutStudent() {
     })
   }, [s, location.pathname, round.id, nav])
 
+  // כותרת קבועה (משימה 3, 14.10): כששורת השם נגללת מחוץ למסך, מופיעה שורה דקה
+  // למעלה עם השם, הכיתה ות"ז. IntersectionObserver מתחשב גם בגלילה הפנימית של
+  // המעטפת, לא רק בחלון.
+  const nameRow = useRef<HTMLDivElement>(null)
+  const [nameHidden, setNameHidden] = useState(false)
+  useEffect(() => {
+    const el = nameRow.current
+    if (!el) return
+    const io = new IntersectionObserver(([e]) => setNameHidden(!e.isIntersecting))
+    io.observe(el)
+    return () => io.disconnect()
+  }, [s])
+
   if (!s) return <Empty title="התלמיד לא נמצא בסבב הזה" />
 
   const kind = eligibilityKind(s)
@@ -83,6 +96,41 @@ export default function BagrutStudent() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
+      {/* ── שורה קבועה: בגובה אפס, כך שהופעתה אינה מזיזה את הדף. -mb-4 מבטל את
+          הרווח שהיה נוסף בגלל gap של העמודה ── */}
+      <div className="sticky top-0 z-20 -mb-4 h-0">
+        <div
+          aria-hidden={!nameHidden}
+          className={`absolute inset-x-0 top-0 flex items-center gap-3 rounded-b-xl border-x border-b border-slate-200 bg-white/95 px-4 py-1.5 text-sm shadow-md backdrop-blur transition ${
+            nameHidden ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-2 opacity-0'
+          }`}
+        >
+          <span className="truncate font-bold text-slate-800">{displayName(s)}</span>
+          <span className="shrink-0 text-xs text-slate-500">
+            כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{s.student_id}</span>
+          </span>
+          {s.in_t2 && <StatusBadge kind={kind} />}
+          <span className="mr-auto" />
+          <nav className="hidden shrink-0 gap-0.5 md:flex">
+            {tabs.map(([k, label]) => (
+              <button
+                key={k}
+                tabIndex={nameHidden ? 0 : -1}
+                onClick={() => setTab(k)}
+                className={`rounded-md px-2 py-0.5 text-xs font-semibold ${tab === k ? 'bg-sky-100 text-sky-800' : 'text-slate-500 hover:bg-slate-100'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+          <span className="flex shrink-0 items-center gap-1 text-xs">
+            <button tabIndex={nameHidden ? 0 : -1} disabled={pos <= 0} onClick={() => go(pos - 1)} title="התלמיד הקודם" className="rounded-md px-1.5 py-0.5 text-slate-600 hover:bg-slate-100 disabled:opacity-30">▶</button>
+            <span className="tabular-nums text-slate-400">{pos + 1}/{ids.length}</span>
+            <button tabIndex={nameHidden ? 0 : -1} disabled={pos < 0 || pos >= ids.length - 1} onClick={() => go(pos + 1)} title="התלמיד הבא" className="rounded-md px-1.5 py-0.5 text-slate-600 hover:bg-slate-100 disabled:opacity-30">◀</button>
+          </span>
+        </div>
+      </div>
+
       {/* ── כותרת ── */}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Link to={nav?.backTo ?? `${base}/students`} className="rounded-lg px-2 py-1 text-sky-700 hover:bg-sky-50">
@@ -99,7 +147,7 @@ export default function BagrutStudent() {
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3">
+        <div ref={nameRow} className="flex flex-wrap items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-sky-100 text-lg font-extrabold text-sky-800">
             {(s.first_name ?? displayName(s)).slice(0, 1)}
           </div>
