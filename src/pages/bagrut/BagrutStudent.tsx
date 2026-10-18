@@ -66,17 +66,31 @@ export default function BagrutStudent() {
     })
   }, [s, location.pathname, round.id, nav])
 
-  // כותרת קבועה (משימה 3, 14.10): כששורת השם נגללת מחוץ למסך, מופיעה שורה דקה
-  // למעלה עם השם, הכיתה ות"ז. IntersectionObserver מתחשב גם בגלילה הפנימית של
-  // המעטפת, לא רק בחלון.
+  // כותרת קבועה (משימה 3, 14.10): כששורת השם נגללת מעל הקצה העליון של אזור
+  // הגלילה, מופיעה שורה דקה למעלה עם השם, הכיתה ות"ז.
+  //
+  // ⚠️ לא IntersectionObserver: עם הגדלה/הקטנה של הדף (zoom במעטפת) הוא אינו
+  // מדווח שהשורה יצאה, והשורה הקבועה לא הופיעה אף פעם — נבדק בכרום. כאן
+  // משווים מיקומים על המסך בכל גלילה, וזה נכון בכל גודל.
   const nameRow = useRef<HTMLDivElement>(null)
   const [nameHidden, setNameHidden] = useState(false)
   useEffect(() => {
     const el = nameRow.current
     if (!el) return
-    const io = new IntersectionObserver(([e]) => setNameHidden(!e.isIntersecting))
-    io.observe(el)
-    return () => io.disconnect()
+    let scroller: HTMLElement | null = el.parentElement
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+    const target: HTMLElement | Window = scroller ?? window
+    const check = () => {
+      const top = scroller ? scroller.getBoundingClientRect().top : 0
+      setNameHidden(el.getBoundingClientRect().bottom < top)
+    }
+    check()
+    target.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      target.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
+    }
   }, [s])
 
   if (!s) return <Empty title="התלמיד לא נמצא בסבב הזה" />
