@@ -2,7 +2,9 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useBagrut } from './context'
 import { SUBJECT_GROUPS, programWeightSum, type RoundSubject } from '@/lib/bagrut'
-import { Card, WeightBar } from '@/components/bagrut/ui'
+import { Card, Empty, WeightBar } from '@/components/bagrut/ui'
+import { useAuth } from '@/context/AuthContext'
+import { canSeeBagrutProgram } from '@/lib/admin'
 
 /**
  * ריבוע שאלון: הסמל בשורה העליונה, המשקל ומספר הניגשים מתחתיו. כל ערך
@@ -45,6 +47,15 @@ function QuestionnaireChip({ code, weight, takers, alt = false, title }: {
  * שלב 1: צפייה. עריכה (רכז בגרויות) — שלב 3 בתוכנית.
  */
 export default function BagrutProgram() {
+  const { profile } = useAuth()
+  // מי שאין לו את הדף בסרגל (מחנך, רכז מקצוע, רכז שכבה) ומגיע בקישור ישיר
+  if (!canSeeBagrutProgram(profile)) {
+    return <Empty title="תוכנית בית הספר זמינה לרכז הבגרויות">הדף מציג את מפת השאלונים והמשקלים של בית הספר כולו.</Empty>
+  }
+  return <ProgramView />
+}
+
+function ProgramView() {
   const { data, index, round, base } = useBagrut()
 
   const takers = useMemo(() => {

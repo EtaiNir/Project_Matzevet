@@ -101,6 +101,14 @@ export function bagrutTitle(u: BagrutScopeFields | null | undefined): string {
   return parts.length ? parts.join(' · ') : BAGRUT_ROLE_LABELS[role]
 }
 
+/**
+ * דף "תוכנית בית הספר" (המצפן) — רק לרכז בגרויות ולמנהל־על (אייל, 18.10). למחנך
+ * ולרכז מקצוע הוא לא רלוונטי. תצוגה בלבד: המצפן אינו מידע על תלמידים.
+ */
+export function canSeeBagrutProgram(u: (BagrutScopeFields & { role?: string | null }) | null | undefined): boolean {
+  return u?.role === 'super_admin' || u?.bagrut_role === 'coordinator'
+}
+
 /** משתמש בית־ספרי (לא מועצתי, לא כל בית הספר) */
 function scopedBagrut(u: BagrutScopeFields | null | undefined): boolean {
   return Boolean(u?.bagrut_role && u.bagrut_role !== 'council' && u.bagrut_role !== 'coordinator')

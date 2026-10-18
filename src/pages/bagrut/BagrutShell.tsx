@@ -5,7 +5,7 @@ import Logo from '@/components/brand/Logo'
 import HomeLink from '@/components/HomeLink'
 import LastStudentLink from '@/components/bagrut/LastStudentLink'
 import ModuleSwitch from '@/components/ModuleSwitch'
-import { bagrutGeneralScope, bagrutHasSubjects, bagrutTitle, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
+import { bagrutGeneralScope, bagrutHasSubjects, bagrutTitle, canSeeBagrutProgram, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
   buildIndex,
   classSortKey,
@@ -19,6 +19,7 @@ import {
   type ActionCounts,
   type BagrutRound,
   type BagrutSchool,
+  type BagrutStudent,
   type RoundData,
   type RoundIndex,
   type Tracking,
@@ -380,7 +381,8 @@ export default function BagrutShell() {
       <div className="flex min-h-0 flex-1">
         {/* הסרגל סופר תמיד את הדפים הכלליים, ואת "המקצועות שלי" — לפי כל מה שמותר */}
         {ctx && general && generalIndex && index && (
-          <Rail ctx={{ ...ctx, data: general, index: generalIndex }} fullIndex={index} isSuperAdmin={isSuperAdmin} />
+          <Rail ctx={{ ...ctx, data: general, index: generalIndex }} fullIndex={index} allStudents={data?.students ?? []}
+            lensId={lens?.id ?? null} onClassLens={() => chooseLens('scope')} isSuperAdmin={isSuperAdmin} />
         )}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* מתג התצוגה — רק כשיש יותר מאחת, ורק בדפים הכלליים */}
@@ -493,7 +495,16 @@ function SchoolPicker({ authorityCode, authorityName, schools, isSuperAdmin }: {
 }
 
 /** סרגל ימני: המסכים, התצורות המוכנות עם ספירות, והמקצועות לפי קבוצה. */
-function Rail({ ctx, fullIndex, isSuperAdmin }: { ctx: BagrutContextValue; fullIndex: RoundIndex; isSuperAdmin: boolean }) {
+function Rail({ ctx, fullIndex, allStudents, lensId, onClassLens, isSuperAdmin }: {
+  ctx: BagrutContextValue
+  fullIndex: RoundIndex
+  /** כל התלמידים שמותר לראות — לספירת "הכיתה שלי" בלי קשר לתצוגה */
+  allStudents: BagrutStudent[]
+  lensId: string | null
+  /** לחיצה על "הכיתה שלי" עוברת לתצוגת הכיתה */
+  onClassLens: () => void
+  isSuperAdmin: boolean
+}) {
   const { data, base } = ctx
   const location = useLocation()
   const counts = useMemo(() => {
@@ -534,6 +545,21 @@ function Rail({ ctx, fullIndex, isSuperAdmin }: { ctx: BagrutContextValue; fullI
     const keys = profile?.bagrut_subject_keys ?? []
     return data.subjects.filter((s) => keys.includes(s.subject_key))
   }, [profile, data.subjects])
+
+  // הכיתות שסומנו לו — עם מספר התלמידים מכל מה שמותר (לא רק התצוגה הנוכחית),
+  // וקישור לרשימה באותו פורמט כמו הכיתות שמתחת לשכבה
+  const myClasses = useMemo(() => {
+    const scope = bagrutGeneralScope(profile)
+    if (!scope?.classes.length) return []
+    return scope.classes.map((name) => {
+      const inClass = allStudents.filter((s) => s.class_name === name)
+      const grade = inClass[0]?.grade ?? ''
+      const q = grade && grade === ctx.round.graduating_grade
+        ? `?view=graduating&class=${encodeURIComponent(name)}`
+        : `?grade=${encodeURIComponent(grade)}&class=${encodeURIComponent(name)}`
+      return { name, n: inClass.length, q }
+    })
+  }, [profile, allStudents, ctx.round.graduating_grade])
 
   const link = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition ${
@@ -587,9 +613,12 @@ function Rail({ ctx, fullIndex, isSuperAdmin }: { ctx: BagrutContextValue; fullI
         <NavLink end to={base} className={link}>
           <span aria-hidden>◔</span> תמונת מצב
         </NavLink>
-        <NavLink to={`${base}/program`} className={link}>
-          <span aria-hidden>▤</span> תוכנית בית הספר
-        </NavLink>
+        {/* תוכנית בית הספר — רק לרכז בגרויות ולמנהל־על (אייל, 18.10) */}
+        {canSeeBagrutProgram(profile) && (
+          <NavLink to={`${base}/program`} className={link}>
+            <span aria-hidden>▤</span> תוכנית בית הספר
+          </NavLink>
+        )}
         {isSuperAdmin && (
           <NavLink to={`${base}/upload`} className={link}>
             <span aria-hidden>⬆</span> קליטת סבב
@@ -636,6 +665,20 @@ function Rail({ ctx, fullIndex, isSuperAdmin }: { ctx: BagrutContextValue; fullI
           )
         })}
       </div>
+
+      {/* מחנך: "הכיתה שלי" — רשימת תלמידי הכיתה, בתצוגת הכיתה (אייל, 18.10) */}
+      {myClasses.length > 0 && (
+        <div className="rounded-xl bg-violet-50/70 py-1.5">
+          <div className="px-3 pb-1 text-xs font-bold text-violet-700">{myClasses.length > 1 ? 'הכיתות שלי' : 'הכיתה שלי'}</div>
+          {myClasses.map((c) => (
+            <Link key={c.name} to={`${base}/students${c.q}`} onClick={onClassLens}
+              className={link({ isActive: lensId === 'scope' && isHere(c.q) })}>
+              <span className="truncate">{c.name}</span>
+              {count(c.n)}
+            </Link>
+          ))}
+        </div>
+      )}
 
       {/* רכז מקצוע: רק המקצועות שלו (035 — גם התלמידים רק שלו). שאר המקצועות לא מוצגים */}
       {mySubjects.length > 0 && (
