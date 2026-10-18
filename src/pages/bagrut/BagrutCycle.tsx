@@ -46,7 +46,9 @@ import { saveLogPdf } from '@/lib/printLog'
 
 type AiState = { picture: AiAnalysis<AiPicture> | null; plan: AiAnalysis<AiPlan> | null }
 
-type Inner = 'plan' | 'log' | 'prep'
+// "הכנה לשיחה" הוסרה (משימה 6, פגישת 14.10): לשונית שלא עשתה דבר, עד שתגיע
+// תבנית השיחה מהשותפה של סבא. התכנון נשאר ב-docs/bagrut-intervention-design.md §5.
+type Inner = 'plan' | 'log'
 
 const SESSIONS = ['מועד חורף', 'מועד קיץ', 'סוף המחצית', 'עד סוף החודש']
 
@@ -93,7 +95,7 @@ export default function CycleTab({ sid }: { sid: string }) {
   if (error) return <Card><p className="text-sm text-rose-700">{error}</p></Card>
   if (!actions || !log || !ai) return <Card><p className="text-sm text-slate-400">טוען את המעקב…</p></Card>
 
-  const tabs: [Inner, string][] = [['plan', 'מצב ותוכנית'], ['log', `יומן מעקב${log.length ? ` (${log.length})` : ''}`], ['prep', '🗒 הכנה לשיחה']]
+  const tabs: [Inner, string][] = [['plan', 'מצב ותוכנית'], ['log', `יומן מעקב${log.length ? ` (${log.length})` : ''}`]]
 
   return (
     <div className="flex flex-col gap-4">
@@ -113,7 +115,6 @@ export default function CycleTab({ sid }: { sid: string }) {
       </div>
       {inner === 'plan' && <PlanView sid={sid} actions={actions} onActions={changeActions} ai={ai} onAi={setAi} />}
       {inner === 'log' && <LogView sid={sid} log={log} onLog={setLog} />}
-      {inner === 'prep' && <PrepView />}
     </div>
   )
 }
@@ -871,18 +872,3 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-// ─────────────────────────────── הכנה לשיחה ───────────────────────────────
-
-function PrepView() {
-  return (
-    <Card title="הכנה לשיחה">
-      <p className="text-sm text-slate-600">
-        כאן יהיה דף אחד להדפסה לפני שיחה עם התלמיד: המצב במשפט, על מה לבנות, הפעולות שבתוכנית עם הציון הנדרש,
-        מה סוכם בפעם הקודמת, ושאלות מוצעות לשיחה — וסיכום השיחה יישמר ישר ליומן.
-      </p>
-      <p className="mt-2 text-sm text-slate-500">
-        מבנה השיחה עצמו ממתין לתבנית מהשותפה של סבא (מומחית לשיחה הפדגוגית). עד אז — "מצב ותוכנית" ו"יומן מעקב" מכסים את רוב המידע.
-      </p>
-    </Card>
-  )
-}
