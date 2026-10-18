@@ -148,6 +148,8 @@ Deno.serve(async (req) => {
           // בגרות (מיגרציה 037): מועצתי — בלי היקף; רכז בגרויות — בתי הספר בלבד;
           // כל השאר — איחוד של השכבות, הכיתות והמקצועות שסומנו (מחנך יכול להיות גם רכז מקצוע)
           bagrut_role: bagrutRole,
+          // מנהל/ת בית ספר — כותרת בלבד, רק עם "כל בית הספר" (039)
+          bagrut_title: bagrutRole === 'coordinator' && body.bagrut_title === 'principal' ? 'principal' : null,
           bagrut_schools: bagrutRole && bagrutRole !== 'council' ? strArray(body.bagrut_schools) : [],
           bagrut_grades: bagrutScoped ? strArray(body.bagrut_grades) : [],
           bagrut_classes: bagrutScoped ? strArray(body.bagrut_classes) : [],

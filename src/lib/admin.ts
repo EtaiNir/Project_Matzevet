@@ -69,8 +69,13 @@ export const BAGRUT_ROLE_LABELS: Record<BagrutRole, string> = {
  * שסומן: כל בית הספר, או **איחוד** של שכבות, כיתות ומקצועות. כך מחנך יכול
  * להיות גם רכז מקצוע (סבא, 14.10).
  */
+/** כותרת לתצוגה בבגרות (039) — לא משפיעה על הרשאות */
+export type BagrutTitle = 'principal'
+export const BAGRUT_TITLE_LABELS: Record<BagrutTitle, string> = { principal: 'מנהל/ת בית ספר' }
+
 export interface BagrutScopeFields {
   bagrut_role?: BagrutRole | null
+  bagrut_title?: BagrutTitle | null
   bagrut_grades?: string[] | null
   bagrut_classes?: string[] | null
   bagrut_subject_keys?: string[] | null
@@ -92,6 +97,7 @@ export function primaryBagrutRole(wholeSchool: boolean, d: BagrutScopeFields): B
 export function bagrutTitle(u: BagrutScopeFields | null | undefined): string {
   const role = u?.bagrut_role
   if (!role) return ''
+  if (role === 'coordinator' && u?.bagrut_title === 'principal') return BAGRUT_TITLE_LABELS.principal
   if (role === 'council' || role === 'coordinator') return BAGRUT_ROLE_LABELS[role]
   const parts = [
     u?.bagrut_classes?.length ? BAGRUT_ROLE_LABELS.homeroom : null,
@@ -190,6 +196,8 @@ export interface ManagedUser {
   bagrut_grades: string[]
   bagrut_classes: string[]
   bagrut_subject_keys: string[]
+  /** כותרת לתצוגה (039): 'principal' = מנהל/ת בית ספר, עם "כל בית הספר" */
+  bagrut_title?: BagrutTitle | null
 }
 
 export interface MoeUpload {
@@ -481,7 +489,7 @@ export async function documentUrl(doc: ClientDocument): Promise<string | null> {
 
 const USER_BASE_COLUMNS =
   'id, email, display_name, role, authority_codes, scope_level, scope_values, is_suspended, ' +
-  'bagrut_role, bagrut_schools, bagrut_grades, bagrut_classes, bagrut_subject_keys'
+  'bagrut_role, bagrut_schools, bagrut_grades, bagrut_classes, bagrut_subject_keys, bagrut_title'
 const USER_PROFILE_COLUMNS =
   'job_title, institution_name, institution_code, can_edit_extra'
 
@@ -556,6 +564,7 @@ export interface NewUserInput {
   bagrut_grades: string[]
   bagrut_classes: string[]
   bagrut_subject_keys: string[]
+  bagrut_title?: BagrutTitle | null
 }
 
 export async function createUser(input: NewUserInput) {
@@ -597,6 +606,7 @@ export async function updateUserPermissions(
       | 'bagrut_grades'
       | 'bagrut_classes'
       | 'bagrut_subject_keys'
+      | 'bagrut_title'
     >
   >,
 ) {
@@ -611,10 +621,12 @@ export async function updateUserPermissions(
  * כל השאר — בתי הספר ואיחוד השכבות, הכיתות והמקצועות שסומנו. מה שלא רלוונטי
  * מתאפס, כדי שלא יישארו שאריות.
  */
-export function bagrutPatch(role: BagrutRole | null, d: Pick<ManagedUser, 'bagrut_schools' | 'bagrut_grades' | 'bagrut_classes' | 'bagrut_subject_keys'>) {
+export function bagrutPatch(role: BagrutRole | null, d: Pick<ManagedUser, 'bagrut_schools' | 'bagrut_grades' | 'bagrut_classes' | 'bagrut_subject_keys' | 'bagrut_title'>) {
   const scoped = Boolean(role) && role !== 'council' && role !== 'coordinator'
   return {
     bagrut_role: role,
+    // מנהל/ת בית ספר — רק עם "כל בית הספר" (039)
+    bagrut_title: role === 'coordinator' && d.bagrut_title === 'principal' ? ('principal' as const) : null,
     bagrut_schools: role && role !== 'council' ? d.bagrut_schools : [],
     bagrut_grades: scoped ? d.bagrut_grades : [],
     bagrut_classes: scoped ? d.bagrut_classes : [],

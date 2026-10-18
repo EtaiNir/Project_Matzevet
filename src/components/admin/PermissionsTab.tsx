@@ -270,7 +270,7 @@ export default function PermissionsTab({ code }: Props) {
                           onChange={(v) => setDraft({ ...draft, ...v })} />
                       ) : (
                         <BagrutFields options={bagrutOptions}
-                          value={{ bagrut_role: draft.bagrut_role ?? 'coordinator', bagrut_schools: draft.bagrut_schools, bagrut_grades: draft.bagrut_grades, bagrut_classes: draft.bagrut_classes, bagrut_subject_keys: draft.bagrut_subject_keys }}
+                          value={{ bagrut_role: draft.bagrut_role ?? 'coordinator', bagrut_schools: draft.bagrut_schools, bagrut_grades: draft.bagrut_grades, bagrut_classes: draft.bagrut_classes, bagrut_subject_keys: draft.bagrut_subject_keys, bagrut_title: draft.bagrut_title ?? null }}
                           onChange={(v) => setDraft({ ...draft, ...v })} />
                       )}
                     </ProductBox>

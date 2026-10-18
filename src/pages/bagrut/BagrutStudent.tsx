@@ -15,11 +15,13 @@ import {
   type GradeRow,
   type RoundSubject,
   type SubjectRow,
+  canEditBagrutData,
 } from '@/lib/bagrut'
+import { useAuth } from '@/context/AuthContext'
 import { Card, CompletionMark, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import CycleTab from './BagrutCycle'
-import EditableField from '@/components/bagrut/EditableField'
+import EditableField, { EditGroup } from '@/components/bagrut/EditableField'
 import { setLastStudent } from '@/lib/lastStudent'
 
 type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
@@ -354,6 +356,7 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
 
 function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; grades: GradeRow[]; m: SubjectRow | undefined }) {
   const { index, data } = useBagrut()
+  const { profile } = useAuth()
   const comp = completion(m?.completion_status)
   const passed = comp === 'done' && gradeTone(m?.final_grade) === 'pass'
 
@@ -366,6 +369,9 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
   const border = !passed && tone === 'fail' ? 'border-rose-200' : !passed && tone === 'blocked' ? 'border-orange-300' : comp === 'progress' ? 'border-amber-200' : 'border-slate-200'
 
   return (
+    // עריכה ידנית לכל הריבוע — עיפרון אחד בפינה (אייל, 18.10)
+    <EditGroup allowed={canEditBagrutData(profile, sub.subject_key)}>
+    {({ toggle, actions }) => (
     <div className={`rounded-2xl border bg-white shadow-sm ${border}`}>
       {/* האריח תמיד פתוח — בלי חץ לקיפול (אייל, 6.10) */}
       <div className="flex w-full items-center gap-3 p-4 text-right">
@@ -374,6 +380,7 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
           <div className="truncate font-bold text-slate-800">{sub.subject_name}</div>
           <div className="text-xs text-slate-500">{m?.questionnaires ? `${m.questionnaires} שאלונים` : ''}{m?.units ? ` · ${m.units} יח״ל` : ''}</div>
         </div>
+        {toggle}
         <div className="text-left">
           {m?.final_grade == null && m?.cumulative_grade != null ? (
             // אין עדיין ציון סופי — הציון המשוקלל המצטבר הוא המספר הבולט
@@ -424,8 +431,11 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
             <span>מצב <EditableField edit={subRef('completion_status')} value={m.completion_status}>{m.completion_status ?? '—'}</EditableField></span>
           </div>
         )}
+        {actions}
       </div>
     </div>
+    )}
+    </EditGroup>
   )
 }
 

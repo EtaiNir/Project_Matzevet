@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  BAGRUT_TITLE_LABELS,
   bagrutTitle,
   primaryBagrutRole,
   ROLE_LABELS,
@@ -7,6 +8,7 @@ import {
   fetchScopeOptions,
   type BagrutRole,
   type BagrutScopeOptions,
+  type BagrutTitle,
   type ScopeLevel,
   type ScopeOption,
   type UserRole,
@@ -154,6 +156,8 @@ export interface BagrutValue {
   bagrut_grades: string[]
   bagrut_classes: string[]
   bagrut_subject_keys: string[]
+  /** כותרת לתצוגה (039) — רק עם "כל בית הספר" */
+  bagrut_title: BagrutTitle | null
 }
 
 type ScopeKind = 'bagrut_grades' | 'bagrut_classes' | 'bagrut_subject_keys'
@@ -227,9 +231,23 @@ export function BagrutFields({ options, value, onChange }: {
               <input type="checkbox" checked={whole} className="mt-0.5 accent-violet-600"
                 onChange={() => emit({ ...value, bagrut_role: whole ? null : 'coordinator' }, !whole)} />
               <span>
-                <strong>כל בית הספר</strong> <span className="text-slate-500">— רכז/ת בגרויות: כל התלמידים, ועריכת תוכנית בית הספר</span>
+                <strong>כל בית הספר</strong> <span className="text-slate-500">— כל התלמידים, ועריכת תוכנית בית הספר</span>
               </span>
             </label>
+
+            {/* כותרת בלבד (039): רכז בגרויות ומנהל בית ספר רואים ועורכים אותו דבר */}
+            {whole && (
+              <div className="mr-6 mt-2 flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-slate-500">כותרת:</span>
+                {([[null, 'רכז/ת בגרויות'], ['principal', BAGRUT_TITLE_LABELS.principal]] as const).map(([t, label]) => (
+                  <label key={label} className="flex cursor-pointer items-center gap-1.5">
+                    <input type="radio" name="bagrut-title" checked={(value.bagrut_title ?? null) === t}
+                      onChange={() => onChange({ ...value, bagrut_title: t })} className="accent-violet-600" />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            )}
 
             {!whole && (
               <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">

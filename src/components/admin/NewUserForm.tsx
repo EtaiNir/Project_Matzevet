@@ -30,7 +30,7 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
   const [withBagrut, setWithBagrut] = useState(false)
   const [matzevet, setMatzevet] = useState<MatzevetValue>({ role: 'viewer', scope_level: 'council', scope_values: [] })
   const [bagrut, setBagrut] = useState<BagrutValue>({
-    bagrut_role: 'coordinator', bagrut_schools: [], bagrut_grades: [], bagrut_classes: [], bagrut_subject_keys: [],
+    bagrut_role: 'coordinator', bagrut_schools: [], bagrut_grades: [], bagrut_classes: [], bagrut_subject_keys: [], bagrut_title: null,
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -57,6 +57,7 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
         bagrut_grades: b?.bagrut_grades ?? [],
         bagrut_classes: b?.bagrut_classes ?? [],
         bagrut_subject_keys: b?.bagrut_subject_keys ?? [],
+        bagrut_title: b?.bagrut_role === 'coordinator' ? b.bagrut_title ?? null : null,
       })
       onCreated()
     } catch (e) {

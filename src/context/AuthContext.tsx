@@ -35,6 +35,8 @@ export interface UserProfile {
    */
   bagrut_grades?: string[]
   bagrut_classes?: string[]
+  /** כותרת לתצוגה (039): 'principal' = מנהל/ת בית ספר */
+  bagrut_title?: 'principal' | null
   bagrut_subject_keys?: string[]
 }
 
@@ -58,7 +60,7 @@ export function productAccess(p: UserProfile | null) {
  * כך האתר עובד לפני ההרצה, ומציג את השדות מיד אחריה בלי פריסה מחדש.
  */
 const EXTENDED_COLUMNS =
-  `${BASE_COLUMNS}, job_title, institution_name, institution_code, can_edit_extra, bagrut_role, bagrut_grades, bagrut_classes, bagrut_subject_keys`
+  `${BASE_COLUMNS}, job_title, institution_name, institution_code, can_edit_extra, bagrut_role, bagrut_title, bagrut_grades, bagrut_classes, bagrut_subject_keys`
 
 interface AuthContextValue {
   session: Session | null
