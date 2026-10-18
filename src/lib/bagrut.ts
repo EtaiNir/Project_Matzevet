@@ -96,6 +96,33 @@ export interface BagrutStudent {
   reason: string | null
 }
 
+/**
+ * שדות ניתוח הזכאות (T2), בסדר ובכותרות של הקובץ המקורי של סבא — כמו
+ * T2_FIELDS ב-scripts/load_bagrut.py (רק טעויות ההקלדה בכותרות תוקנו:
+ * "לפ T1", "סהכ", "יחדות"). `short` — ערך קצר, מוצג בשורת התקציר.
+ */
+export interface T2Field {
+  key: keyof BagrutStudent
+  label: string
+  short?: boolean
+}
+export const T2_FIELDS: T2Field[] = [
+  { key: 'status', label: 'סטטוס לזכאות לפי T1', short: true },
+  { key: 'total_units', label: 'סה"כ יחידות זכאות', short: true },
+  { key: 'core_units', label: 'סה"כ יחידות לתלמיד במקצועות המלל', short: true },
+  { key: 'negatives_count', label: 'מספר שליליים', short: true },
+  { key: 'mother_tongue_status', label: 'סטטוס בשפת אם - ערבית', short: true },
+  { key: 'compensation_eligible', label: 'האם זכאי לשיפוי', short: true },
+  { key: 'reason', label: 'תאור סיבת אי הזכאות' },
+  { key: 'blockers', label: 'חסמים לזכאות' },
+  { key: 'intervention', label: 'התערבות מומלצת לזכאות' },
+  { key: 'done_summary', label: 'מה כבר בוצע' },
+  { key: 'grades_summary', label: 'ריכוז מקצועות וציונים לזכאות' },
+  { key: 'reinforced_subject', label: 'מקצוע מוגבר' },
+  { key: 'one_negative_option', label: 'אפשרות לזכאות עם שלילי אחד' },
+  { key: 'compensation_pair', label: 'זוג מקצועות לקומפנסציה' },
+]
+
 export interface GradeRow {
   student_id: string
   subject_key: string
