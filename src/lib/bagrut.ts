@@ -98,8 +98,9 @@ export interface BagrutStudent {
 
 /**
  * שדות ניתוח הזכאות (T2), בסדר ובכותרות של הקובץ המקורי של סבא — כמו
- * T2_FIELDS ב-scripts/load_bagrut.py (רק טעויות ההקלדה בכותרות תוקנו:
- * "לפ T1", "סהכ", "יחדות"). `short` — ערך קצר, מוצג בשורת התקציר.
+ * T2_FIELDS ב-scripts/load_bagrut.py. תוקנו רק טעויות הקלדה ("סהכ", "יחדות"),
+ * ו"לפ T1" נכתב "לפי עיבוד הציונים": המשתמשים אינם מכירים את המונחים T1/T2
+ * (פגישת 5.10). `short` — ערך קצר, מוצג בשורת התקציר.
  */
 export interface T2Field {
   key: keyof BagrutStudent
@@ -107,7 +108,7 @@ export interface T2Field {
   short?: boolean
 }
 export const T2_FIELDS: T2Field[] = [
-  { key: 'status', label: 'סטטוס לזכאות לפי T1', short: true },
+  { key: 'status', label: 'סטטוס לזכאות לפי עיבוד הציונים', short: true },
   { key: 'total_units', label: 'סה"כ יחידות זכאות', short: true },
   { key: 'core_units', label: 'סה"כ יחידות לתלמיד במקצועות המלל', short: true },
   { key: 'negatives_count', label: 'מספר שליליים', short: true },
