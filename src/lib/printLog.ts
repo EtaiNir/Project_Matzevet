@@ -71,7 +71,9 @@ export function logHtml(p: PrintLogInput): string {
   .f { margin-top: 6px; }
   .l { font-size: 9pt; font-weight: bold; color: #64748b; }
   .v { white-space: pre-wrap; }
-  footer { margin-top: 16px; color: #94a3b8; font-size: 8.5pt; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+  /* padding-bottom: כל חלק מצולם בנפרד בגבולות הקופסה שלו — בלי ריווח מתחת לשורה
+     האחרונה, תחתית האותיות נחתכת (קרה בתחתית, 18.10) */
+  footer { margin-top: 16px; color: #94a3b8; font-size: 8.5pt; line-height: 1.8; border-top: 1px solid #e2e8f0; padding: 6px 0 6px; }
 </style></head><body>
 <table class="page"><thead><tr><td></td></tr></thead><tfoot><tr><td></td></tr></tfoot><tbody><tr><td>
 <header>
@@ -163,6 +165,8 @@ export async function saveLogPdf(p: PrintLogInput): Promise<boolean> {
     const width = A4.w - A4.margin * 2
     let y = A4.margin
     for (const el of blocks) {
+      // הצילום בגבולות הקופסה בדיוק — ולכן לכל חלק יש ריווח מתחת לשורה האחרונה
+      // (ראה footer ב-CSS). ⚠️ לא לחתוך עם x/y של html2canvas: נבדק, והצילום זז
       const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', logging: false })
       const h = (canvas.height / canvas.width) * width
       // רשומה שלא נכנסת בשארית העמוד — לעמוד חדש (אלא אם העמוד ריק ממילא)
