@@ -437,6 +437,8 @@ function StaffCard({ sid, className = '' }: { sid: string; className?: string })
 
 // ── תוכנית ההתערבות
 /** מפתח קבוע להצעת AI — כדי שהצעה שאושרה או נדחתה לא תוצע שוב */
+// התוכן כבר עבר plainTerms בטעינה, וגם המפתחות השמורים (plainAction) — כך הצעה
+// שטופלה לפני התרגום לא חוזרת להופיע
 const aiKey = (a: AiPlanAction) => `ai:${a.title.replace(/\s+/g, ' ').trim()}`
 
 function PlanCard({ sid, actions, onActions, intervention, plan, onNewPlan }: {

@@ -96,6 +96,53 @@ export interface BagrutStudent {
   reason: string | null
 }
 
+// ─────────────────────────────── מונחים ───────────────────────────────
+
+/**
+ * המשתמשים אינם מכירים את המונחים T1 ו-T2 (פגישת 5.10) — אבל הם מופיעים
+ * **בתוך הנתונים**: ניתוח הזכאות שסבא מפיק כותב "לא אותרו חסמים בנתוני T1",
+ * וה-AI חוזר על המונחים. כאן הם מתורגמים, פעם אחת, כשהנתונים נטענים — כך
+ * כל מסך וכל ייצוא לאקסל מקבלים את השמות הברורים.
+ *
+ *   T1 → עיבוד הציונים · T2 → ניתוח הזכאות
+ *
+ * אותיות השימוש ("ב-T1", "ומ-T2") נצמדות לשם; ה' הידיעה נבלעת ("ה-T1", "וה-T2").
+ * המסד אינו משתנה. מסכי הקליטה של מנהל־העל אינם עוברים כאן — שם אלה שמות הקבצים.
+ */
+const TERM_NAMES: Record<string, string> = { '1': 'עיבוד הציונים', '2': 'ניתוח הזכאות' }
+const TERM_RE = /(^|[^A-Za-z0-9֐-׿])([ובלמשהכ]{1,3})?[-־]?T([12])(?![0-9])/g
+
+export function plainTerms(text: string): string
+export function plainTerms(text: string | null): string | null
+export function plainTerms(text: string | null): string | null {
+  if (!text || !/T[12]/.test(text)) return text
+  return text.replace(TERM_RE, (_m, pre: string, prefix: string | undefined, n: string) =>
+    `${pre}${(prefix ?? '').replace(/ה$/, '')}${TERM_NAMES[n]}`)
+}
+
+/** כל מחרוזת בתוך אובייקט או מערך (תוכן ניתוח ה-AI) */
+function plainDeep<T>(v: T): T {
+  if (typeof v === 'string') return plainTerms(v) as T
+  if (Array.isArray(v)) return v.map(plainDeep) as T
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plainDeep(x)])) as T
+  return v
+}
+
+const STUDENT_TEXT: (keyof BagrutStudent)[] = [
+  'status', 'done_summary', 'grades_summary', 'blockers', 'intervention', 'one_negative_option',
+  'compensation_pair', 'compensation_eligible', 'mother_tongue_status', 'reinforced_subject', 'total_units', 'reason',
+]
+function plainStudent(s: BagrutStudent): BagrutStudent {
+  const out = { ...s } as Record<string, unknown>
+  for (const k of STUDENT_TEXT) out[k] = plainTerms(s[k] as string | null)
+  return out as unknown as BagrutStudent
+}
+
+/** פעולה בתוכנית — גם המפתח, שנגזר מכותרת ההצעה (ראה aiKey ב-BagrutCycle) */
+export function plainAction<A extends { title: string; detail?: string | null; suggest_key?: string | null }>(a: A): A {
+  return { ...a, title: plainTerms(a.title), detail: plainTerms(a.detail ?? null), suggest_key: plainTerms(a.suggest_key ?? null) }
+}
+
 /**
  * שדות ניתוח הזכאות (T2), בסדר ובכותרות של הקובץ המקורי של סבא — כמו
  * T2_FIELDS ב-scripts/load_bagrut.py. תוקנו רק טעויות הקלדה ("סהכ", "יחדות"),
@@ -457,7 +504,7 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     subjects,
     program,
     questionnaires: new Map(qs.map((q) => [q.code, q])),
-    students,
+    students: students.map(plainStudent),
     grades,
     subjectRows,
     tracking: new Map(tracking.map((t) => [t.student_id, t])),
@@ -576,7 +623,7 @@ export async function fetchStudentCycle(round: BagrutRound, studentId: string): 
   ])
   if (a.error) throw new Error(`טעינת התוכנית נכשלה: ${a.error.message}`)
   if (l.error) throw new Error(`טעינת היומן נכשלה: ${l.error.message}`)
-  return { actions: (a.data ?? []) as BagrutAction[], log: (l.data ?? []) as BagrutLogEntry[] }
+  return { actions: ((a.data ?? []) as BagrutAction[]).map(plainAction), log: (l.data ?? []) as BagrutLogEntry[] }
 }
 
 type ActionInput = Partial<Omit<BagrutAction, 'id' | 'student_id' | 'created_at' | 'updated_at'>> & { title: string }
@@ -587,14 +634,14 @@ export async function createAction(round: BagrutRound, studentId: string, input:
     .insert({ ...studentKey(round, studentId), ...input }).select(ACTION_COLS).single()
   if (error) throw new Error(`הוספת הפעולה נכשלה: ${error.message}`)
   if (!data) throw new Error('הוספת הפעולה נחסמה — אין לך הרשאה לעדכן את התלמיד הזה')
-  return data as BagrutAction
+  return plainAction(data as BagrutAction)
 }
 
 export async function updateAction(id: string, patch: Partial<ActionInput>): Promise<BagrutAction> {
   const { data, error } = await supabase.from('bagrut_actions').update(patch).eq('id', id).select(ACTION_COLS).maybeSingle()
   if (error) throw new Error(`עדכון הפעולה נכשל: ${error.message}`)
   if (!data) throw new Error('עדכון הפעולה נחסם — אין לך הרשאה לעדכן את התלמיד הזה')
-  return data as BagrutAction
+  return plainAction(data as BagrutAction)
 }
 
 export async function deleteAction(id: string): Promise<void> {
@@ -666,7 +713,7 @@ export async function fetchLatestAi(round: BagrutRound, studentId: string): Prom
     .select('id, kind, content, model, round_id, created_at')
     .match(studentKey(round, studentId)).order('created_at', { ascending: false }).limit(20)
   if (error) throw new Error(`טעינת ניתוחי ה-AI נכשלה: ${error.message}`)
-  const rows = (data ?? []) as AiAnalysis[]
+  const rows = ((data ?? []) as AiAnalysis[]).map((r) => ({ ...r, content: plainDeep(r.content) }))
   return {
     picture: (rows.find((r) => r.kind === 'picture') as AiAnalysis<AiPicture> | undefined) ?? null,
     plan: (rows.find((r) => r.kind === 'plan') as AiAnalysis<AiPlan> | undefined) ?? null,
@@ -688,7 +735,8 @@ export async function requestAi<T extends AiPicture | AiPlan>(round: BagrutRound
     } catch { /* נשארים עם ההודעה הכללית */ }
     throw new Error(message)
   }
-  return data as AiAnalysis<T>
+  const a = data as AiAnalysis<T>
+  return { ...a, content: plainDeep(a.content) }
 }
 
 // ─────────────────────────────── קליטת סבב ───────────────────────────────
