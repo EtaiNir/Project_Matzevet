@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useBagrut, type CardNavState } from './context'
 import {
@@ -66,32 +66,36 @@ export default function BagrutStudent() {
     })
   }, [s, location.pathname, round.id, nav])
 
-  // כותרת קבועה (משימה 3, 14.10): כששורת השם נגללת מעל הקצה העליון של אזור
-  // הגלילה, מופיעה שורה דקה למעלה עם השם, הכיתה ות"ז.
+  // כותרת קבועה (משימה 3, 14.10): כששורת השם נגללת מעל השורה הקבועה, השורה
+  // הקבועה מופיעה — עם השם, הכיתה ות"ז.
   //
-  // ⚠️ לא IntersectionObserver: עם הגדלה/הקטנה של הדף (zoom במעטפת) הוא אינו
-  // מדווח שהשורה יצאה, והשורה הקבועה לא הופיעה אף פעם — נבדק בכרום. כאן
-  // משווים מיקומים על המסך בכל גלילה, וזה נכון בכל גודל.
+  // ⚠️ שתי גרסאות קודמות נכשלו לסירוגין — "מופיע ולא נשאר / לא מופיע בכלל":
+  // IntersectionObserver אינו מדווח כשהדף מוגדל (zoom במעטפת), ומאזין שנקשר
+  // פעם אחת לאלמנט ולמיכל גלילה שנמצאו בהרצה הראשונה איבד אותם ברינדור מחדש.
+  // כאן: מאזין אחד לכל גלילה בדף (capture — גלילה של אלמנט אינה מבעבעת),
+  // שמודד בכל פעם את האלמנטים הנוכחיים דרך ה-ref, ומשווה את תחתית שורת השם
+  // לנקודת העיגון של השורה הקבועה עצמה — בלי לחפש את מיכל הגלילה.
   const nameRow = useRef<HTMLDivElement>(null)
+  const anchor = useRef<HTMLDivElement>(null)
   const [nameHidden, setNameHidden] = useState(false)
+  // מיד, ולא ב-requestAnimationFrame: פריים אינו מובטח (לשונית ברקע, דפדפן
+  // מוגבל) — וכך נשאר ערך ישן. שתי מדידות מיקום בכל גלילה — זול.
+  const checkName = useCallback(() => {
+    const n = nameRow.current
+    const a = anchor.current
+    if (n && a) setNameHidden(n.getBoundingClientRect().bottom <= a.getBoundingClientRect().top)
+  }, [])
   useEffect(() => {
-    const el = nameRow.current
-    if (!el) return
-    let scroller: HTMLElement | null = el.parentElement
-    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
-    const target: HTMLElement | Window = scroller ?? window
-    const check = () => {
-      const top = scroller ? scroller.getBoundingClientRect().top : 0
-      setNameHidden(el.getBoundingClientRect().bottom < top)
-    }
-    check()
-    target.addEventListener('scroll', check, { passive: true })
-    window.addEventListener('resize', check)
+    checkName()
+    document.addEventListener('scroll', checkName, { capture: true, passive: true })
+    window.addEventListener('resize', checkName)
     return () => {
-      target.removeEventListener('scroll', check)
-      window.removeEventListener('resize', check)
+      document.removeEventListener('scroll', checkName, { capture: true })
+      window.removeEventListener('resize', checkName)
     }
-  }, [s])
+  }, [checkName])
+  // מעבר לשונית, מעבר לתלמיד אחר או נתונים שהתעדכנו — בלי גלילה; לבדוק מחדש
+  useEffect(checkName, [checkName, tab, id, data])
 
   if (!s) return <Empty title="התלמיד לא נמצא בסבב הזה" />
 
@@ -112,7 +116,7 @@ export default function BagrutStudent() {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-6">
       {/* ── שורה קבועה: בגובה אפס, כך שהופעתה אינה מזיזה את הדף. -mb-4 מבטל את
           הרווח שהיה נוסף בגלל gap של העמודה ── */}
-      <div className="sticky top-0 z-20 -mb-4 h-0">
+      <div ref={anchor} className="sticky top-0 z-20 -mb-4 h-0">
         <div
           aria-hidden={!nameHidden}
           className={`absolute inset-x-0 top-0 flex items-center gap-3 rounded-b-xl border-x border-b border-slate-200 bg-white/95 px-4 py-1.5 text-sm shadow-md backdrop-blur transition ${
