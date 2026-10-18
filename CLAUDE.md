@@ -17,6 +17,8 @@
 - **Export:** כותב XLSX משלנו ([`lib/xlsx.ts`](src/lib/xlsx.ts)) — בלי
   תלויות. SheetJS הוסר: הגרסה החינמית אינה כותבת עיצוב, ו-`npm install`
   נכשל ברשת הזו ב-`SELF_SIGNED_CERT_IN_CHAIN`
+- **PDF:** יומן המעקב בבגרות — `jspdf` + `html2canvas` ([`lib/printLog.ts`](src/lib/printLog.ts)),
+  בגרסאות קבועות, נטענות רק בלחיצה. נוספו 18.10, כש-`npm install` כבר עבר
 - **Language:** TypeScript
 
 ## כללים קריטיים
