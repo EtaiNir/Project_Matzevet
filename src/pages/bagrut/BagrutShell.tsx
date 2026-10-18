@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useMatch, useNavigate, useParams } 
 import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import HomeLink from '@/components/HomeLink'
+import LastStudentLink from '@/components/bagrut/LastStudentLink'
 import ModuleSwitch from '@/components/ModuleSwitch'
 import { BAGRUT_ROLE_LABELS, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
@@ -238,6 +239,7 @@ export default function BagrutShell() {
         )}
         <ModuleSwitch authorityCode={authorityCode} />
         <HomeLink />
+        <LastStudentLink />
 
         {/* בית הספר — בחירה רק כשיש יותר מאחד */}
         {school && (schools.length > 1 ? (

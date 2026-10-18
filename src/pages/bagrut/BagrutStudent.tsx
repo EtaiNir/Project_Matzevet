@@ -19,6 +19,7 @@ import {
 import { Card, CompletionMark, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import CycleTab from './BagrutCycle'
+import { setLastStudent } from '@/lib/lastStudent'
 
 type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
 
@@ -33,7 +34,8 @@ export default function BagrutStudent() {
   const { id = '' } = useParams()
   const { data, index, base, round } = useBagrut()
   const navigate = useNavigate()
-  const nav = useLocation().state as CardNavState | null
+  const location = useLocation()
+  const nav = location.state as CardNavState | null
   const [tab, setTab] = useState<Tab>('summary')
 
   const s = index.studentById.get(id)
@@ -54,6 +56,15 @@ export default function BagrutStudent() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
+
+  // "התלמיד האחרון" — כל כרטיס שנפתח הופך לאחרון (בזיכרון הדף בלבד, lib/lastStudent)
+  useEffect(() => {
+    if (!s) return
+    setLastStudent({
+      studentId: s.student_id, name: displayName(s), className: s.class_name,
+      href: location.pathname, roundId: round.id, nav,
+    })
+  }, [s, location.pathname, round.id, nav])
 
   if (!s) return <Empty title="התלמיד לא נמצא בסבב הזה" />
 

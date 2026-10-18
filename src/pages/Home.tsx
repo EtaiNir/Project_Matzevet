@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { productAccess, useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
+import LastStudentLink from '@/components/bagrut/LastStudentLink'
 import { IconGraduation, IconLandmark, IconLock, IconRoster } from '@/components/brand/Icons'
 import { supabase } from '@/lib/supabase'
 import { fetchAuthorities, fetchStudentCounts, ROLE_LABELS, BAGRUT_ROLE_LABELS, type Authority } from '@/lib/admin'
@@ -224,6 +225,7 @@ export default function Home() {
         <header className="flex items-center gap-3 px-6 py-4">
           <Logo className="h-8 w-8" />
           <span className="font-bold text-slate-700">פורטל נתוני חינוך</span>
+          <LastStudentLink />
           <span className="mr-auto" />
           {access.superAdmin && (
             <Link to="/admin" className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-white hover:text-sky-700">ניהול</Link>
