@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  BAGRUT_ROLE_LABELS,
+  bagrutTitle,
   ROLE_LABELS,
   authorityHasMatzevet,
   bagrutPatch,
@@ -352,17 +352,20 @@ function AccessChips({ user, product, bagrutOptions }: { user: ManagedUser; prod
 
   const name = (list: { value: string; label: string }[] | undefined, v: string) => list?.find((o) => o.value === v)?.label ?? v
   const role = user.bagrut_role!
+  // מה שסומן, יחד (037) — כיתות, שכבות ומקצועות יכולים להופיע זה לצד זה
   const scope =
     role === 'council' ? 'כל בתי הספר'
       : [
           user.bagrut_schools.map((s) => name(bagrutOptions?.schools, s)).join(', ') || 'לא נבחר בית ספר',
-          role === 'grade_coordinator' && (user.bagrut_grades.join(', ') || 'בלי שכבות'),
-          role === 'homeroom' && (user.bagrut_classes.join(', ') || 'בלי כיתות'),
-          role === 'subject_coordinator' && user.bagrut_subject_keys.length > 0 && user.bagrut_subject_keys.map((k) => name(bagrutOptions?.subjects, k)).join(', '),
+          role === 'coordinator' && 'כל בית הספר',
+          user.bagrut_classes.length > 0 && user.bagrut_classes.join(', '),
+          user.bagrut_grades.length > 0 && `שכבה ${user.bagrut_grades.join(', ')}`,
+          user.bagrut_subject_keys.length > 0 && user.bagrut_subject_keys.map((k) => name(bagrutOptions?.subjects, k)).join(', '),
+          role !== 'coordinator' && !user.bagrut_classes.length && !user.bagrut_grades.length && !user.bagrut_subject_keys.length && 'לא סומן מה הוא רואה',
         ].filter(Boolean).join(' · ')
   return (
     <>
-      <span className={`${chip} bg-violet-50 text-violet-800`}>{BAGRUT_ROLE_LABELS[role]}</span>
+      <span className={`${chip} bg-violet-50 text-violet-800`}>{bagrutTitle(user)}</span>
       <span className={`${chip} max-w-xs truncate bg-sky-50 text-sky-700`} title={scope}>{scope}</span>
     </>
   )

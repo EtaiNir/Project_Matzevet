@@ -64,13 +64,78 @@ export const BAGRUT_ROLE_LABELS: Record<BagrutRole, string> = {
   homeroom: 'מחנך/ת',
 }
 
-/** מה כל תפקיד בגרות רואה — מוצג ליד הבחירה, כדי שיהיה ברור מה ניתן */
-export const BAGRUT_ROLE_HINTS: Record<BagrutRole, string> = {
-  council: 'רואה את כל בתי הספר ברשות. צפייה בלבד — אינו עורך מעקב.',
-  coordinator: 'רואה את כל תלמידי בתי הספר שנבחרו, עורך מעקב ואת תוכנית בית הספר.',
-  grade_coordinator: 'רואה ועורך מעקב לתלמידי השכבות שנבחרו.',
-  subject_coordinator: 'רואה ועורך מעקב רק לתלמידים שיש להם ציון באחד המקצועות שסומנו — כמו בדפי המקצועות.',
-  homeroom: 'רואה ועורך מעקב לתלמידי הכיתות שנבחרו.',
+/**
+ * מה משתמש בבגרות רואה (מיגרציה 037). התפקיד הוא כותרת; מה שקובע הוא מה
+ * שסומן: כל בית הספר, או **איחוד** של שכבות, כיתות ומקצועות. כך מחנך יכול
+ * להיות גם רכז מקצוע (סבא, 14.10).
+ */
+export interface BagrutScopeFields {
+  bagrut_role?: BagrutRole | null
+  bagrut_grades?: string[] | null
+  bagrut_classes?: string[] | null
+  bagrut_subject_keys?: string[] | null
+}
+
+/**
+ * התפקיד הראשי לפי מה שסומן — נשמר ב-bagrut_role. המסד מבחין רק במועצתי ובכל
+ * בית הספר; לשאר — האיחוד. הסדר (כיתה, שכבה, מקצוע) קובע רק את הכותרת הראשית.
+ */
+export function primaryBagrutRole(wholeSchool: boolean, d: BagrutScopeFields): BagrutRole {
+  if (wholeSchool) return 'coordinator'
+  if (d.bagrut_classes?.length) return 'homeroom'
+  if (d.bagrut_grades?.length) return 'grade_coordinator'
+  if (d.bagrut_subject_keys?.length) return 'subject_coordinator'
+  return 'homeroom'
+}
+
+/** הכותרת לתצוגה — כל מה שסומן, למשל "מחנך/ת · רכז/ת מקצוע" */
+export function bagrutTitle(u: BagrutScopeFields | null | undefined): string {
+  const role = u?.bagrut_role
+  if (!role) return ''
+  if (role === 'council' || role === 'coordinator') return BAGRUT_ROLE_LABELS[role]
+  const parts = [
+    u?.bagrut_classes?.length ? BAGRUT_ROLE_LABELS.homeroom : null,
+    u?.bagrut_grades?.length ? BAGRUT_ROLE_LABELS.grade_coordinator : null,
+    u?.bagrut_subject_keys?.length ? BAGRUT_ROLE_LABELS.subject_coordinator : null,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : BAGRUT_ROLE_LABELS[role]
+}
+
+/** משתמש בית־ספרי (לא מועצתי, לא כל בית הספר) */
+function scopedBagrut(u: BagrutScopeFields | null | undefined): boolean {
+  return Boolean(u?.bagrut_role && u.bagrut_role !== 'council' && u.bagrut_role !== 'coordinator')
+}
+
+/**
+ * סומנו לו מקצועות. אז בסרגל רק "המקצועות שלי", ודף של מקצוע אחר נחסם — גם
+ * כשסומנה לו גם כיתה (אייל, 18.10: *"גישה רק לתלמידים של הכיתה שלו ולדפים של
+ * המקצוע — לא לכולם"*).
+ */
+export function bagrutHasSubjects(u: BagrutScopeFields | null | undefined): boolean {
+  return scopedBagrut(u) && Boolean(u?.bagrut_subject_keys?.length)
+}
+
+/**
+ * מי נמצא בדפים הכלליים (כל התלמידים, השכבות, תמונת המצב) — כשסומנו כיתות או
+ * שכבות: רק תלמידיהן. ה-RLS נותן גם את תלמידי המקצוע (037) — הם בשביל דפי
+ * המקצוע וכרטיס התלמיד, לא בשביל הרשימות הכלליות. null = בלי צמצום.
+ */
+export function bagrutGeneralScope(u: BagrutScopeFields | null | undefined): { grades: string[]; classes: string[] } | null {
+  if (!scopedBagrut(u)) return null
+  const grades = u?.bagrut_grades ?? []
+  const classes = u?.bagrut_classes ?? []
+  return grades.length || classes.length ? { grades, classes } : null
+}
+
+/**
+ * רואה רק דרך מקצועות — בלי כיתה, שכבה או בית ספר שלם. משמש באזור האישי
+ * (בלי בלוק "הרשות שלי").
+ */
+export function bagrutSubjectsOnly(u: BagrutScopeFields | null | undefined): boolean {
+  return Boolean(
+    u?.bagrut_role && u.bagrut_role !== 'council' && u.bagrut_role !== 'coordinator'
+      && u.bagrut_subject_keys?.length && !u.bagrut_classes?.length && !u.bagrut_grades?.length,
+  )
 }
 
 /** לאיזה מוצר יש למשתמש גישה — נגזר מהשדות; האכיפה עצמה ב-RLS */
@@ -533,14 +598,19 @@ export async function updateUserPermissions(
   if (!data?.length) throw new Error('העדכון נחסם — נדרשת הרשאת מנהל־על')
 }
 
-/** שדות הבגרות לשמירה — רק מה שרלוונטי לתפקיד; השאר מתאפס, כדי שלא יישארו שאריות */
+/**
+ * שדות הבגרות לשמירה (037). מועצתי — בלי היקף; כל בית הספר — רק בתי הספר;
+ * כל השאר — בתי הספר ואיחוד השכבות, הכיתות והמקצועות שסומנו. מה שלא רלוונטי
+ * מתאפס, כדי שלא יישארו שאריות.
+ */
 export function bagrutPatch(role: BagrutRole | null, d: Pick<ManagedUser, 'bagrut_schools' | 'bagrut_grades' | 'bagrut_classes' | 'bagrut_subject_keys'>) {
+  const scoped = Boolean(role) && role !== 'council' && role !== 'coordinator'
   return {
     bagrut_role: role,
     bagrut_schools: role && role !== 'council' ? d.bagrut_schools : [],
-    bagrut_grades: role === 'grade_coordinator' ? d.bagrut_grades : [],
-    bagrut_classes: role === 'homeroom' ? d.bagrut_classes : [],
-    bagrut_subject_keys: role === 'subject_coordinator' ? d.bagrut_subject_keys : [],
+    bagrut_grades: scoped ? d.bagrut_grades : [],
+    bagrut_classes: scoped ? d.bagrut_classes : [],
+    bagrut_subject_keys: scoped ? d.bagrut_subject_keys : [],
   }
 }
 

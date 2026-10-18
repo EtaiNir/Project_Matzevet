@@ -259,7 +259,11 @@ export interface BagrutOverview {
  * — מחנך מקבל רק את הכיתה שלו, רכז שכבה רק את השכבה. כך אותו קוד מתאים
  * לשלושת התפקידים.
  */
-export async function loadBagrutOverviews(codes: string[], role: string): Promise<BagrutOverview[]> {
+/**
+ * `general` — כשסומנו כיתות או שכבות (bagrutGeneralScope): רק תלמידיהן נספרים
+ * כאן, גם אם ה-RLS נותן גם את תלמידי המקצוע (מחנך שהוא גם רכז מקצוע, 037).
+ */
+export async function loadBagrutOverviews(codes: string[], role: string, general: { grades: string[]; classes: string[] } | null = null): Promise<BagrutOverview[]> {
   const rounds = (await Promise.all(codes.map((c) => fetchRounds(c).catch(() => [] as BagrutRound[])))).flat()
   // הסבב האחרון לכל בית ספר
   const latest = new Map<string, BagrutRound>()
@@ -275,7 +279,9 @@ export async function loadBagrutOverviews(codes: string[], role: string): Promis
     // בית הספר בכתובת (החלטה 016) — בלעדיו הקישור נוחת במסך הבחירה
     const base = `/bagrut/${round.authority_code}/${round.school_code}`
     const school = round.school_name ?? round.school_code
-    const students = data.students
+    const students = general
+      ? data.students.filter((s) => (s.grade && general.grades.includes(s.grade)) || (s.class_name && general.classes.includes(s.class_name)))
+      : data.students
     const grad = students.filter((s) => s.in_t2)
     const mode = grad.length ? 'graduating' : 'progress'
     const pool = mode === 'graduating' ? grad : students

@@ -114,6 +114,7 @@ Deno.serve(async (req) => {
       const authorityCodes = strArray(body.authority_codes)
       const scopeValues = scopeLevel === 'none' || scopeLevel === 'council' ? [] : strArray(body.scope_values)
       const bagrutRole = body.bagrut_role ? String(body.bagrut_role) : null
+      const bagrutScoped = Boolean(bagrutRole) && bagrutRole !== 'council' && bagrutRole !== 'coordinator'
 
       if (!email || !password) return json({ error: 'חסרים מייל או סיסמה' }, 400)
       if (password.length < 8) return json({ error: 'הסיסמה חייבת להיות באורך 8 תווים לפחות' }, 400)
@@ -144,11 +145,13 @@ Deno.serve(async (req) => {
           // מנהל־על — כל הרשות במצבת, כמו שאר מנהלי־העל
           scope_level: role === 'super_admin' ? 'council' : scopeLevel,
           scope_values: role === 'super_admin' ? [] : scopeValues,
+          // בגרות (מיגרציה 037): מועצתי — בלי היקף; רכז בגרויות — בתי הספר בלבד;
+          // כל השאר — איחוד של השכבות, הכיתות והמקצועות שסומנו (מחנך יכול להיות גם רכז מקצוע)
           bagrut_role: bagrutRole,
-          bagrut_schools: bagrutRole ? strArray(body.bagrut_schools) : [],
-          bagrut_grades: bagrutRole === 'grade_coordinator' ? strArray(body.bagrut_grades) : [],
-          bagrut_classes: bagrutRole === 'homeroom' ? strArray(body.bagrut_classes) : [],
-          bagrut_subject_keys: bagrutRole === 'subject_coordinator' ? strArray(body.bagrut_subject_keys) : [],
+          bagrut_schools: bagrutRole && bagrutRole !== 'council' ? strArray(body.bagrut_schools) : [],
+          bagrut_grades: bagrutScoped ? strArray(body.bagrut_grades) : [],
+          bagrut_classes: bagrutScoped ? strArray(body.bagrut_classes) : [],
+          bagrut_subject_keys: bagrutScoped ? strArray(body.bagrut_subject_keys) : [],
         })
         .eq('id', data.user.id)
       if (updErr) return json({ error: translate(updErr.message) }, 400)

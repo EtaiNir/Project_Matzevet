@@ -41,6 +41,9 @@ secrets). פריסה: [server-migration.md](../docs/server-migration.md#פריס
 לכל רשות — ראה [decisions/014](../docs/decisions/014-bagrut-module.md).
 ההרשאה בעמודות `bagrut_role` + `bagrut_schools/grades/classes/subject_keys`,
 **נפרדת** מ-`scope_level` של המצבת. מערך היקף ריק = **כלום**, לא הכול.
+**מ-037 ההיקף הוא איחוד:** משתמש בית־ספרי (לא `council`, לא `coordinator`)
+רואה את מי שבשכבה **או** בכיתה **או** במקצוע שסומנו — `bagrut_role` הוא רק
+התפקיד הראשי. `bagrut_student_visible` היא נקודת ההחלטה היחידה.
 רכז מקצוע רואה **רק את תלמידי המקצועות שלו** (מיגרציות 035–036, הופכות את
 030): מי שיש לו ציון שאלון באחד מהם — בדיוק מי שמופיע בדף המקצוע
 (`bagrut_subject_member`). T1 אינו אומר מי "רשום" למקצוע; מי שעוד לא ניגש

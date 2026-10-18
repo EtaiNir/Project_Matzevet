@@ -29,7 +29,10 @@ export default function BagrutHome() {
     [data.students],
   )
   const graduating = round.graduating_grade ?? grades[0] ?? ''
-  const grade = params.get('grade') || graduating
+  // ברירת המחדל — השכבה המסיימת, אם יש בה תלמידים בתצוגה הזו. מחנך יב-1 לא
+  // צריך לנחות על "שכבה יג — 0 תלמידים"
+  const defaultGrade = grades.length && !grades.includes(graduating) ? grades[0] : graduating
+  const grade = params.get('grade') || defaultGrade
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-6">
@@ -46,7 +49,7 @@ export default function BagrutHome() {
             {grades.map((g) => (
               <button
                 key={g}
-                onClick={() => setParams(g === graduating ? {} : { grade: g }, { replace: true })}
+                onClick={() => setParams(g === defaultGrade ? {} : { grade: g }, { replace: true })}
                 className={`rounded-lg px-4 py-1.5 text-sm font-bold transition ${
                   g === grade ? 'bg-sky-600 text-white shadow' : 'text-slate-600 hover:bg-slate-100'
                 }`}

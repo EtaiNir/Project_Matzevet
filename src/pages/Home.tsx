@@ -4,7 +4,7 @@ import { productAccess, useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import { IconGraduation, IconLandmark, IconLock, IconRoster } from '@/components/brand/Icons'
 import { supabase } from '@/lib/supabase'
-import { fetchAuthorities, fetchStudentCounts, ROLE_LABELS, BAGRUT_ROLE_LABELS, type Authority } from '@/lib/admin'
+import { bagrutGeneralScope, bagrutSubjectsOnly, bagrutTitle, fetchAuthorities, fetchStudentCounts, ROLE_LABELS, type Authority } from '@/lib/admin'
 import { loadAdminOverview, loadBagrutOverviews, loadManagerOverview, type AdminOverview, type BagrutOverview, type ManagerOverview, type Todo } from '@/lib/home'
 import { AuthoritiesSection, BagrutSection, ManagerSection, TodoSection } from '@/components/home/RoleBlocks'
 
@@ -145,7 +145,7 @@ export default function Home() {
 
   // ── תוכן לפי תפקיד: מנהל־על · מנהל רשות · רכז בגרויות / רכז שכבה / מחנך
   // רכז מקצוע לא מקבל את בלוק "הרשות שלי" גם כשיש לו גם תפקיד מנהל במצבת (אייל, 13.10)
-  const isManager = !access.superAdmin && profile?.role === 'admin' && access.matzevet && profile?.bagrut_role !== 'subject_coordinator'
+  const isManager = !access.superAdmin && profile?.role === 'admin' && access.matzevet && !bagrutSubjectsOnly(profile)
   const bagrutWorker = !access.superAdmin && ['coordinator', 'grade_coordinator', 'homeroom'].includes(profile?.bagrut_role ?? '')
   const [admin, setAdmin] = useState<AdminOverview | null>(null)
   const [managers, setManagers] = useState<ManagerOverview[] | null>(null)
@@ -167,8 +167,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!bagrutWorker || codes == null) return
-    loadBagrutOverviews(codes, profile?.bagrut_role ?? '').then(setBagrutOv).catch(() => setBagrutOv([]))
-  }, [bagrutWorker, codes, profile?.bagrut_role])
+    loadBagrutOverviews(codes, profile?.bagrut_role ?? '', bagrutGeneralScope(profile)).then(setBagrutOv).catch(() => setBagrutOv([]))
+  }, [bagrutWorker, codes, profile])
 
   const roleBased = access.superAdmin || isManager || bagrutWorker
   const todos: Todo[] = [
@@ -183,7 +183,7 @@ export default function Home() {
   const hebrew = hebrewDate()
   const roles = [
     access.superAdmin ? 'מנהל־על' : access.matzevet && profile ? `מצבת: ${ROLE_LABELS[profile.role]}` : null,
-    !access.superAdmin && profile?.bagrut_role ? `זכאות לבגרות: ${BAGRUT_ROLE_LABELS[profile.bagrut_role]}` : null,
+    !access.superAdmin && profile?.bagrut_role ? `זכאות לבגרות: ${bagrutTitle(profile)}` : null,
   ].filter(Boolean)
   const none = !access.matzevet && !access.bagrut
 

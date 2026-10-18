@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import HomeLink from '@/components/HomeLink'
 import ModuleSwitch from '@/components/ModuleSwitch'
-import { BAGRUT_ROLE_LABELS, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
+import { bagrutGeneralScope, bagrutHasSubjects, bagrutTitle, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
   buildIndex,
   classSortKey,
@@ -19,6 +19,7 @@ import {
   type BagrutRound,
   type BagrutSchool,
   type RoundData,
+  type RoundIndex,
   type Tracking,
 } from '@/lib/bagrut'
 import { BagrutContext, type BagrutContextValue } from './context'
@@ -26,6 +27,47 @@ import { isFollowupDue } from '@/lib/bagrutCycle'
 import { Empty, ErrorBox, Loading } from '@/components/bagrut/ui'
 
 const ROUND_KEY = 'bagrut:round'
+const LENS_KEY = 'bagrut:lens'
+
+/** תצוגה של הדפים הכלליים — קבוצת תלמידים אחת מתוך מה שמותר למשתמש */
+interface Lens {
+  id: 'scope' | 'subjects'
+  label: string
+  ids: Set<string>
+}
+
+/** שם המקצוע בלי מספר היחידות — "אנגלית 4 יח"ל" ← "אנגלית" */
+const subjectFamily = (name: string) => name.replace(/\s*\d+\s*(יח"ל|יח״ל)?\s*$/, '').trim()
+
+/**
+ * התצוגות של משתמש בית־ספרי (037): "הכיתה שלי" (כיתות ושכבות שסומנו) ו"המקצועות
+ * שלי" (מי שיש לו ציון באחד המקצועות — כמו דף המקצוע). תצוגה אחת — אין מתג;
+ * רכז בגרויות, מועצה ומנהל־על — בלי צמצום (מערך ריק).
+ */
+function buildLenses(profile: Parameters<typeof bagrutGeneralScope>[0], data: RoundData | null): Lens[] {
+  if (!data) return []
+  const out: Lens[] = []
+  const scope = bagrutGeneralScope(profile)
+  if (scope) {
+    const ids = new Set(
+      data.students
+        .filter((s) => (s.grade && scope.grades.includes(s.grade)) || (s.class_name && scope.classes.includes(s.class_name)))
+        .map((s) => s.student_id),
+    )
+    const parts = [
+      scope.classes.length ? `${scope.classes.length > 1 ? 'הכיתות שלי' : 'הכיתה שלי'}: ${scope.classes.join(', ')}` : null,
+      scope.grades.length ? `שכבה ${scope.grades.join(', ')}` : null,
+    ].filter(Boolean)
+    out.push({ id: 'scope', label: parts.join(' · '), ids })
+  }
+  if (bagrutHasSubjects(profile)) {
+    const keys = new Set(profile?.bagrut_subject_keys ?? [])
+    const ids = new Set(data.grades.filter((g) => keys.has(g.subject_key)).map((g) => g.student_id))
+    const names = [...new Set(data.subjects.filter((s) => keys.has(s.subject_key)).map((s) => subjectFamily(s.subject_name)))]
+    out.push({ id: 'subjects', label: `המקצועות שלי: ${names.join(', ')}`, ids })
+  }
+  return out
+}
 const ZOOM_KEY = 'bagrut:zoom'
 const ZOOM_STEPS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6]
 
@@ -168,6 +210,43 @@ export default function BagrutShell() {
 
   const index = useMemo(() => (data ? buildIndex(data) : null), [data])
 
+  // ── הדפים הכלליים מול דפי המקצוע (אייל, 18.10). מחנך שהוא גם רכז מקצוע מקבל
+  // מה-RLS את תלמידי הכיתה **ואת** תלמידי המקצוע (037) — אחרת דף המקצוע ריק.
+  // הדפים הכלליים (תמונת המצב, הרשימות, הסרגל) מציגים **תצוגה אחת** בכל פעם:
+  // "הכיתה שלי" או "המקצועות שלי", ומתג ביניהן. דף המקצוע וכרטיס התלמיד מקבלים
+  // הכול; זה לא הרחבת הרשאה — ה-RLS כבר החליט מה מותר.
+  const lenses = useMemo(() => buildLenses(profile, data), [profile, data])
+  const [lensId, setLensId] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem(LENS_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })
+  const lens = lenses.find((l) => l.id === lensId) ?? lenses[0] ?? null
+  const chooseLens = (id: string) => {
+    setLensId(id)
+    try {
+      sessionStorage.setItem(LENS_KEY, id)
+    } catch {
+      /* מצב פרטי */
+    }
+  }
+  const general = useMemo(() => {
+    if (!data || !lens) return data
+    const ids = lens.ids
+    return {
+      ...data,
+      students: data.students.filter((s) => ids.has(s.student_id)),
+      grades: data.grades.filter((g) => ids.has(g.student_id)),
+      subjectRows: data.subjectRows.filter((r) => ids.has(r.student_id)),
+    }
+  }, [data, lens])
+  const generalIndex = useMemo(() => (general && general !== data ? buildIndex(general) : index), [general, data, index])
+  const onSubjectPage = Boolean(useMatch('/bagrut/:code/:school/subject/:key'))
+  const onStudentCard = Boolean(useMatch('/bagrut/:code/:school/student/:id'))
+  const fullView = onSubjectPage || onStudentCard
+
   const applyTracking = useCallback((t: Tracking) => {
     setData((d) => {
       if (!d) return d
@@ -187,12 +266,12 @@ export default function BagrutShell() {
   }, [])
 
   const ctx: BagrutContextValue | null =
-    round && data && index
+    round && data && index && general && generalIndex
       ? {
           authorityCode,
           round,
-          data,
-          index,
+          data: fullView ? data : general,
+          index: fullView ? index : generalIndex,
           canEditTracking: isSuperAdmin || (Boolean(profile?.bagrut_role) && profile?.bagrut_role !== 'council'),
           applyTracking,
           applyActionCounts,
@@ -203,7 +282,7 @@ export default function BagrutShell() {
   const authorityName = allAuthorities.find((a) => a.code === authorityCode)?.name ?? ''
   const identity = [
     profile?.display_name ?? profile?.email,
-    profile?.bagrut_role ? BAGRUT_ROLE_LABELS[profile.bagrut_role] : profile?.role ? ROLE_LABELS[profile.role] : '',
+    profile?.bagrut_role ? bagrutTitle(profile) : profile?.role ? ROLE_LABELS[profile.role] : '',
   ]
     .filter(Boolean)
     .join(' · ')
@@ -297,8 +376,25 @@ export default function BagrutShell() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {ctx && <Rail ctx={ctx} isSuperAdmin={isSuperAdmin} />}
+        {/* הסרגל סופר תמיד את הדפים הכלליים, ואת "המקצועות שלי" — לפי כל מה שמותר */}
+        {ctx && general && generalIndex && index && (
+          <Rail ctx={{ ...ctx, data: general, index: generalIndex }} fullIndex={index} isSuperAdmin={isSuperAdmin} />
+        )}
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* מתג התצוגה — רק כשיש יותר מאחת, ורק בדפים הכלליים */}
+          {ctx && lens && lenses.length > 1 && !fullView && !isUpload && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-slate-200 bg-white px-4 py-2">
+              <span className="text-sm font-semibold text-slate-500">תצוגה:</span>
+              <div className="flex gap-0.5 rounded-xl bg-slate-100 p-1">
+                {lenses.map((l) => (
+                  <button key={l.id} onClick={() => chooseLens(l.id)}
+                    className={`rounded-lg px-3 py-1 text-sm font-semibold transition ${l.id === lens.id ? 'bg-white text-violet-800 shadow-sm' : 'text-slate-500 hover:text-violet-700'}`}>
+                    {l.label} <span className="text-xs font-normal opacity-70">({l.ids.size})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {zoomable && <ZoomBar zoom={zoom} onChange={setZoom} />}
           {/* גלילת הדף — ב-RTL הסרגל יושב בצד השמאלי של המסך */}
           <div className="min-h-0 flex-1 overflow-auto">
@@ -395,8 +491,8 @@ function SchoolPicker({ authorityCode, authorityName, schools, isSuperAdmin }: {
 }
 
 /** סרגל ימני: המסכים, התצורות המוכנות עם ספירות, והמקצועות לפי קבוצה. */
-function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: boolean }) {
-  const { data, index, base } = ctx
+function Rail({ ctx, fullIndex, isSuperAdmin }: { ctx: BagrutContextValue; fullIndex: RoundIndex; isSuperAdmin: boolean }) {
+  const { data, base } = ctx
   const location = useLocation()
   const counts = useMemo(() => {
     const t2 = data.students.filter((s) => s.in_t2)
@@ -421,16 +517,19 @@ function Rail({ ctx, isSuperAdmin }: { ctx: BagrutContextValue; isSuperAdmin: bo
     }
   }, [data, ctx.round.graduating_grade])
 
+  // כמה ניגשו לכל מקצוע — מתוך כל מה שמותר (כמו דף המקצוע עצמו), לא רק הכיתה
   const takers = useMemo(() => {
     const m = new Map<string, number>()
-    for (const [, bySub] of index.gradesByStudent) for (const k of bySub.keys()) m.set(k, (m.get(k) ?? 0) + 1)
+    for (const [, bySub] of fullIndex.gradesByStudent) for (const k of bySub.keys()) m.set(k, (m.get(k) ?? 0) + 1)
     return m
-  }, [index])
+  }, [fullIndex])
 
   const { profile } = useAuth()
-  const isSubjectCoordinator = profile?.bagrut_role === 'subject_coordinator'
+  // סומנו לו מקצועות (גם יחד עם כיתה) — בסרגל רק "המקצועות שלי" (18.10)
+  const isSubjectCoordinator = bagrutHasSubjects(profile)
   const mySubjects = useMemo(() => {
-    const keys = profile?.bagrut_role === 'subject_coordinator' ? profile.bagrut_subject_keys ?? [] : []
+    // גם מחנך שהוא רכז מקצוע מקבל את "המקצועות שלי" בראש הסרגל
+    const keys = profile?.bagrut_subject_keys ?? []
     return data.subjects.filter((s) => keys.includes(s.subject_key))
   }, [profile, data.subjects])
 

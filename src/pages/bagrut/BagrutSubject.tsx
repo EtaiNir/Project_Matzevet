@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useBagrut, type CardNavState } from './context'
 import { useAuth } from '@/context/AuthContext'
+import { bagrutHasSubjects } from '@/lib/admin'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import { Card, CompletionMark, Empty, Grade, Histogram, COMPLETION_META } from '@/components/bagrut/ui'
 import {
@@ -84,8 +85,8 @@ export default function BagrutSubject() {
   for (const r of scoped) compCount[completion(r.m?.completion_status)]++
 
   if (!subject) return <Empty title="המקצוע לא נמצא בסבב הזה" />
-  // רכז מקצוע — רק המקצועות שלו (035). התלמידים כבר מסוננים ב-RLS; כאן — המקצוע עצמו
-  if (profile?.bagrut_role === 'subject_coordinator' && !(profile.bagrut_subject_keys ?? []).includes(key)) {
+  // סומנו לו מקצועות (גם עם כיתה) — רק המקצועות שלו (035, 037, 18.10). התלמידים כבר מסוננים ב-RLS; כאן — המקצוע עצמו
+  if (bagrutHasSubjects(profile) && !(profile?.bagrut_subject_keys ?? []).includes(key)) {
     return <Empty title={`${subject.subject_name} אינו מהמקצועות שלך`}>המקצועות שלך מופיעים בסרגל, תחת "המקצועות שלי".</Empty>
   }
   if (!allRows.length) return <Empty title={`אין ציונים ב${subject.subject_name}`}>אף תלמיד בסבב לא ניגש לשאלון במקצוע הזה.</Empty>

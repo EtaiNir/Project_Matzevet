@@ -91,7 +91,7 @@ export function BagrutUploadPanel({ code, school: fixedSchool, embedded = false 
   const dupes = (['details', 't1_11', 't1_12', 't1', 't2', 'compass', 'accdb'] as BagrutRole[]).filter(
     (r) => roles.filter((x) => x === r).length > 1,
   )
-  const ready = picked.length > 0 && !missing.length && !unknown.length && !dupes.length && /^\d+$/.test(school) && year.trim()
+  const ready = picked.length > 0 && !missing.length && !unknown.length && !dupes.length && /^\d{6}$/.test(school) && year.trim()
 
   const submit = async () => {
     setBusy(true)
