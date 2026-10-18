@@ -488,14 +488,25 @@ class XlsxSource:
 
 
 def read_sheet_from_header(path, id_headers):
-    """הגיליון הראשון, החל משורת הכותרת — השורה הראשונה (מתוך 10) שיש בה אחת
-    מכותרות הת"ז. ב-T2 של אגיאל יש מעליה כותרת ושורה ריקה."""
-    ws = openpyxl.load_workbook(path, read_only=True, data_only=True).worksheets[0]
-    rows = list(ws.iter_rows(values_only=True))
-    hi = next((i for i, r in enumerate(rows[:10])
-               if any(str(v).strip() in id_headers for v in r if v is not None)), None)
+    """הגיליון הראשון **שיש בו** שורת כותרת עם עמודת ת"ז — השורה הראשונה (מתוך
+    10) שיש בה אחת מכותרות הת"ז, והנתונים ממנה והלאה. ב-T2 של אגיאל יש מעליה
+    כותרת ושורה ריקה.
+
+    לא בהכרח הגיליון הראשון: ב-T2 של אבו רביע מ-17.10 הגיליון הראשון הוא
+    "סיכום T2" והנתונים ב-"T2 ניתוח זכאות" — והקליטה נכשלה פעמיים. הגיליונות
+    נבדקים לפי הסדר, ולכן גיליון נתונים מאוחר יותר ("פירוט מקצועות", שגם בו
+    יש "מספר זהות") אינו נבחר על פניו."""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    rows, hi = [], None
+    for ws in wb.worksheets:
+        rows = list(ws.iter_rows(values_only=True))
+        hi = next((i for i, r in enumerate(rows[:10])
+                   if any(str(v).strip() in id_headers for v in r if v is not None)), None)
+        if hi is not None:
+            break
     if hi is None:
-        sys.exit(f"לא נמצאה שורת כותרת עם עמודת ת\"ז ב-{os.path.basename(path)}")
+        sys.exit(f"לא נמצאה שורת כותרת עם עמודת ת\"ז ב-{os.path.basename(path)} "
+                 f"(נבדקו הגיליונות: {', '.join(ws.title for ws in wb.worksheets)})")
     names = [str(h).strip() if h is not None else "" for h in rows[hi]]
     data = [dict(zip(names, r)) for r in rows[hi + 1:] if any(v is not None for v in r)]
     return rows[:hi], names, data
