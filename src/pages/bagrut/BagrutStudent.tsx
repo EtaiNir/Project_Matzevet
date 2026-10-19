@@ -15,12 +15,15 @@ import {
   type GradeRow,
   type RoundSubject,
   type SubjectRow,
+  canEditBagrutData,
 } from '@/lib/bagrut'
+import { useAuth } from '@/context/AuthContext'
 import { Card, CompletionMark, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import CycleTab from './BagrutCycle'
-import EditableField from '@/components/bagrut/EditableField'
+import EditableField, { EditGroup } from '@/components/bagrut/EditableField'
 import { setLastStudent } from '@/lib/lastStudent'
+import { computeHonors, HONOR_KEYS, HONOR_META } from '@/lib/bagrutHonors'
 
 type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
 
@@ -105,6 +108,8 @@ export default function BagrutStudent() {
   const flags = TRACKING_FLAGS.filter((f) => tracking?.[f.key])
   const gradesBySub = index.gradesByStudent.get(id) ?? new Map<string, GradeRow[]>()
   const metrics = index.metrics.get(id) ?? new Map<string, SubjectRow>()
+  const honors = computeHonors(index, s)
+  const honorBadges = honors ? HONOR_KEYS.filter((h) => honors.results[h].ok && !(h === 'tech_no_english' && honors.results.tech.ok)) : []
 
   const tabs: [Tab, string][] = [
     ['summary', 'סיכום זכאות'],
@@ -180,6 +185,11 @@ export default function BagrutStudent() {
           </div>
           <span className="mr-auto" />
           {s.in_t2 && <StatusBadge kind={kind} long />}
+          {honorBadges.map((h) => (
+            <span key={h} className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-900 ring-1 ring-inset ring-amber-300">
+              ★ {HONOR_META[h].label}
+            </span>
+          ))}
           {flags.map((f) => (
             <span key={f.key} className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-200">
               {f.icon} {f.label}
@@ -338,6 +348,8 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
         )}
       </div>
 
+      <HonorsCard sid={sid} />
+
       {(s.grades_summary || s.done_summary) && (
         <Card title="ריכוז המקצועות והציונים לזכאות" className="lg:col-span-5">
           <p className="text-sm leading-relaxed text-slate-700">{s.grades_summary}</p>
@@ -350,10 +362,52 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
   )
 }
 
+// ─────────────────────────────── מצטיינת וטק ───────────────────────────────
+
+/** בגרות מצטיינת וטק — מחושבות אצלנו מעל ניתוח הזכאות (decisions/019) */
+function HonorsCard({ sid }: { sid: string }) {
+  const { index } = useBagrut()
+  const h = computeHonors(index, index.studentById.get(sid)!)
+  if (!h) return null
+  return (
+    <Card title="בגרות מצטיינת ובגרות טק" className="lg:col-span-5">
+      <div className="grid gap-3 md:grid-cols-3">
+        {HONOR_KEYS.map((k) => {
+          const r = h.results[k]
+          return (
+            <div key={k} className={`rounded-xl p-3 ring-1 ring-inset ${r.ok ? 'bg-amber-50 ring-amber-300' : 'bg-slate-50 ring-slate-200'}`}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className={`text-sm font-extrabold ${r.ok ? 'text-amber-900' : 'text-slate-700'}`}>{r.ok ? '★ ' : ''}{HONOR_META[k].label}</span>
+                <span className={`mr-auto rounded-full px-2 py-0.5 text-[11px] font-bold ${r.ok ? 'bg-amber-200 text-amber-900' : 'bg-white text-slate-500 ring-1 ring-inset ring-slate-200'}`}>
+                  {r.ok ? 'עומד בתנאים' : r.missing === 1 ? 'חסר תנאי אחד' : `חסרים ${r.missing} תנאים`}
+                </span>
+              </div>
+              <ul className="flex flex-col gap-1">
+                {r.conditions.map((c) => (
+                  <li key={c.label} className="flex items-start gap-1.5 text-xs" title={c.detail}>
+                    <span className={`font-bold ${c.ok ? 'text-emerald-600' : 'text-rose-500'}`}>{c.ok ? '✓' : '✕'}</span>
+                    <span className="text-slate-700">{c.label}<span className="text-slate-400"> · {c.detail}</span></span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })}
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+        מחושב במערכת: זכאות מניתוח הזכאות, ומעליה המקצועות שהושלמו בציון 55 ומעלה. הממוצע משוקלל לפי יח״ל, בלי בונוס.
+        {' '}במצטיינת נדרשת גם הצלחה במעורבות החברתית — היא אינה בנתונים ואינה נבדקת כאן.
+        {h.noUnits.length > 0 && <> לא נכנסו לממוצע (אין יח״ל): {h.noUnits.join(', ')}.</>}
+      </p>
+    </Card>
+  )
+}
+
 // ─────────────────────────────── אריח מקצוע ───────────────────────────────
 
 function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; grades: GradeRow[]; m: SubjectRow | undefined }) {
   const { index, data } = useBagrut()
+  const { profile } = useAuth()
   const comp = completion(m?.completion_status)
   const passed = comp === 'done' && gradeTone(m?.final_grade) === 'pass'
 
@@ -366,6 +420,9 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
   const border = !passed && tone === 'fail' ? 'border-rose-200' : !passed && tone === 'blocked' ? 'border-orange-300' : comp === 'progress' ? 'border-amber-200' : 'border-slate-200'
 
   return (
+    // עריכה ידנית לכל הריבוע — עיפרון אחד בפינה (אייל, 18.10)
+    <EditGroup allowed={canEditBagrutData(profile, sub.subject_key)}>
+    {({ toggle, actions }) => (
     <div className={`rounded-2xl border bg-white shadow-sm ${border}`}>
       {/* האריח תמיד פתוח — בלי חץ לקיפול (אייל, 6.10) */}
       <div className="flex w-full items-center gap-3 p-4 text-right">
@@ -374,6 +431,7 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
           <div className="truncate font-bold text-slate-800">{sub.subject_name}</div>
           <div className="text-xs text-slate-500">{m?.questionnaires ? `${m.questionnaires} שאלונים` : ''}{m?.units ? ` · ${m.units} יח״ל` : ''}</div>
         </div>
+        {toggle}
         <div className="text-left">
           {m?.final_grade == null && m?.cumulative_grade != null ? (
             // אין עדיין ציון סופי — הציון המשוקלל המצטבר הוא המספר הבולט
@@ -424,8 +482,11 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
             <span>מצב <EditableField edit={subRef('completion_status')} value={m.completion_status}>{m.completion_status ?? '—'}</EditableField></span>
           </div>
         )}
+        {actions}
       </div>
     </div>
+    )}
+    </EditGroup>
   )
 }
 

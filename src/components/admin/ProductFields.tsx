@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  BAGRUT_ROLE_HINTS,
-  BAGRUT_ROLE_LABELS,
+  BAGRUT_TITLE_LABELS,
+  bagrutTitle,
+  primaryBagrutRole,
   ROLE_LABELS,
   SCOPE_LABELS,
   fetchScopeOptions,
   type BagrutRole,
   type BagrutScopeOptions,
+  type BagrutTitle,
   type ScopeLevel,
   type ScopeOption,
   type UserRole,
@@ -154,44 +156,126 @@ export interface BagrutValue {
   bagrut_grades: string[]
   bagrut_classes: string[]
   bagrut_subject_keys: string[]
+  /** כותרת לתצוגה (039) — רק עם "כל בית הספר" */
+  bagrut_title: BagrutTitle | null
 }
 
-/** תפקיד והיקף בבגרות — מוצגים רק שדות ההיקף שהתפקיד משתמש בהם */
+type ScopeKind = 'bagrut_grades' | 'bagrut_classes' | 'bagrut_subject_keys'
+
+const SCOPE_KINDS: { key: ScopeKind; label: string; role: string; hint: string; options: keyof BagrutScopeOptions }[] = [
+  { key: 'bagrut_classes', label: 'כיתות', role: 'מחנך/ת', hint: 'כל תלמידי הכיתות שנבחרו', options: 'classes' },
+  { key: 'bagrut_grades', label: 'שכבות', role: 'רכז/ת שכבה', hint: 'כל תלמידי השכבות שנבחרו', options: 'grades' },
+  { key: 'bagrut_subject_keys', label: 'מקצועות', role: 'רכז/ת מקצוע', hint: 'תלמידים שיש להם ציון באחד המקצועות — כמו בדפי המקצועות', options: 'subjects' },
+]
+
+/**
+ * מה המשתמש רואה בבגרות (מיגרציה 037). התפקיד הוא כותרת; מסמנים מה הוא רואה:
+ * צפייה מועצתית, כל בית הספר, או **איחוד** של כיתות, שכבות ומקצועות. כך
+ * מחנך יכול להיות גם רכז מקצוע (סבא, 14.10). התפקיד הראשי נגזר ממה שסומן.
+ */
 export function BagrutFields({ options, value, onChange }: {
   options: BagrutScopeOptions | null
   value: BagrutValue
   onChange: (v: BagrutValue) => void
 }) {
   const role = value.bagrut_role ?? 'coordinator'
+  const council = role === 'council'
+  const whole = role === 'coordinator'
   const loading = options == null
+  // סוג היקף שסומן ועוד לא נבחר בו כלום — נשאר פתוח לבחירה
+  const [open, setOpen] = useState<Record<ScopeKind, boolean>>({ bagrut_grades: false, bagrut_classes: false, bagrut_subject_keys: false })
+  const ticked = (k: ScopeKind) => open[k] || value[k].length > 0
+
+  // כל שינוי עובר כאן: מעדכנים את השדה, וגוזרים מחדש את התפקיד הראשי
+  const emit = (next: BagrutValue, wholeSchool = next.bagrut_role === 'coordinator') =>
+    onChange(next.bagrut_role === 'council' ? next : { ...next, bagrut_role: primaryBagrutRole(wholeSchool, next) })
+
+  const toggleKind = (k: ScopeKind) => {
+    if (ticked(k)) {
+      setOpen((o) => ({ ...o, [k]: false }))
+      emit({ ...value, [k]: [] })
+    } else {
+      setOpen((o) => ({ ...o, [k]: true }))
+    }
+  }
+
+  const nothing = !council && !whole && SCOPE_KINDS.every((s) => value[s.key].length === 0)
+  const title = bagrutTitle(value)
+
   return (
     <div className="space-y-3">
-      <label className="block">
-        <span className="mb-1 block text-sm text-slate-600">תפקיד בזכאות לבגרות</span>
-        <select value={role} onChange={(e) => onChange({ ...value, bagrut_role: e.target.value as BagrutRole })} className={field}>
-          {(Object.keys(BAGRUT_ROLE_LABELS) as BagrutRole[]).map((r) => <option key={r} value={r}>{BAGRUT_ROLE_LABELS[r]}</option>)}
-        </select>
-        <span className="mt-1 block text-xs text-slate-500">{BAGRUT_ROLE_HINTS[role]}</span>
-      </label>
+      <div className="flex gap-0.5 rounded-xl bg-slate-100 p-1">
+        {([['school', 'בית ספר'], ['council', 'צפייה מועצתית']] as const).map(([k, label]) => {
+          const active = (k === 'council') === council
+          return (
+            <button key={k} type="button"
+              onClick={() => emit(k === 'council' ? { ...value, bagrut_role: 'council' } : { ...value, bagrut_role: 'coordinator' }, k === 'school')}
+              className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition ${active ? 'bg-white text-violet-800 shadow-sm' : 'text-slate-500 hover:text-violet-700'}`}>
+              {label}
+            </button>
+          )
+        })}
+      </div>
 
-      {role !== 'council' && (
-        <MultiPick label="בתי ספר" options={options?.schools ?? []} loading={loading}
-          selected={value.bagrut_schools} onChange={(v) => onChange({ ...value, bagrut_schools: v })}
-          emptyWarning="לא נבחר בית ספר — המשתמש לא יראה אף תלמיד בבגרות." />
-      )}
-      {role === 'grade_coordinator' && (
-        <MultiPick label="שכבות" options={options?.grades ?? []} loading={loading}
-          selected={value.bagrut_grades} onChange={(v) => onChange({ ...value, bagrut_grades: v })}
-          emptyWarning="לא נבחרה שכבה — רכז השכבה לא יראה אף תלמיד." />
-      )}
-      {role === 'homeroom' && (
-        <MultiPick label="כיתות" options={options?.classes ?? []} loading={loading}
-          selected={value.bagrut_classes} onChange={(v) => onChange({ ...value, bagrut_classes: v })}
-          emptyWarning="לא נבחרה כיתה — המחנך לא יראה אף תלמיד." />
-      )}
-      {role === 'subject_coordinator' && (
-        <MultiPick label="המקצועות שלו (מיקוד — לא הגבלה)" options={options?.subjects ?? []} loading={loading}
-          selected={value.bagrut_subject_keys} onChange={(v) => onChange({ ...value, bagrut_subject_keys: v })} />
+      {council ? (
+        <p className="text-xs text-slate-500">רואה את כל בתי הספר ברשות. צפייה בלבד — אינו עורך מעקב.</p>
+      ) : (
+        <>
+          <MultiPick label="בתי ספר" options={options?.schools ?? []} loading={loading}
+            selected={value.bagrut_schools} onChange={(v) => emit({ ...value, bagrut_schools: v })}
+            emptyWarning="לא נבחר בית ספר — המשתמש לא יראה אף תלמיד בבגרות." />
+
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <div className="mb-2 text-sm font-semibold text-slate-700">מה הוא רואה</div>
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <input type="checkbox" checked={whole} className="mt-0.5 accent-violet-600"
+                onChange={() => emit({ ...value, bagrut_role: whole ? null : 'coordinator' }, !whole)} />
+              <span>
+                <strong>כל בית הספר</strong> <span className="text-slate-500">— כל התלמידים, ועריכת תוכנית בית הספר</span>
+              </span>
+            </label>
+
+            {/* כותרת בלבד (039): רכז בגרויות ומנהל בית ספר רואים ועורכים אותו דבר */}
+            {whole && (
+              <div className="mr-6 mt-2 flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-slate-500">כותרת:</span>
+                {([[null, 'רכז/ת בגרויות'], ['principal', BAGRUT_TITLE_LABELS.principal]] as const).map(([t, label]) => (
+                  <label key={label} className="flex cursor-pointer items-center gap-1.5">
+                    <input type="radio" name="bagrut-title" checked={(value.bagrut_title ?? null) === t}
+                      onChange={() => onChange({ ...value, bagrut_title: t })} className="accent-violet-600" />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {!whole && (
+              <div className="mt-3 space-y-3 border-t border-slate-100 pt-3">
+                <p className="text-xs text-slate-500">אפשר לסמן כמה — המשתמש רואה את כולם יחד (למשל כיתה ומקצוע).</p>
+                {SCOPE_KINDS.map((s) => (
+                  <div key={s.key}>
+                    <label className="flex cursor-pointer items-start gap-2 text-sm">
+                      <input type="checkbox" checked={ticked(s.key)} onChange={() => toggleKind(s.key)} className="mt-0.5 accent-violet-600" />
+                      <span><strong>{s.label}</strong> <span className="text-slate-500">— {s.role}: {s.hint}</span></span>
+                    </label>
+                    {ticked(s.key) && (
+                      <div className="mr-6 mt-2">
+                        <MultiPick label={s.label} options={options?.[s.options] ?? []} loading={loading}
+                          selected={value[s.key]} onChange={(v) => emit({ ...value, [s.key]: v })} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {nothing ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">לא סומן מה המשתמש רואה — הוא לא יראה אף תלמיד.</p>
+          ) : (
+            <p className="text-xs text-slate-500">כותרת: <strong className="text-violet-800">{title}</strong></p>
+          )}
+        </>
       )}
     </div>
   )

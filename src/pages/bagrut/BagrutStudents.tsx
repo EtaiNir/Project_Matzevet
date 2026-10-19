@@ -21,6 +21,7 @@ import {
   type EligibilityKind,
   type TrackingFlag,
 } from '@/lib/bagrut'
+import { HONOR_KEYS, HONOR_META, honorsMap, missingText, type HonorKey } from '@/lib/bagrutHonors'
 
 /**
  * רשימת התלמידים — זכאות ומעקב. **טבלה**, כמו במצבת: כאן עובדים —
@@ -51,6 +52,8 @@ export default function BagrutStudents() {
     nogrades: params.get('nogrades') ?? '',
     // בלי תוכנית התערבות (אף פעולה) — מהאזור האישי: "על הסף בלי תוכנית"
     noplan: params.get('noplan') ?? '',
+    // בגרות מצטיינת / טק — מחושבות אצלנו (decisions/019)
+    honor: params.get('honor') ?? '',
   }
   // שכבה שאינה מסיימת — אין לה T2, ועמודות הזכאות היו ריקות לגמרי
   const hideT2 = Boolean(f.grade && round.graduating_grade && f.grade !== round.graduating_grade)
@@ -58,6 +61,7 @@ export default function BagrutStudents() {
     () => new Map(data.students.map((s) => [s.student_id, t1Summary(index, s.student_id)])),
     [data.students, index],
   )
+  const honors = useMemo(() => honorsMap(index, data.students), [data.students, index])
   const set = (key: string, value: string) => {
     const next = new URLSearchParams(params)
     if (value) next.set(key, value)
@@ -98,10 +102,11 @@ export default function BagrutStudents() {
         const c = data.actionCounts.get(s.student_id)
         if (c && c.active + c.done) return false
       }
+      if (f.honor && !honors.get(s.student_id)?.results[f.honor as HonorKey]?.ok) return false
       if (q && !(displayName(s).includes(q) || s.student_id.includes(q))) return false
       return true
     })
-  }, [data, summaries, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades, f.noplan])
+  }, [data, summaries, honors, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades, f.noplan, f.honor])
 
   const toggle = async (s: BagrutStudent, flag: TrackingFlag) => {
     const cur = data.tracking.get(s.student_id)
@@ -201,6 +206,33 @@ export default function BagrutStudents() {
       render: (s) => <span className="truncate text-xs text-slate-600" title={s.reinforced_subject ?? ''}>{s.reinforced_subject}</span>,
       sortValue: (s) => s.reinforced_subject,
     },
+    ...(['excellence', 'tech'] as HonorKey[]).map(
+      (h, i): Column<BagrutStudent> => ({
+        key: `honor_${h}`, group: 'honors', groupTitle: i === 0 ? 'הצטיינות' : undefined,
+        header: HONOR_META[h].short, exportHeader: HONOR_META[h].label, width: 84, align: 'center',
+        render: (s) => {
+          const r = honors.get(s.student_id)?.results[h]
+          if (!r) return null
+          return r.ok ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900 ring-1 ring-inset ring-amber-300">★ כן</span>
+          ) : (
+            <span className="text-[11px] text-slate-400" title={`חסר: ${missingText(r)}`}>חסרים {r.missing}</span>
+          )
+        },
+        sortValue: (s) => {
+          const r = honors.get(s.student_id)?.results[h]
+          return r ? -r.missing : null
+        },
+        exportValue: (s) => {
+          const r = honors.get(s.student_id)?.results[h]
+          return r ? (r.ok ? 'כן' : `לא — חסר: ${missingText(r)}`) : ''
+        },
+        filterValues: (s) => {
+          const r = honors.get(s.student_id)?.results[h]
+          return r ? (r.ok ? 'כן' : 'לא') : ''
+        },
+      }),
+    ),
     ...TRACKING_FLAGS.map(
       (fl): Column<BagrutStudent> => ({
         key: fl.key, group: 'track', groupTitle: 'מעקב הצוות', header: fl.short, exportHeader: fl.label, width: 76, align: 'center',
@@ -277,6 +309,7 @@ export default function BagrutStudents() {
     f.blocker ? BLOCKER_LABELS[f.blocker as BlockerKind] : '',
     f.missing,
     f.flag ? TRACKING_FLAGS.find((x) => x.key === f.flag)?.label : '',
+    f.honor ? HONOR_META[f.honor as HonorKey]?.label : '',
   ]
     .filter(Boolean)
     .join(' · ')
@@ -325,6 +358,10 @@ export default function BagrutStudents() {
           <option value="">כל סימוני המעקב</option>
           {TRACKING_FLAGS.map((fl) => <option key={fl.key} value={fl.key}>{fl.icon} {fl.label}</option>)}
         </select>
+        <select value={f.honor} onChange={(e) => set('honor', e.target.value)} className={select}>
+          <option value="">כל סוגי ההצטיינות</option>
+          {HONOR_KEYS.map((h) => <option key={h} value={h}>★ {HONOR_META[h].label}</option>)}
+        </select>
         {active && (
           <button onClick={() => setParams({}, { replace: true })} className="rounded-lg px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-100">
             ↺ ניקוי
@@ -338,7 +375,7 @@ export default function BagrutStudents() {
         // המיון ההתחלתי נקבע ברכיב פעם אחת — מעבר ל"מעקב השבוע" ובחזרה מתחיל אותו מחדש
         key={f.view === 'followup' ? 'followup' : 'list'}
         rows={rows}
-        columns={hideT2 ? columns.filter((c) => c.group !== 't2') : columns}
+        columns={hideT2 ? columns.filter((c) => c.group !== 't2' && c.group !== 'honors') : columns}
         rowKey={(s) => s.student_id}
         exportName={`בגרות_${round.school_name ?? round.school_code}_${label || 'תלמידים'}`}
         // "מעקב השבוע" — לפי המועד: מה שעבר קודם, אחר כך היום, ואז השבוע

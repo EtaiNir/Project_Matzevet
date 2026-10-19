@@ -143,6 +143,13 @@ export default function Pivot() {
         </div>
         <div className="flex items-center gap-2 text-sm">
           <Link
+            to={`/charts/${authorityCode}`}
+            state={useIncoming ? navState : undefined}
+            className="rounded-lg px-2 py-1 text-slate-500 transition hover:bg-sky-50 hover:text-sky-700"
+          >
+            📊 גרפים
+          </Link>
+          <Link
             to={`/students/${authorityCode}`}
             className="rounded-lg px-2 py-1 text-slate-500 transition hover:bg-sky-50 hover:text-sky-700"
           >

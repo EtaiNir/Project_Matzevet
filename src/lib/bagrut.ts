@@ -228,7 +228,7 @@ export interface RoundData {
   tracking: Map<string, Tracking>
   /** תוכנית ההתערבות לכל תלמיד — ספירות בלבד, לרשימה ולפס המצב */
   actionCounts: Map<string, ActionCounts>
-  /** עריכות ידניות בסבב (מיגרציה 037) — האחרונה לכל שדה, לפי editKey */
+  /** עריכות ידניות בסבב (מיגרציה 038) — האחרונה לכל שדה, לפי editKey */
   edits: Map<string, ManualEdit>
 }
 
@@ -262,16 +262,20 @@ export const editKey = (e: EditRef) =>
 
 /**
  * מי רשאי לערוך — לתצוגה בלבד (כפתור העריכה). האכיפה ב-may_edit_bagrut_data
- * במסד (מלכודת 16). רכז מקצוע: רק שדה של מקצוע שלו; שדות ניתוח הזכאות — לא.
+ * במסד (מלכודת 16, מיגרציה 038), לפי מה שסומן (037): רכז בגרויות — הכול;
+ * שכבות שסומנו — כל שדה (המסד בודק שהתלמיד בשכבה); מקצועות שסומנו — רק שדה של
+ * מקצוע שלו, לא ניתוח הזכאות. כיתות (מחנך) ומועצתי — לא עורכים.
  */
 export function canEditBagrutData(
-  profile: { role?: string; bagrut_role?: string | null; bagrut_subject_keys?: string[] } | null,
+  profile: { role?: string; bagrut_role?: string | null; bagrut_grades?: string[]; bagrut_subject_keys?: string[] } | null,
   subjectKey: string | null,
 ): boolean {
   if (!profile) return false
   if (profile.role === 'super_admin') return true
-  if (profile.bagrut_role === 'coordinator' || profile.bagrut_role === 'grade_coordinator') return true
-  return profile.bagrut_role === 'subject_coordinator' && subjectKey != null && (profile.bagrut_subject_keys ?? []).includes(subjectKey)
+  if (profile.bagrut_role === 'coordinator') return true
+  if (!profile.bagrut_role || profile.bagrut_role === 'council') return false
+  if (profile.bagrut_grades?.length) return true
+  return subjectKey != null && (profile.bagrut_subject_keys ?? []).includes(subjectKey)
 }
 
 export interface EditResult {
@@ -291,7 +295,7 @@ export async function editBagrutField(round: BagrutRound, ref: EditRef, value: s
   if (error) {
     // הפונקציה עוד לא במסד — אומרים את זה, לא "שגיאה" (מלכודת 15)
     if (error.code === 'PGRST202' || /bagrut_edit_field/.test(error.message)) {
-      throw new Error('העריכה הידנית עדיין לא הופעלה במסד (מיגרציה 037)')
+      throw new Error('העריכה הידנית עדיין לא הופעלה במסד (מיגרציה 038)')
     }
     throw new Error(`השמירה נכשלה: ${error.message}`)
   }
@@ -311,7 +315,7 @@ export async function editBagrutField(round: BagrutRound, ref: EditRef, value: s
   }
 }
 
-/** העריכות של הסבב. טבלה שעוד לא קיימת (לפני 037) = אין עריכות, לא שגיאה. */
+/** העריכות של הסבב. טבלה שעוד לא קיימת (לפני 038) = אין עריכות, לא שגיאה. */
 async function loadEdits(roundId: string): Promise<Map<string, ManualEdit>> {
   const { data, error } = await supabase.from('bagrut_manual_edits')
     .select('target, student_id, subject_key, questionnaire_code, field, old_value, new_value, edited_by_email, edited_at')

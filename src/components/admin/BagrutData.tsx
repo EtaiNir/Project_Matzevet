@@ -37,6 +37,7 @@ export default function BagrutData({ code }: { code: string }) {
   // בית ספר חדש
   const [adding, setAdding] = useState(false)
   const [newCode, setNewCode] = useState('')
+  const codeValid = /^\d{6}$/.test(newCode)
   const [newName, setNewName] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -152,7 +153,7 @@ export default function BagrutData({ code }: { code: string }) {
               <form
                 onSubmit={(e) => {
                   e.preventDefault()
-                  if (newCode && newName.trim()) addSchool()
+                  if (codeValid && newName.trim()) addSchool()
                 }}
                 className="flex flex-col gap-2 rounded-xl border-2 border-dashed border-sky-300 p-4"
               >
@@ -163,10 +164,15 @@ export default function BagrutData({ code }: { code: string }) {
                     dir="ltr"
                     inputMode="numeric"
                     value={newCode}
-                    onChange={(e) => setNewCode(e.target.value.replace(/\D/g, ''))}
+                    maxLength={6}
+                    onChange={(e) => setNewCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="610006"
                     className={`${input} mt-1 font-mono`}
                   />
+                  {/* סמל מוסד של משרד החינוך — 6 ספרות (סבא, 14.10); נאכף גם במסד (037) */}
+                  {newCode && !codeValid && (
+                    <span className="mt-1 block text-xs font-normal text-amber-700">סמל מוסד הוא 6 ספרות ({newCode.length} הוקלדו)</span>
+                  )}
                 </label>
                 <label className="text-sm font-semibold text-slate-600">
                   שם בית הספר
@@ -178,7 +184,7 @@ export default function BagrutData({ code }: { code: string }) {
                   />
                 </label>
                 <div className="flex gap-2">
-                  <button disabled={!newCode || !newName.trim() || saving} className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
+                  <button disabled={!codeValid || !newName.trim() || saving} className="rounded-lg bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50">
                     {saving ? 'שומר…' : 'הוספה וקליטה'}
                   </button>
                   <button type="button" onClick={() => setAdding(false)} className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100">

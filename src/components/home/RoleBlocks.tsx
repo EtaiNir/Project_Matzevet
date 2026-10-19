@@ -122,6 +122,7 @@ export function ManagerSection({ m, name, ago }: { m: ManagerOverview; name: str
           <Link to={`/students/${m.code}`} className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-bold text-white hover:bg-sky-700">לטבלת התלמידים</Link>
           <Link to={`/upload/${m.code}`} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">העלאת מצב"ת</Link>
           <Link to={`/pivot/${m.code}`} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">פיבוטים</Link>
+          <Link to={`/charts/${m.code}`} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">גרפים</Link>
         </div>
         <div>
           <div className="mb-2 text-xs font-bold text-slate-400">הטבלאות הייעודיות שלי</div>

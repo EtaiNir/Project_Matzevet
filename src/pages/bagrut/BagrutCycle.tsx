@@ -28,11 +28,13 @@ import {
   type BagrutLogEntry,
   type LogKind,
   type TrackingFlag,
+  canEditBagrutData,
 } from '@/lib/bagrut'
+import { useAuth } from '@/context/AuthContext'
 import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
 import { saveLogPdf } from '@/lib/printLog'
-import EditableField from '@/components/bagrut/EditableField'
+import EditableField, { EditGroup } from '@/components/bagrut/EditableField'
 
 /**
  * לשונית המעקב כמחזור התערבות — מצב → תוכנית → מעקב
@@ -212,6 +214,7 @@ function PlanView({ sid, actions, onActions, ai, onAi }: {
  */
 function T2Card({ sid }: { sid: string }) {
   const { index } = useBagrut()
+  const { profile } = useAuth()
   const s = index.studentById.get(sid)!
   const value = (f: T2Field) => {
     const v = s[f.key]
@@ -220,7 +223,10 @@ function T2Card({ sid }: { sid: string }) {
   const short = T2_FIELDS.filter((f) => f.short)
   const long = T2_FIELDS.filter((f) => !f.short)
   return (
-    <Card title="ניתוח הזכאות" action={<span className="text-xs text-slate-400">כפי שהגיע, בלי עיבוד</span>}>
+    // עריכה ידנית לכל הכרטיס — עיפרון אחד בפינה (אייל, 18.10)
+    <EditGroup allowed={s.in_t2 && canEditBagrutData(profile, null)}>
+    {({ toggle, actions }) => (
+    <Card title="ניתוח הזכאות" action={<span className="flex items-center gap-2"><span className="text-xs text-slate-400">כפי שהגיע, בלי עיבוד</span>{toggle}</span>}>
       {!s.in_t2 ? (
         <p className="text-sm text-slate-500">לתלמיד הזה אין ניתוח זכאות — הוא נעשה לשכבה המסיימת בלבד.</p>
       ) : (
@@ -245,9 +251,12 @@ function T2Card({ sid }: { sid: string }) {
               </div>
             ))}
           </dl>
+          {actions}
         </>
       )}
     </Card>
+    )}
+    </EditGroup>
   )
 }
 

@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime
 import traceback
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -69,6 +70,7 @@ BACKUP_MAX_AGE_DAYS = 90   # גיבוי ישן מזה נמחק (חוץ מהאח�
 WATCH_STATE = AGENT_DIR / "watch-state.json"
 WATCH_EVERY = 60          # כל כמה שניות לסרוק את תיקיית המצב"ת המקומית
 FILE_SETTLE_SECONDS = 30  # קובץ שנגעו בו לאחרונה - ממתינים שהעתקתו תסתיים
+HEARTBEAT_EVERY = 3600    # שורת "הסוכן פעיל" בלוג — פעם בשעה
 
 # ששת הקבצים שמשרד החינוך מפיץ, לפי הקידומת בשם
 MOE_PREFIXES = ("TALMIDIM", "PIRTEY_KESHER", "GORMEY_KESHER",
@@ -139,6 +141,14 @@ def connect():
         password=require("PGPASSWORD"),
         sslmode="require",
         connect_timeout=20,
+        # TCP keepalives: חיבור שנפל באמצע (ניתוק רשת, שינה של הנתב) מתגלה תוך
+        # כדקה ונזרקת שגיאה — והלולאה מתחברת מחדש. בלעדיהם שאילתה על חיבור מת
+        # ממתינה לנצח: אצל סבא הסוכן "רץ" מ-2.10 בלי לעשות דבר, אחרי timeout
+        # ברשת ושורת "מתחבר ל-Supabase" אחרונה בלוג.
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=3,
     )
     conn.autocommit = True
     return conn
@@ -438,7 +448,10 @@ def process_bagrut(conn, job) -> None:
 
         if proc.returncode != 0:
             # שגיאה שהבדיקה זיהתה — הודעה קריאה; אחרת קריסה — זנב הפלט (מלכודת 15)
-            msg = " · ".join(report.get("errors") or []) or (proc.stderr or proc.stdout or "")[-800:]
+            # בקריסה — שורת החריגה עצמה, מתחילתה: זנב של 800 תווים חתך את
+            # תחילת ההודעה כשהיא ארוכה (רשימת עמודות, 19.10)
+            out = (proc.stderr or proc.stdout or "").strip().splitlines()
+            msg = " · ".join(report.get("errors") or []) or (out[-1][:800] if out else "")
             raise RuntimeError(msg)
 
         log.info("3/3 מעדכן סטטוס…")
@@ -856,6 +869,37 @@ def file_version(path: Path) -> tuple:
     return (0, "", path.stat().st_mtime)
 
 
+# ששת הקבצים של רשות — מאותו משלוח, אם החותמות בשמות בטווח הזה. משלוח של משרד
+# החינוך מגיע כולו תוך דקות (15.10: 19:00–19:06)
+DELIVERY_WINDOW_HOURS = 6
+# סט מעורב שלא הושלם — נטען בכל זאת אחרי זמן זה, עם אזהרה (אולי משרד החינוך
+# פשוט לא שלח השבוע את אחד הקבצים)
+MIXED_MAX_WAIT_HOURS = 6
+
+# רשות → (טביעת האצבע של הסט המעורב, מתי נראה לראשונה)
+_mixed_since: dict = {}
+
+
+def delivery_spread_hours(files: dict) -> float | None:
+    """
+    הפער בשעות בין החותמת המוקדמת למאוחרת בששת הקבצים שנבחרו לרשות.
+
+    הסוכן בוחר לכל סוג קובץ את העדכני. אם משלוח עדיין מגיע, הוא עלול לבחור את
+    קובץ התלמידים החדש לצד קובץ אנשי הקשר מהשבוע שעבר — ולטעון סט מעורב. פער
+    גדול = המשלוח לא הושלם. None = לאחד הקבצים אין חותמת — לא חוסמים.
+    """
+    stamps = []
+    for path in files.values():
+        version = file_version(path)
+        if not version[0]:
+            return None
+        try:
+            stamps.append(datetime.strptime(version[1], "%Y-%m-%d-%H-%M-%S"))
+        except ValueError:
+            return None
+    return (max(stamps) - min(stamps)).total_seconds() / 3600
+
+
 def group_files_by_authority(folder: Path, moe_codes: dict) -> dict:
     """
     מקבץ את קובצי ה-CSV בתיקייה לפי רשות.
@@ -896,10 +940,61 @@ def fingerprint(files: dict) -> str:
                     for p in sorted(files))
 
 
+# גודל כל קובץ כפי שנראה בסריקה, ומתי נראה כך לראשונה — לבדיקת יציבות
+_seen_sizes: dict = {}
+
+
+def _is_locked(path: Path) -> bool:
+    """
+    האם תהליך אחר מחזיק את הקובץ פתוח לכתיבה (Windows: sharing violation).
+
+    פתיחה לקריאה+כתיבה בלי לשנות דבר: נכשלת כשמישהו אחר כותב לקובץ ולא
+    מאפשר שיתוף. קובץ לקריאה בלבד (מאפיין) — אין מה לבדוק, ולא נחשב נעול.
+    """
+    try:
+        if not os.access(path, os.W_OK):
+            return False
+        fd = os.open(str(path), os.O_RDWR | getattr(os, "O_BINARY", 0))
+        os.close(fd)
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+
+
 def files_settled(files: dict) -> bool:
-    """קובץ שעדיין מועתק לתיקייה — לא נוגעים בו עד שיירגע."""
+    """
+    האם ששת הקבצים סיימו להגיע לתיקייה ושוחררו. שלושה תנאים, כולם:
+
+    1. **הגודל לא השתנה** מאז שנראה לראשונה, לפחות FILE_SETTLE_SECONDS. זה
+       המבחן העיקרי: כלי העתקה (robocopy /COPY:DAT, חילוץ ZIP, סנכרון) משמרים
+       את תאריך המקור, ולכן לפי mtime בלבד קובץ שעדיין מועתק נראה "ישן"
+       ונתפס באמצע (אצל סבא, 18.10).
+    2. **mtime** ישן מ-FILE_SETTLE_SECONDS — כמו קודם.
+    3. **הקובץ אינו נעול** בידי תהליך אחר שעדיין כותב אליו.
+
+    stat שנכשל (התיקייה נעולה לרגע) = עוד לא — ננסה בסבב הבא.
+    """
     now = time.time()
-    return all(now - f.stat().st_mtime > FILE_SETTLE_SECONDS for f in files.values())
+    settled = True
+    for f in files.values():
+        try:
+            st = f.stat()
+        except OSError:
+            return False
+        key = str(f)
+        seen = _seen_sizes.get(key)
+        if seen is None or seen[0] != st.st_size:
+            _seen_sizes[key] = (st.st_size, now)
+            settled = False
+            continue
+        if now - seen[1] < FILE_SETTLE_SECONDS or now - st.st_mtime < FILE_SETTLE_SECONDS:
+            settled = False
+            continue
+        if _is_locked(f):
+            settled = False
+    return settled
 
 
 def record_local_run(conn, code: str, folder: Path):
@@ -948,7 +1043,12 @@ def scan_watch_folder(conn, folder: Path, process_existing: bool = False) -> Non
     if not moe_codes:
         return
 
-    groups = group_files_by_authority(folder, moe_codes)
+    try:
+        groups = group_files_by_authority(folder, moe_codes)
+    except OSError as exc:
+        # התיקייה נעולה לרגע בידי תהליך העדכון — לא תקלה, ננסה בסבב הבא
+        log.info("תיקיית המצב\"ת אינה זמינה כרגע (%s) — ממתין לסבב הבא", exc)
+        return
 
     if process_existing:
         # "תעבד עכשיו את מה שיש" — מתעלמים ממה שכבר נרשם, אחרת מצב
@@ -964,6 +1064,18 @@ def scan_watch_folder(conn, folder: Path, process_existing: bool = False) -> Non
             take_baseline(state, folder, groups, moe_codes)
             return
 
+    if process_existing:
+        # בדיקת היציבות צריכה שתי סריקות (גודל זהה לאורך FILE_SETTLE_SECONDS).
+        # בהרצה חד־פעמית יש סריקה אחת — בלי זה כל הרשויות היו "עדיין בהעתקה"
+        # והטעינה לא הייתה קורית לעולם (אצל סבא, 19.10). רושמים את הגדלים,
+        # ממתינים, והלולאה למטה בודקת שוב
+        complete = [f for f in groups.values() if all(p in f for p in MOE_PREFIXES)]
+        for f in complete:
+            files_settled(f)
+        if complete:
+            log.info("בודק שהקבצים יציבים — %s שניות", FILE_SETTLE_SECONDS + 2)
+            time.sleep(FILE_SETTLE_SECONDS + 2)
+
     for moe, files in sorted(groups.items()):
         code = moe_codes[moe]
         missing = [p for p in MOE_PREFIXES if p not in files]
@@ -971,7 +1083,10 @@ def scan_watch_folder(conn, folder: Path, process_existing: bool = False) -> Non
             log.debug("רשות %s — חסרים %s, מדלג", code, ", ".join(missing))
             continue
 
-        fp = fingerprint(files)
+        try:
+            fp = fingerprint(files)
+        except OSError:
+            continue                      # קובץ נעול לרגע — בסבב הבא
         if state["authorities"].get(code) == fp:
             continue                      # כבר עובד, שום דבר לא השתנה
 
@@ -979,6 +1094,23 @@ def scan_watch_folder(conn, folder: Path, process_existing: bool = False) -> Non
         # בתיקייה מלכתחילה, ולכן זו טעינה ראשונה ולא עדכון.
         if not process_existing and code not in state["authorities"]:
             log.info("רשות %s נוספה למערכת — טעינה ראשונה מהתיקייה", code)
+
+        # ששת הקבצים — מאותו משלוח. אחרת המשלוח עוד מגיע: ממתינים, ולא טוענים
+        # קובץ חדש לצד קובץ מהשבוע שעבר
+        spread = delivery_spread_hours(files)
+        if spread is not None and spread > DELIVERY_WINDOW_HOURS:
+            seen_mixed = _mixed_since.get(code)
+            if seen_mixed is None or seen_mixed[0] != fp:
+                seen_mixed = _mixed_since[code] = (fp, time.time())
+                log.info("רשות %s — הקבצים מכמה משלוחים (פער של %.0f שעות בין החותמות), "
+                         "ממתין שהמשלוח יושלם", code, spread)
+            waited = (time.time() - seen_mixed[1]) / 3600
+            if waited < MIXED_MAX_WAIT_HOURS:
+                continue
+            log.warning("רשות %s — הסט מעורב כבר %.0f שעות; נטען בכל זאת "
+                        "(ייתכן שמשרד החינוך לא שלח את כל הקבצים)", code, waited)
+        else:
+            _mixed_since.pop(code, None)
 
         if not files_settled(files):
             log.info("רשות %s — הקבצים עדיין בהעתקה, ממתין", code)
@@ -991,9 +1123,23 @@ def scan_watch_folder(conn, folder: Path, process_existing: bool = False) -> Non
         # קידומת מתוך התיקייה, ואם יש בה כמה מועצות הוא היה מערבב ביניהן.
         work_dir = Path(tempfile.mkdtemp(prefix=f"matzevet-local-{code}-"))
         upload_id = None
+        # ההעתקה לפני כל רישום: קובץ שננעל בדיוק עכשיו (תהליך העדכון חזר אליו)
+        # אינו כישלון — ממתינים לסבב הבא, בלי שורת "נכשל" בהיסטוריה באתר
         try:
+            sizes = {p: p.stat().st_size for p in files.values()}
             for path in files.values():
                 shutil.copy2(path, work_dir / path.name)
+            # הקובץ השתנה תוך כדי ההעתקה — עותק חלקי. לא טוענים אותו
+            if any(p.stat().st_size != sizes[p] or (work_dir / p.name).stat().st_size != sizes[p]
+                   for p in files.values()):
+                raise OSError("קובץ השתנה תוך כדי ההעתקה")
+        except OSError as exc:
+            log.info("רשות %s — הקבצים עדיין בשימוש (%s), ממתין לסבב הבא", code, exc)
+            for path in files.values():
+                _seen_sizes.pop(str(path), None)
+            shutil.rmtree(work_dir, ignore_errors=True)
+            continue
+        try:
             log.info("1/5 הועתקו 6 קבצים לעיבוד")
 
             upload_id = record_local_run(conn, code, folder)
@@ -1084,8 +1230,14 @@ def main() -> None:
 
     conn = None
     idle_logged = False
+    # שורת "חי" בלוג כל HEARTBEAT_EVERY — כדי שאפשר יהיה להבחין בין סוכן בטל
+    # לסוכן תקוע. בלעדיה, לוג שקט מ-2.10 לא אמר כלום (אצל סבא, 18.10)
+    last_beat = time.time()
 
     while True:
+        if time.time() - last_beat > HEARTBEAT_EVERY:
+            last_beat = time.time()
+            log.info("הסוכן פעיל — %s", "מחובר" if conn is not None and not conn.closed else "לא מחובר")
         try:
             if conn is None or conn.closed:
                 conn = connect()

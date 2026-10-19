@@ -41,6 +41,13 @@ secrets). פריסה: [server-migration.md](../docs/server-migration.md#פריס
 לכל רשות — ראה [decisions/014](../docs/decisions/014-bagrut-module.md).
 ההרשאה בעמודות `bagrut_role` + `bagrut_schools/grades/classes/subject_keys`,
 **נפרדת** מ-`scope_level` של המצבת. מערך היקף ריק = **כלום**, לא הכול.
+**מ-037 ההיקף הוא איחוד:** משתמש בית־ספרי (לא `council`, לא `coordinator`)
+רואה את מי שבשכבה **או** בכיתה **או** במקצוע שסומנו — `bagrut_role` הוא רק
+התפקיד הראשי. `bagrut_student_visible` היא נקודת ההחלטה היחידה.
+`users.bagrut_title` (039) — כותרת לתצוגה בלבד ("מנהל/ת בית ספר" עם
+`coordinator`); אף פונקציה ב-RLS אינה קוראת אותה, ואסור שתתחיל.
+**עריכה ידנית** (038) — `may_edit_bagrut_data` נגזרת מאותו איחוד: רכז בגרויות —
+הכול; שכבות שסומנו — תלמידי השכבה; מקצועות שסומנו — שדות המקצוע בלבד.
 רכז מקצוע רואה **רק את תלמידי המקצועות שלו** (מיגרציות 035–036, הופכות את
 030): מי שיש לו ציון שאלון באחד מהם — בדיוק מי שמופיע בדף המקצוע
 (`bagrut_subject_member`). T1 אינו אומר מי "רשום" למקצוע; מי שעוד לא ניגש
@@ -52,7 +59,7 @@ secrets). פריסה: [server-migration.md](../docs/server-migration.md#פריס
 שם בית הספר, והוא גובר על השם שבקבצים.
 **זכאות נקבעת רק לפי T2** — גם ב-`bagrut-ai` ([014 §8](../docs/decisions/014-bagrut-module.md)).
 **עריכה ידנית של נתוני הסבב** ([decisions/018](../docs/decisions/018-bagrut-manual-edits.md),
-מיגרציה 037) — **רק** דרך `bagrut_edit_field`, עם רשימה סגורה של שדות. אין
+מיגרציה 038) — **רק** דרך `bagrut_edit_field`, עם רשימה סגורה של שדות. אין
 מדיניות UPDATE על `bagrut_students/grades/subjects` למשתמשים, ואסור להוסיף:
 RLS מגביל שורות ולא עמודות, ורכז היה משנה כיתה ומזיז תלמיד מחוץ להיקף. שדה
 חדש לעריכה = שורה ב-`case` בפונקציה. `bagrut_manual_edits` נמחקת עם הסבב

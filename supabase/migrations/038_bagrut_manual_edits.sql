@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════
--- 037 — עריכה ידנית של נתוני הבגרות (משימה 7, פגישת 14.10)
+-- 038 — עריכה ידנית של נתוני הבגרות (משימה 7, פגישת 14.10)
 -- ═══════════════════════════════════════════════════════════════
 -- צוות בית הספר מתקן ידנית שדה בנתוני הסבב: ציון שאלון, מדדי מקצוע, או
 -- שדה בניתוח הזכאות. סבא: "זה אחריות של בית הספר לעשות את השינויים בצורה
@@ -8,6 +8,9 @@
 -- ההחלטות (18.10):
 --   · עורכים: רכז בגרויות, רכז שכבה, רכז מקצוע — **רק במקצועות שלו**, ומנהל־על.
 --     לא מחנך, ולא צפייה מועצתית (נשארת צפייה בלבד).
+--   · נכתבה כ-037 בענף bagrut-t2-fields; שונתה ל-038 במיזוג, כי 037 (היקף מאוחד —
+--     אדם אחד בכמה תפקידים) כבר הוחלה. may_edit_bagrut_data הותאמה לה: ההרשאה
+--     נגזרת ממה שסומן (שכבות / מקצועות), לא מתפקיד אחד.
 --   · גם שדות ניתוח הזכאות (סטטוס, חסמים, התערבות…) — לא רק ציונים. ⚠️ זה מרכך
 --     את "זכאות נקבעת רק לפי T2" (014 §8): הקוד וה-AI עדיין אינם מחשבים זכאות,
 --     אבל **אדם מבית הספר** רשאי לתקן את מה ש-T2 אמר. כל תיקון מסומן במסך.
@@ -71,21 +74,25 @@ stable
 security definer
 set search_path = public
 as $$
+  -- מותאם להיקף המאוחד של 037 (אדם אחד בכמה תפקידים): לא לפי תפקיד אחד, אלא
+  -- לפי מה שסומן. רכז בגרויות — כל תלמיד שהוא רואה. שכבות שסומנו — כל שדה של
+  -- תלמיד בשכבה. מקצועות שסומנו — רק שדה של מקצוע שלו (לא ניתוח הזכאות).
+  -- כיתות (מחנך) — לא מוסיפות עריכה. מועצתי — לא עורך.
   select coalesce((
     select not u.is_suspended
        and (u.role = 'super_admin'
-            or ((u.bagrut_role in ('coordinator', 'grade_coordinator')
-                 -- רכז מקצוע: רק שדה של מקצוע שלו; שדות ניתוח הזכאות — לא
-                 or (u.bagrut_role = 'subject_coordinator'
-                     and p_subject is not null
-                     and p_subject = any(coalesce(u.bagrut_subject_keys, '{}'))))
-                and exists (
-                  select 1 from public.bagrut_students s
-                   where s.round_id = p_round
-                     and s.student_id = p_student
-                     and public.has_authority(s.authority_code)
-                     and public.bagrut_student_visible(p_round, p_student, s.school_code,
-                                                       s.grade, s.class_name, s.track))))
+            or exists (
+                 select 1 from public.bagrut_students s
+                  where s.round_id = p_round
+                    and s.student_id = p_student
+                    and public.has_authority(s.authority_code)
+                    and public.bagrut_student_visible(p_round, p_student, s.school_code,
+                                                      s.grade, s.class_name, s.track)
+                    and (u.bagrut_role = 'coordinator'
+                         or (u.bagrut_role in ('grade_coordinator', 'subject_coordinator', 'homeroom')
+                             and (coalesce(s.grade = any(u.bagrut_grades), false)
+                                  or (p_subject is not null
+                                      and p_subject = any(coalesce(u.bagrut_subject_keys, '{}'))))))))
     from public.users u
     where u.id = auth.uid()), false);
 $$;

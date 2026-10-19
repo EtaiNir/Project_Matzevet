@@ -168,6 +168,14 @@ export default function RailTopBar({
         >
           ▦ פיבוטים
         </Link>
+        <Link
+          to={`/charts/${authorityCode}`}
+          state={pivotState}
+          title={pivotState?.fromLabel ? `גרפים על ${pivotState.fromLabel}` : 'תמונת הרשות בגרפים'}
+          className={btn}
+        >
+          📊 גרפים
+        </Link>
         {canUpdateMoe && authorityCode && (
           <Link
             to={`/upload/${authorityCode}`}

@@ -30,7 +30,14 @@ export interface UserProfile {
   can_edit_extra?: boolean
   /** תפקיד במודול זכאות לבגרות (מיגרציות 026, 030). null = אין גישה למודול */
   bagrut_role?: 'council' | 'coordinator' | 'grade_coordinator' | 'subject_coordinator' | 'homeroom' | null
-  /** רכז מקצוע: המקצועות שלו (subject_key של הסבב) — מיקוד במסכים, לא הגבלת גישה (מיגרציה 030) */
+  /**
+   * מה המשתמש רואה בבגרות — איחוד של השלושה (מיגרציה 037): שכבות, כיתות, ומקצועות
+   * (subject_key של הסבב; רואה תלמידים עם ציון בהם — 036)
+   */
+  bagrut_grades?: string[]
+  bagrut_classes?: string[]
+  /** כותרת לתצוגה (039): 'principal' = מנהל/ת בית ספר */
+  bagrut_title?: 'principal' | null
   bagrut_subject_keys?: string[]
 }
 
@@ -54,7 +61,7 @@ export function productAccess(p: UserProfile | null) {
  * כך האתר עובד לפני ההרצה, ומציג את השדות מיד אחריה בלי פריסה מחדש.
  */
 const EXTENDED_COLUMNS =
-  `${BASE_COLUMNS}, job_title, institution_name, institution_code, can_edit_extra, bagrut_role, bagrut_subject_keys`
+  `${BASE_COLUMNS}, job_title, institution_name, institution_code, can_edit_extra, bagrut_role, bagrut_title, bagrut_grades, bagrut_classes, bagrut_subject_keys`
 
 interface AuthContextValue {
   session: Session | null
