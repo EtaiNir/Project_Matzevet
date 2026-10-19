@@ -649,6 +649,12 @@ function Rail({ ctx, fullIndex, allStudents, lensId, onClassLens, isSuperAdmin }
         <NavLink end to={base} className={link}>
           <span aria-hidden>◔</span> תמונת מצב
         </NavLink>
+        {/* מחושב אצלנו מעל ניתוח הזכאות (decisions/019) — לשכבה המסיימת */}
+        {counts.graduating > 0 && (
+          <NavLink to={`${base}/honors`} className={link}>
+            <span aria-hidden>★</span> מצטיינת וטק
+          </NavLink>
+        )}
         {/* תוכנית בית הספר — רק לרכז בגרויות ולמנהל־על (אייל, 18.10) */}
         {canSeeBagrutProgram(profile) && (
           <NavLink to={`${base}/program`} className={link}>

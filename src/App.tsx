@@ -6,6 +6,7 @@ import Contact from './pages/Contact'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Pivot from './pages/Pivot'
+import Charts from './pages/Charts'
 import SavedViews from './pages/SavedViews'
 import UpdateData from './pages/UpdateData'
 import UpdateGanim from './pages/UpdateGanim'
@@ -18,6 +19,7 @@ import BagrutSubject from './pages/bagrut/BagrutSubject'
 import BagrutStudent from './pages/bagrut/BagrutStudent'
 import BagrutProgram from './pages/bagrut/BagrutProgram'
 import BagrutUpload from './pages/bagrut/BagrutUpload'
+import BagrutHonors from './pages/bagrut/BagrutHonors'
 import Home from './pages/Home'
 import RequireProduct from './components/RequireProduct'
 
@@ -68,6 +70,8 @@ export default function App() {
       <Route path="/students/:code" element={matzevet(<Dashboard />)} />
       <Route path="/pivot" element={matzevet(<Pivot />)} />
       <Route path="/pivot/:code" element={matzevet(<Pivot />)} />
+      <Route path="/charts" element={matzevet(<Charts />)} />
+      <Route path="/charts/:code" element={matzevet(<Charts />)} />
       {/* רשימת הטבלאות הייעודיות, ופתיחת אחת מהן בטבלה הראשית */}
       <Route path="/views/:code" element={matzevet(<SavedViews />)} />
       <Route path="/views/:code/:viewId" element={matzevet(<Dashboard />)} />
@@ -87,6 +91,7 @@ export default function App() {
           <Route path="subject/:key" element={<BagrutSubject />} />
           <Route path="student/:id" element={<BagrutStudent />} />
           <Route path="program" element={<BagrutProgram />} />
+          <Route path="honors" element={<BagrutHonors />} />
           <Route path="upload" element={<BagrutUpload />} />
         </Route>
       </Route>
