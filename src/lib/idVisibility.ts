@@ -36,6 +36,8 @@ export const ID_LEVELS: { level: IdLevel; product: 'matzevet' | 'bagrut'; label:
 type Settings = Map<IdLevel, boolean>
 
 let settings: Settings = new Map()
+/** false — הטבלה עוד לא במסד (לפני 040). null — עוד לא נבדק */
+let available: boolean | null = null
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
 
@@ -43,13 +45,26 @@ const emit = () => listeners.forEach((l) => l())
 export async function loadIdVisibility(): Promise<Settings> {
   const { data, error } = await supabase.from('id_visibility').select('level, visible')
   settings = error ? new Map() : new Map((data ?? []).map((r) => [r.level as IdLevel, r.visible as boolean]))
+  available = !error
   emit()
   return settings
 }
 
 export function resetIdVisibility() {
   settings = new Map()
+  available = null
   emit()
+}
+
+/** האם ההגדרה פעילה במסד — לפאנל, כדי לא להציע מתג שהשמירה שלו תיכשל */
+export function useIdVisibilityAvailable(): boolean | null {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l)
+      return () => listeners.delete(l)
+    },
+    () => available,
+  )
 }
 
 /** מנהל־על בלבד — האכיפה במדיניות של 040 */

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ID_LEVELS, saveIdVisibility, useIdSettings, type IdLevel } from '@/lib/idVisibility'
+import { ID_LEVELS, saveIdVisibility, useIdSettings, useIdVisibilityAvailable, type IdLevel } from '@/lib/idVisibility'
 
 /**
  * חשיפת תעודות זהות לפי רמת הרשאה (מיגרציה 040) — מנהל־על בוחר לכל רמה.
@@ -8,6 +8,8 @@ import { ID_LEVELS, saveIdVisibility, useIdSettings, type IdLevel } from '@/lib/
  */
 export default function IdVisibilityPanel() {
   const settings = useIdSettings()
+  // לפני 040 — אין טבלה. המתגים מושבתים מראש, במקום שגיאה אחרי כל לחיצה
+  const available = useIdVisibilityAvailable()
   const [busy, setBusy] = useState<IdLevel | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -34,7 +36,7 @@ export default function IdVisibilityPanel() {
               <button
                 role="switch"
                 aria-checked={on}
-                disabled={busy !== null}
+                disabled={busy !== null || available === false}
                 onClick={() => toggle(level)}
                 className={`relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-50 ${on ? 'bg-emerald-500' : 'bg-slate-300'}`}
                 title={on ? 'רואה ת"ז — לחיצה מסתירה' : 'ת"ז מוסתרת — לחיצה חושפת'}
@@ -61,6 +63,11 @@ export default function IdVisibilityPanel() {
       <p className="mt-1 text-xs text-amber-700">
         הסתרה במסך ובייצוא בלבד — הנתון עדיין יוצא מהמסד למי שרואה את השורה. האכיפה במסד היא שלב נפרד.
       </p>
+      {available === false && (
+        <p className="mt-3 rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+          ההגדרה עוד לא פעילה: מיגרציה 040 טרם הוחלה על המסד. עד אז כל הרמות רואות ת"ז, והמתגים מושבתים.
+        </p>
+      )}
       {err && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{err}</p>}
       <div className="mt-4 grid max-w-3xl gap-6 sm:grid-cols-2">
         {group('matzevet', 'מצבת תלמידים')}
