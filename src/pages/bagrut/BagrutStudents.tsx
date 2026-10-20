@@ -21,6 +21,7 @@ import {
   type BlockerKind,
   type EligibilityKind,
   type TrackingFlag,
+  studentPath,
 } from '@/lib/bagrut'
 import { HONOR_KEYS, HONOR_META, honorsMap, missingText, type HonorKey } from '@/lib/bagrutHonors'
 
@@ -392,7 +393,7 @@ export default function BagrutStudents() {
             fromLabel: label || 'כל התלמידים',
             backTo: location.pathname + location.search,
           }
-          navigate(`${base}/student/${s.student_id}`, { state })
+          navigate(studentPath(base, round, s.student_id), { state })
         }}
       />
     </div>

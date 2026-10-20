@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useBagrut, type CardNavState } from './context'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import { Empty, Kpi, StatusBadge } from '@/components/bagrut/ui'
-import { classSortKey, displayName, eligibilityKind, ELIGIBILITY_META, fmt, type BagrutStudent } from '@/lib/bagrut'
+import { classSortKey, displayName, eligibilityKind, ELIGIBILITY_META, fmt, type BagrutStudent, studentPath } from '@/lib/bagrut'
 import {
   EXCELLENCE_AVERAGE,
   HONOR_KEYS,
@@ -186,7 +186,7 @@ export default function BagrutHonors() {
             fromLabel: label,
             backTo: location.pathname + location.search,
           }
-          navigate(`${base}/student/${s.student_id}`, { state })
+          navigate(studentPath(base, round, s.student_id), { state })
         }}
       />
 

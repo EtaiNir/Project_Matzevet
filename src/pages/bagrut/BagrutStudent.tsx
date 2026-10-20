@@ -11,6 +11,8 @@ import {
   parseBlockers,
   questionnaireLabel,
   SUBJECT_GROUPS,
+  studentPath,
+  studentUrlKey,
   TRACKING_FLAGS,
   type GradeRow,
   type RoundSubject,
@@ -36,7 +38,7 @@ type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
  * "בתהליך" פתוח ובולט. הקודם/הבא מדפדפים ברשימה שממנה הגעת.
  */
 export default function BagrutStudent() {
-  const { id = '' } = useParams()
+  const { id: param = '' } = useParams()
   const { data, index, base, round } = useBagrut()
   const navigate = useNavigate()
   const location = useLocation()
@@ -44,12 +46,19 @@ export default function BagrutStudent() {
   const nav = location.state as CardNavState | null
   const [tab, setTab] = useState<Tab>('summary')
 
+  // בכתובת — קוד, לא ת"ז (studentPath). קישור ישן עם ת"ז עדיין נפתח, ומוחלף לקוד
+  const byKey = useMemo(() => new Map(data.students.map((x) => [studentUrlKey(round, x.student_id), x.student_id])), [data.students, round])
+  const id = byKey.get(param) ?? (index.studentById.has(param) ? param : '')
+  useEffect(() => {
+    if (id && id === param) navigate(studentPath(base, round, id), { state: nav, replace: true })
+  }, [id, param, base, round, nav, navigate])
+
   const s = index.studentById.get(id)
   const ids = nav?.ids ?? data.students.map((x) => x.student_id)
   const pos = ids.indexOf(id)
   const go = (i: number) => {
     const next = ids[i]
-    if (next) navigate(`${base}/student/${next}`, { state: nav, replace: true })
+    if (next) navigate(studentPath(base, round, next), { state: nav, replace: true })
   }
 
   useEffect(() => {

@@ -455,6 +455,36 @@ export function classSortKey(c: string | null): string {
   return m ? `${m[1]}-${m[2].padStart(3, '0')}` : c
 }
 
+// ─────────────────────────────── כתובת כרטיס התלמיד ───────────────────────────────
+
+/**
+ * הכתובת של כרטיס תלמיד אינה מכילה ת"ז (20.10): `/student/<קוד>` במקום
+ * `/student/<ת"ז>`. שורת הכתובת, ההיסטוריה של הדפדפן וקישור שמועתק — כולם
+ * חשפו את המספר, לכל משתמש.
+ *
+ * הקוד: FNV-1a כפול על רשות + בית ספר + ת"ז — קבוע לאותו תלמיד באותו בית ספר,
+ * גם בין סבבים (קישור שנשמר ממשיך לעבוד אחרי הקליטה הבאה). ⚠️ זו הסתרה מעין
+ * מזדמנת, לא הצפנה: הקוד מחושב בדפדפן, ומי שיודע את הרשות ואת בית הספר יכול
+ * לנסות את כל מספרי הזהות ולמצוא אותו. החסימה האמיתית — במסד (decisions/020).
+ */
+function fnv1a(s: string, seed: number): number {
+  let h = seed >>> 0
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619) >>> 0
+  }
+  return h
+}
+
+export function studentUrlKey(round: Pick<BagrutRound, 'authority_code' | 'school_code'>, studentId: string): string {
+  const s = `${round.authority_code}:${round.school_code}:${studentId}`
+  return fnv1a(s, 2166136261).toString(36) + fnv1a(s, 0x9e3779b9).toString(36)
+}
+
+export function studentPath(base: string, round: Pick<BagrutRound, 'authority_code' | 'school_code'>, studentId: string): string {
+  return `${base}/student/${studentUrlKey(round, studentId)}`
+}
+
 export function displayName(s: BagrutStudent): string {
   return s.full_name ?? [s.first_name, s.last_name].filter(Boolean).join(' ') ?? s.student_id
 }
