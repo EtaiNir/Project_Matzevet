@@ -41,8 +41,9 @@ export default function IdVisibilityPanel() {
               >
                 <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${on ? 'right-0.5' : 'right-[1.125rem]'}`} />
               </button>
+              {/* המצב צמוד לשם — לא בקצה השורה: במסך רחב הוא נדד לעמודה השנייה ונראה שייך לה */}
               <span className="text-slate-700">{label}</span>
-              <span className={`mr-auto text-xs ${on ? 'text-emerald-700' : 'text-slate-500'}`}>{on ? 'רואה ת"ז' : 'מוסתרת'}</span>
+              <span className={`text-xs ${on ? 'text-emerald-700' : 'font-semibold text-slate-500'}`}>· {on ? 'רואה ת"ז' : 'ת"ז מוסתרת'}</span>
             </li>
           )
         })}
@@ -61,7 +62,7 @@ export default function IdVisibilityPanel() {
         הסתרה במסך ובייצוא בלבד — הנתון עדיין יוצא מהמסד למי שרואה את השורה. האכיפה במסד היא שלב נפרד.
       </p>
       {err && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{err}</p>}
-      <div className="mt-4 grid gap-6 sm:grid-cols-2">
+      <div className="mt-4 grid max-w-3xl gap-6 sm:grid-cols-2">
         {group('matzevet', 'מצבת תלמידים')}
         {group('bagrut', 'זכאות לבגרות')}
       </div>
