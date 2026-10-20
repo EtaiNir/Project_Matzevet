@@ -55,6 +55,8 @@ create trigger id_visibility_stamp before update on public.id_visibility
   for each row execute function public.id_visibility_stamp();
 
 -- ═══════════════════════════════════════════════════════════════
+-- ✅ הוחלה על המסד החי ב-20.10. נבדקה קודם — 6/6 (התרחישים למטה, כמשתמש מאומת
+-- רגיל וכמנהל־על). ברירת המחדל נשמרה: 10 שורות, כולן גלויות.
 -- בדיקה לפני החלה (בטרנזקציה שמגולגלת לאחור, כמשתמש מאומת):
 --   1. משתמש רגיל: select מחזיר 10 שורות; update → 0 שורות (מלכודת 21)
 --   2. מנהל־על: update visible=false ל-m_school → שורה אחת, updated_by = הוא
