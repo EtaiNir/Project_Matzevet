@@ -23,6 +23,7 @@ import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import CycleTab from './BagrutCycle'
 import EditableField, { EditGroup } from '@/components/bagrut/EditableField'
 import { setLastStudent } from '@/lib/lastStudent'
+import { maskId, useCanSeeIds } from '@/lib/idVisibility'
 import { computeHonors, HONOR_KEYS, HONOR_META } from '@/lib/bagrutHonors'
 
 type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
@@ -39,6 +40,7 @@ export default function BagrutStudent() {
   const { data, index, base, round } = useBagrut()
   const navigate = useNavigate()
   const location = useLocation()
+  const showIds = useCanSeeIds('bagrut')
   const nav = location.state as CardNavState | null
   const [tab, setTab] = useState<Tab>('summary')
 
@@ -131,7 +133,7 @@ export default function BagrutStudent() {
         >
           <span className="truncate font-bold text-slate-800">{displayName(s)}</span>
           <span className="shrink-0 text-xs text-slate-500">
-            כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{s.student_id}</span>
+            כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{showIds ? s.student_id : maskId(s.student_id)}</span>
           </span>
           {s.in_t2 && <StatusBadge kind={kind} />}
           <span className="mr-auto" />
@@ -178,7 +180,7 @@ export default function BagrutStudent() {
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-extrabold text-slate-800">{displayName(s)}</h1>
             <div className="text-sm text-slate-500">
-              כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{s.student_id}</span>
+              כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{showIds ? s.student_id : maskId(s.student_id)}</span>
               {s.track && <> · מגמת {s.track}</>}
               {s.missing_status && <> · {s.missing_status}</>}
             </div>

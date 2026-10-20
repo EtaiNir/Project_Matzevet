@@ -13,6 +13,7 @@ import {
   type HonorKey,
   type Honors,
 } from '@/lib/bagrutHonors'
+import { useCanSeeIds } from '@/lib/idVisibility'
 
 type Show = 'yes' | 'near' | 'all'
 const SHOW_LABELS: Record<Show, string> = { yes: 'עומדים בתנאים', near: 'חסר תנאי אחד', all: 'כל השכבה המסיימת' }
@@ -28,6 +29,7 @@ export default function BagrutHonors() {
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const showIds = useCanSeeIds('bagrut')
 
   const type = (HONOR_KEYS as string[]).includes(params.get('type') ?? '') ? (params.get('type') as HonorKey) : 'excellence'
   const show = (['yes', 'near', 'all'] as string[]).includes(params.get('show') ?? '') ? (params.get('show') as Show) : 'yes'
@@ -171,7 +173,7 @@ export default function BagrutHonors() {
       <BagrutTable
         key={type}
         rows={rows}
-        columns={columns}
+        columns={columns.filter((c) => showIds || c.key !== 'id')}
         rowKey={(s) => s.student_id}
         exportName={`בגרות_${round.school_name ?? round.school_code}_${label}`}
         initialSort={{ key: 'class', dir: 'asc' }}

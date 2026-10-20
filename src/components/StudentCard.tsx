@@ -3,10 +3,12 @@ import {
   ALL_FIELDS,
   FIELD_ORDER,
   PARENT_ID_FIELDS,
+  isFieldHidden,
   useFieldsVersion,
   type FieldGroup,
 } from '@/config/fields'
 import { isChecked } from '@/lib/filters'
+import { maskId } from '@/lib/idVisibility'
 
 type Row = Record<string, unknown>
 
@@ -66,7 +68,7 @@ export default function StudentCard({
           <div>
             <h2 className="text-2xl font-bold text-slate-800">{fullName || 'תלמיד'}</h2>
             <p className="text-sm text-slate-500">
-              ת.ז. {String(student['MISPAR_ZEHUT'] ?? '')} · תלמיד {index + 1} מתוך {rows.length}
+              ת.ז. {isFieldHidden('MISPAR_ZEHUT') ? maskId(student['MISPAR_ZEHUT']) : String(student['MISPAR_ZEHUT'] ?? '')} · תלמיד {index + 1} מתוך {rows.length}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -92,6 +94,25 @@ export default function StudentCard({
             </button>
           </div>
         </div>
+
+        {/* ת"ז מוסתרת (040): שדות ההורים אינם בכרטיס — אבל זיהוי האחים נשאר. ההשוואה
+            על המספר האמיתי, בלי להציג אותו */}
+        {isFieldHidden(PARENT_ID_FIELDS[0]) && PARENT_ID_FIELDS.some((f) => student[f]) && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-6 py-2 text-sm">
+            <span className="text-slate-500">זיהוי אחים:</span>
+            {PARENT_ID_FIELDS.map((f, i) =>
+              student[f] ? (
+                <button
+                  key={f}
+                  onClick={() => onFindSiblings(String(student[f]))}
+                  className="rounded-md bg-brand-50 px-2 py-0.5 font-medium text-brand-700 hover:bg-brand-100"
+                >
+                  אחים דרך הורה {i + 1}
+                </button>
+              ) : null,
+            )}
+          </div>
+        )}
 
         {/* גוף — קבוצות שדות */}
         <div className="thin-scrollbar grid gap-6 overflow-y-auto p-6 md:grid-cols-2">

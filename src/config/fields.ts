@@ -216,6 +216,15 @@ export const PRIMARY_KEY = 'MISPAR_ZEHUT'
 /** ת.ז. של גורמי קשר (הורים) — משמש לפונקציית זיהוי אחים (אפיון §5, תצורה 2). */
 export const PARENT_ID_FIELDS = ['GOREM_KESHER_1_ID', 'GOREM_KESHER_2_ID'] as const
 
+/**
+ * כל שדות ת"ז — של התלמיד ושל ההורים. רמת הרשאה שמנהל־על הסתיר לה ת"ז
+ * (מיגרציה 040, lib/idVisibility) אינה רואה אותם בכלל: setHiddenFields מוציא
+ * אותם מהרישום, ולכן הם נעלמים מהטבלה, מבורר השדות, מהסינון, מהפיבוטים,
+ * מהגרפים ומהייצוא — בלי לגעת בכל אחד מהם. הנתון עצמו נשאר בשורה (המפתח,
+ * זיהוי אחים).
+ */
+export const ID_FIELDS = ['MISPAR_ZEHUT', 'MISPAR_ZEHUT_KODEMET', ...PARENT_ID_FIELDS] as const
+
 /** הקבוצה שאליה משויכות כל העמודות שהמשתמש הוסיף. */
 export const EXTRA_GROUP: FieldGroup = 'נתונים תוספתיים'
 
@@ -239,6 +248,7 @@ function buildMap(fields: FieldDef[]): Record<string, FieldDef> {
 // ב-useFieldsVersion() ומכניס אותו ל-deps.
 
 let extraFields: FieldDef[] = []
+let hidden = new Set<string>()
 let version = 0
 const listeners = new Set<() => void>()
 
@@ -246,7 +256,8 @@ export let ALL_FIELDS: FieldDef[] = BASE_FIELDS
 let FIELD_MAP: Record<string, FieldDef> = buildMap(BASE_FIELDS)
 
 function rebuild(): void {
-  ALL_FIELDS = extraFields.length ? [...BASE_FIELDS, ...extraFields] : BASE_FIELDS
+  const base = hidden.size ? BASE_FIELDS.filter((f) => !hidden.has(f.key)) : BASE_FIELDS
+  ALL_FIELDS = extraFields.length ? [...base, ...extraFields] : base
   FIELD_MAP = buildMap(ALL_FIELDS)
   version += 1
   listeners.forEach((notify) => notify())
@@ -256,6 +267,18 @@ function rebuild(): void {
 export function registerExtraFields(defs: FieldDef[]): void {
   extraFields = defs.map((d) => ({ ...d, extra: true, group: EXTRA_GROUP }))
   rebuild()
+}
+
+/** שדות שהמשתמש אינו רואה (ת"ז — 040). רשימה ריקה = הכול גלוי */
+export function setHiddenFields(keys: readonly string[]): void {
+  const next = new Set(keys)
+  if (next.size === hidden.size && [...next].every((k) => hidden.has(k))) return
+  hidden = next
+  rebuild()
+}
+
+export function isFieldHidden(key: string): boolean {
+  return hidden.has(key)
 }
 
 export function clearExtraFields(): void {

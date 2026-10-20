@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import AuditLog from '@/components/admin/AuditLog'
+import IdVisibilityPanel from '@/components/admin/IdVisibilityPanel'
 import HomeLink from '@/components/HomeLink'
 import {
   fetchAuthorities,
@@ -238,6 +239,7 @@ export default function Admin() {
           </div>
         )}
 
+        <IdVisibilityPanel />
         <AuditLog />
       </main>
     </div>

@@ -31,6 +31,8 @@ import {
 } from '@/config/presets'
 import {
   PARENT_ID_FIELDS,
+  isFieldHidden,
+  useFieldsVersion,
   fieldLabel,
   registerExtraFields,
   clearExtraFields,
@@ -605,9 +607,13 @@ export default function Dashboard() {
    * העמודות בסדר התצוגה: תמהיל השדות, מסודר לפי מה שהמשתמש גרר. שדה
    * שנוסף מבורר השדות אחרי הגרירה מצטרף בסוף.
    */
+  // שדה מוסתר (ת"ז לרמה שאינה רואה אותה — 040) אינו מוצג ואינו מיוצא, גם אם
+  // הוא בתצורה או בסדר השמור
+  const fieldsVersion = useFieldsVersion()
   const currentFields = useMemo(
-    () => (fieldOrder ? orderByList(selectedFields, fieldOrder) : selectedFields),
-    [selectedFields, fieldOrder],
+    () => (fieldOrder ? orderByList(selectedFields, fieldOrder) : selectedFields).filter((k) => !isFieldHidden(k)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedFields, fieldOrder, fieldsVersion],
   )
 
   /** גרירת כותרת: משנה את סדר העמודות — וגם בייצוא, שהולך לפי אותו סדר */
@@ -655,7 +661,7 @@ export default function Dashboard() {
     const label = activeView
       ? `טבלה ייעודית «${activeView.name}»`
       : siblingParentId
-        ? `האחים של ת.ז. ${siblingParentId}`
+        ? (isFieldHidden(PARENT_ID_FIELDS[0]) ? 'האחים של ההורה שנבחר' : `האחים של ת.ז. ${siblingParentId}`)
         : `הסינון שבטבלה (${activeFilters.length} תנאים)`
     return {
       ids: results.map((r) => String(r['MISPAR_ZEHUT'] ?? '')).filter(Boolean),

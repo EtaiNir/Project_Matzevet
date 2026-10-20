@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useBagrut, type CardNavState } from './context'
+import { useCanSeeIds } from '@/lib/idVisibility'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import { StatusBadge } from '@/components/bagrut/ui'
 import { fmtDate, isFollowupDue, relDays } from '@/lib/bagrutCycle'
@@ -36,6 +37,8 @@ export default function BagrutStudents() {
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const location = useLocation()
+  // ת"ז מוסתרת לרמה של המשתמש (040) — בלי עמודה ובלי חיפוש לפיה
+  const showIds = useCanSeeIds('bagrut')
   const [saving, setSaving] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -103,10 +106,10 @@ export default function BagrutStudents() {
         if (c && c.active + c.done) return false
       }
       if (f.honor && !honors.get(s.student_id)?.results[f.honor as HonorKey]?.ok) return false
-      if (q && !(displayName(s).includes(q) || s.student_id.includes(q))) return false
+      if (q && !(displayName(s).includes(q) || (showIds && s.student_id.includes(q)))) return false
       return true
     })
-  }, [data, summaries, honors, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades, f.noplan, f.honor])
+  }, [showIds, data, summaries, honors, f.q, f.view, f.kind, f.grade, f.cls, f.flag, f.blocker, f.missing, f.weak, f.nogrades, f.noplan, f.honor])
 
   const toggle = async (s: BagrutStudent, flag: TrackingFlag) => {
     const cur = data.tracking.get(s.student_id)
@@ -324,7 +327,7 @@ export default function BagrutStudents() {
         <input
           value={f.q}
           onChange={(e) => set('q', e.target.value)}
-          placeholder="חיפוש שם או ת״ז"
+          placeholder={showIds ? "חיפוש שם או ת״ז" : "חיפוש שם"}
           className="w-44 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
         />
         {/* ברשימה של כיתה אחת (מהסרגל או מתמונת המצב) השכבה והכיתה כבר נקבעו —
@@ -375,7 +378,7 @@ export default function BagrutStudents() {
         // המיון ההתחלתי נקבע ברכיב פעם אחת — מעבר ל"מעקב השבוע" ובחזרה מתחיל אותו מחדש
         key={f.view === 'followup' ? 'followup' : 'list'}
         rows={rows}
-        columns={hideT2 ? columns.filter((c) => c.group !== 't2' && c.group !== 'honors') : columns}
+        columns={(hideT2 ? columns.filter((c) => c.group !== 't2' && c.group !== 'honors') : columns).filter((c) => showIds || c.key !== 'id')}
         rowKey={(s) => s.student_id}
         exportName={`בגרות_${round.school_name ?? round.school_code}_${label || 'תלמידים'}`}
         // "מעקב השבוע" — לפי המועד: מה שעבר קודם, אחר כך היום, ואז השבוע

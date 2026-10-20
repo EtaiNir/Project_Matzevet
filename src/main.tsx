@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { AuthProvider } from './context/AuthContext'
 import SessionGuard from './components/SessionGuard'
+import IdVisibilitySync from './components/IdVisibilitySync'
 import './index.css'
 
 createRoot(document.getElementById('root')!).render(
@@ -12,6 +13,7 @@ createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <App />
         <SessionGuard />
+        <IdVisibilitySync />
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,
