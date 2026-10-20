@@ -67,7 +67,7 @@ export default function BagrutHome() {
   )
 }
 
-/** השכבה המסיימת — לפי ניתוח הזכאות (T2). */
+/** השכבה המסיימת — לפי מנוע הזכאות (041), שמחושב מהציונים. */
 function GraduatingView() {
   const { data, index, round, base } = useBagrut()
   const navigate = useNavigate()
@@ -140,7 +140,7 @@ function GraduatingView() {
   return (
     <>
       <p className="-mt-3 text-sm text-slate-500">
-        תמונת הזכאות של שכבה {round.graduating_grade} ({grad.length} תלמידים), לפי ניתוח הזכאות. כל מספר כאן נפתח לרשימת התלמידים שמאחוריו.
+        תמונת הזכאות של שכבה {round.graduating_grade} ({grad.length} תלמידים), מחושבת מהציונים ומחוקת הזכאות. כל מספר כאן נפתח לרשימת התלמידים שמאחוריו.
       </p>
 
       {/* ── מדדים ── */}
@@ -424,7 +424,7 @@ const HONOR_PARTS: { key: 'yes' | 'near' | 'rest'; label: string; color: string 
 
 /**
  * אחוזי בגרות מצטיינת, טק וטק ללא אנגלית בשכבה המסיימת. החישוב — של אייל,
- * ב-lib/bagrutHonors (decisions/019): מעל ניתוח הזכאות, לא במקומו. לחיצה על
+ * ב-lib/bagrutHonors (decisions/019): מעל הזכאות המחושבת (041), לא במקומה. לחיצה על
  * מדד או על שורה במקרא פותחת את מסך "מצטיינת וטק" מסונן.
  */
 function HonorsCard() {
@@ -454,7 +454,7 @@ function HonorsCard() {
     <Card title="בגרות מצטיינת וטק — בשכבה המסיימת">
       <Legend
         items={HONOR_PARTS.map((p) => [p.color, p.label])}
-        note={`האחוזים — מתוך ${grad.length} תלמידי השכבה המסיימת · רק תלמיד זכאי לפי ניתוח הזכאות יכול לעמוד בתנאים · לחיצה פותחת את רשימת התלמידים`}
+        note={`האחוזים — מתוך ${grad.length} תלמידי השכבה המסיימת · רק תלמיד זכאי יכול לעמוד בתנאים · לחיצה פותחת את רשימת התלמידים`}
       />
       <div className="grid gap-6 sm:grid-cols-3">
         {HONOR_KEYS.map((k) => {

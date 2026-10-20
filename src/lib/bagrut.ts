@@ -94,6 +94,16 @@ export interface BagrutStudent {
   reinforced_subject: string | null
   total_units: string | null
   reason: string | null
+  /**
+   * מנוע הזכאות (מיגרציה 041, decisions/021). השדות שלמעלה — status, blockers,
+   * total_units… — **מחושבים** מהציונים, מחוקת הזכאות וממבנה הבגרות. ניתוח
+   * הזכאות המקורי של סבא נשמר כאן, להשוואה ולדגלים. null — הסבב עוד לא חושב.
+   */
+  t2_original: Partial<Record<T2Key, string | number | null>> | null
+  calc_at: string | null
+  calc_kind: 'eligible' | 'one_negative' | 'not_eligible' | null
+  /** סף "מלל" — סכום יח"ל מקצועות החובה של בית הספר */
+  core_required: number | null
 }
 
 // ─────────────────────────────── מונחים ───────────────────────────────
@@ -128,13 +138,18 @@ function plainDeep<T>(v: T): T {
   return v
 }
 
-const STUDENT_TEXT: (keyof BagrutStudent)[] = [
+const STUDENT_TEXT: T2Key[] = [
   'status', 'done_summary', 'grades_summary', 'blockers', 'intervention', 'one_negative_option',
   'compensation_pair', 'compensation_eligible', 'mother_tongue_status', 'reinforced_subject', 'total_units', 'reason',
 ]
 function plainStudent(s: BagrutStudent): BagrutStudent {
   const out = { ...s } as Record<string, unknown>
   for (const k of STUDENT_TEXT) out[k] = plainTerms(s[k] as string | null)
+  if (s.t2_original) {
+    const t: Record<string, unknown> = { ...s.t2_original }
+    for (const k of STUDENT_TEXT) if (typeof t[k] === 'string') t[k] = plainTerms(t[k] as string)
+    out.t2_original = t
+  }
   return out as unknown as BagrutStudent
 }
 
@@ -149,13 +164,18 @@ export function plainAction<A extends { title: string; detail?: string | null; s
  * ו"לפ T1" נכתב "לפי עיבוד הציונים": המשתמשים אינם מכירים את המונחים T1/T2
  * (פגישת 5.10). `short` — ערך קצר, מוצג בשורת התקציר.
  */
+export type T2Key =
+  | 'status' | 'done_summary' | 'grades_summary' | 'blockers' | 'intervention' | 'one_negative_option'
+  | 'compensation_pair' | 'compensation_eligible' | 'negatives_count' | 'mother_tongue_status'
+  | 'core_units' | 'reinforced_subject' | 'total_units' | 'reason'
+
 export interface T2Field {
-  key: keyof BagrutStudent
+  key: T2Key
   label: string
   short?: boolean
 }
 export const T2_FIELDS: T2Field[] = [
-  { key: 'status', label: 'סטטוס לזכאות לפי עיבוד הציונים', short: true },
+  { key: 'status', label: 'סטטוס לזכאות', short: true },
   { key: 'total_units', label: 'סה"כ יחידות זכאות', short: true },
   { key: 'core_units', label: 'סה"כ יחידות לתלמיד במקצועות המלל', short: true },
   { key: 'negatives_count', label: 'מספר שליליים', short: true },
@@ -183,13 +203,24 @@ export interface GradeRow {
 export interface SubjectRow {
   student_id: string
   subject_key: string
+  /** ציון סופי, מצטבר, משקל, מצב — מחושבים מציוני השאלונים (041). המקור — t1_original */
   final_grade: number | null
   cumulative_grade: number | null
   units: number | null
   questionnaires: string | null
   cumulative_weight: number | null
   completion_status: string | null
+  t1_original: { final_grade?: number | null; cumulative_grade?: number | null; cumulative_weight?: number | null; completion_status?: string | null } | null
 }
+
+const SUBJECT_COLS_BASE = 'student_id, subject_key, final_grade, cumulative_grade, units, questionnaires, cumulative_weight, completion_status'
+/**
+ * t1_original קיימת רק מ-041. לפני שהמיגרציה הוחלה — בלעדיה, כדי שהאתר והמסד
+ * לא יחייבו סדר פריסה (בקשה שנכשלה על העמודה עוברת לעמודות הישנות, פעם אחת).
+ */
+let subjectCols = `${SUBJECT_COLS_BASE}, t1_original`
+const missingEngineColumn = (e: unknown) => /t1_original/.test((e as Error)?.message ?? '')
+const GRADE_COLS = 'student_id, subject_key, questionnaire_code, grade, weight, weighted'
 
 export interface Tracking {
   student_id: string
@@ -230,6 +261,64 @@ export interface RoundData {
   actionCounts: Map<string, ActionCounts>
   /** עריכות ידניות בסבב (מיגרציה 038) — האחרונה לכל שדה, לפי editKey */
   edits: Map<string, ManualEdit>
+  /** דגלים אדומים — איפה המנוע אינו מסכים עם הקבצים (041) */
+  flags: BagrutFlag[]
+}
+
+// ─────────────────────────────── דגלים אדומים (041) ───────────────────────────────
+
+/**
+ * מקום שבו מנוע הזכאות אינו מסכים עם הקבצים של סבא, **בנתון שלא נערך באתר**.
+ * t1 — מדד מקצוע מול עיבוד הציונים; t2 — פרט זכאות מול ניתוח הזכאות. המנוע
+ * מייצר ומוחק אותם בכל חישוב; האדם רק מסמן "נבדק" ומוסיף הערה.
+ */
+export interface BagrutFlag {
+  id: string
+  student_id: string
+  subject_key: string | null
+  field: string
+  source: 't1' | 't2'
+  source_value: string | null
+  calc_value: string | null
+  status: 'open' | 'reviewed'
+  note: string | null
+  reviewed_by_email: string | null
+  reviewed_at: string | null
+  updated_at: string
+}
+
+const FLAG_COLS = 'id, student_id, subject_key, field, source, source_value, calc_value, status, note, reviewed_by_email, reviewed_at, updated_at'
+
+export const FLAG_FIELD_LABELS: Record<string, string> = {
+  status: 'סטטוס זכאות',
+  total_units: 'סה"כ יח"ל',
+  core_units: 'יח"ל מלל',
+  negatives_count: 'מספר שליליים',
+  blockers: 'סוגי החסמים',
+  final_grade: 'ציון סופי',
+  cumulative_grade: 'ציון מצטבר',
+  completion_status: 'השלמת המקצוע',
+}
+
+export async function reviewFlag(flagId: string, reviewed: boolean, note: string): Promise<BagrutFlag> {
+  const { data, error } = await supabase.rpc('bagrut_review_flag', { p_flag: flagId, p_reviewed: reviewed, p_note: note })
+  if (error) throw new Error(`השמירה נכשלה: ${error.message}`)
+  return data as BagrutFlag
+}
+
+/** חישוב מחדש של סבב שלם — מנהל־על (סבב שנקלט לפני המנוע, או אחרי שינוי במצפן) */
+export async function recomputeRound(roundId: string): Promise<{ students: number; flags: number }> {
+  const { data, error } = await supabase.rpc('bagrut_recompute_round', { p_round: roundId })
+  if (error) {
+    if (error.code === 'PGRST202') throw new Error('מנוע הזכאות עדיין לא הופעל במסד (מיגרציה 041)')
+    throw new Error(`החישוב נכשל: ${error.message}`)
+  }
+  return data as { students: number; flags: number }
+}
+
+/** הסבב חושב במנוע? (סבב שנקלט בגרסה ישנה של הטעינה — לא) */
+export function roundComputed(d: Pick<RoundData, 'students'>): boolean {
+  return d.students.filter((s) => s.in_t2).every((s) => s.calc_at != null)
 }
 
 // ─────────────────────────────── עריכה ידנית (משימה 7) ───────────────────────────────
@@ -261,21 +350,12 @@ export const editKey = (e: EditRef) =>
   `${e.target}|${e.studentId}|${e.subjectKey ?? ''}|${e.questionnaireCode ?? ''}|${e.field}`
 
 /**
- * מי רשאי לערוך — לתצוגה בלבד (כפתור העריכה). האכיפה ב-may_edit_bagrut_data
- * במסד (מלכודת 16, מיגרציה 038), לפי מה שסומן (037): רכז בגרויות — הכול;
- * שכבות שסומנו — כל שדה (המסד בודק שהתלמיד בשכבה); מקצועות שסומנו — רק שדה של
- * מקצוע שלו, לא ניתוח הזכאות. כיתות (מחנך) ומועצתי — לא עורכים.
+ * מי מעדכן ציונים — מנהל־על ורכז/ת בגרויות, כולל מנהל/ת בית ספר (אייל, 20.10).
+ * לתצוגה בלבד (כפתור העריכה); האכיפה ב-may_edit_bagrut_grades במסד (מלכודת 16,
+ * מיגרציה 041). פרטי הזכאות אינם נערכים — הם מחושבים מהציונים.
  */
-export function canEditBagrutData(
-  profile: { role?: string; bagrut_role?: string | null; bagrut_grades?: string[]; bagrut_subject_keys?: string[] } | null,
-  subjectKey: string | null,
-): boolean {
-  if (!profile) return false
-  if (profile.role === 'super_admin') return true
-  if (profile.bagrut_role === 'coordinator') return true
-  if (!profile.bagrut_role || profile.bagrut_role === 'council') return false
-  if (profile.bagrut_grades?.length) return true
-  return subjectKey != null && (profile.bagrut_subject_keys ?? []).includes(subjectKey)
+export function canEditBagrutGrades(profile: { role?: string; bagrut_role?: string | null } | null): boolean {
+  return profile?.role === 'super_admin' || profile?.bagrut_role === 'coordinator'
 }
 
 export interface EditResult {
@@ -284,7 +364,10 @@ export interface EditResult {
   edit: ManualEdit | null
 }
 
-/** עריכת שדה אחד. העריכה נמחקת בקליטת הסבב הבא — כך במסך, כך במסד. */
+/**
+ * עדכון שדה אחד — ציון שאלון, משקל, יח"ל. המסד מחשב מחדש באותה טרנזקציה את
+ * המקצוע, את הזכאות ואת המצטיינת/טק של התלמיד (041). העדכון נמחק בקליטת הסבב הבא.
+ */
 export async function editBagrutField(round: BagrutRound, ref: EditRef, value: string): Promise<EditResult> {
   const { data, error } = await supabase.rpc('bagrut_edit_field', {
     p_round: round.id, p_student: ref.studentId, p_target: ref.target,
@@ -295,7 +378,7 @@ export async function editBagrutField(round: BagrutRound, ref: EditRef, value: s
   if (error) {
     // הפונקציה עוד לא במסד — אומרים את זה, לא "שגיאה" (מלכודת 15)
     if (error.code === 'PGRST202' || /bagrut_edit_field/.test(error.message)) {
-      throw new Error('העריכה הידנית עדיין לא הופעלה במסד (מיגרציה 038)')
+      throw new Error('עדכון הציונים עדיין לא הופעל במסד (מיגרציה 041)')
     }
     throw new Error(`השמירה נכשלה: ${error.message}`)
   }
@@ -339,9 +422,9 @@ export interface ActionCounts {
 // ─────────────────────────────── סיווג ───────────────────────────────
 
 /**
- * סטטוס הזכאות מגיע מניתוח הזכאות (T2) כטקסט חופשי ("זכאי לפי T1 — בכפוף
- * לדרישות פנימיות"). כאן הוא הופך לאחד משלושה סטטוסים — ושם, ולא ברכיבים,
- * יושבת ההחלטה איך לקרוא כל נוסח.
+ * סטטוס הזכאות — מהמנוע (calc_kind, 041). בסבב שעוד לא חושב — מניתוח הזכאות
+ * (T2), שבו הוא טקסט חופשי ("זכאי לפי T1 — בכפוף לדרישות פנימיות"). כאן הוא
+ * הופך לאחד משלושה סטטוסים — ושם, ולא ברכיבים, יושבת ההחלטה איך לקרוא כל נוסח.
  *
  * שלושה בלבד (פגישת 5.10): אין זכאות · זכאי · זכאי במסלול שלילי אחד.
  * "בכפוף לדרישות פנימיות" נכלל ב"זכאי" — דרישות פנימיות אינן נמדדות כאן,
@@ -364,7 +447,10 @@ export const ELIGIBILITY_META: Record<
 }
 
 export function eligibilityKind(s: BagrutStudent): EligibilityKind {
-  if (!s.in_t2 || !s.status) return 'not_graduating'
+  if (!s.in_t2) return 'not_graduating'
+  // מנוע הזכאות (041) — הקביעה עצמה, לא פענוח של טקסט
+  if (s.calc_kind) return s.calc_kind
+  if (!s.status) return 'not_graduating'
   const t = s.status
   if (t.includes('אין זכאות')) return 'not_eligible'
   if (t.includes('שלילי אחד')) return 'one_negative'
@@ -602,11 +688,20 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     step('תלמידים', fetchAll<BagrutStudent>((f, t) =>
       supabase.from('bagrut_students').select('*').eq('round_id', rid).order('student_id').range(f, t))),
     step('ציונים', fetchAll<GradeRow>((f, t) =>
-      supabase.from('bagrut_grades').select('student_id, subject_key, questionnaire_code, grade, weight, weighted')
+      supabase.from('bagrut_grades').select(GRADE_COLS)
         .eq('round_id', rid).order('student_id').order('subject_key').order('questionnaire_code').range(f, t))),
-    step('מדדי מקצוע', fetchAll<SubjectRow>((f, t) =>
-      supabase.from('bagrut_subjects').select('student_id, subject_key, final_grade, cumulative_grade, units, questionnaires, cumulative_weight, completion_status')
-        .eq('round_id', rid).order('student_id').order('subject_key').range(f, t))),
+    step('מדדי מקצוע', (async () => {
+      const q = () => fetchAll<SubjectRow>((f, t) =>
+        supabase.from('bagrut_subjects').select(subjectCols)
+          .eq('round_id', rid).order('student_id').order('subject_key').range(f, t).returns<SubjectRow[]>())
+      try {
+        return await q()
+      } catch (e) {
+        if (!missingEngineColumn(e) || subjectCols === SUBJECT_COLS_BASE) throw e
+        subjectCols = SUBJECT_COLS_BASE
+        return q()
+      }
+    })()),
     step('מעקב', fetchAll<Tracking>((f, t) =>
       supabase.from('bagrut_tracking').select(TRACKING_COLS)
         .eq('authority_code', round.authority_code).eq('school_code', round.school_code)
@@ -625,7 +720,7 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     actionCounts.set(a.student_id, c)
   }
 
-  const edits = await loadEdits(rid)
+  const [edits, flags] = await Promise.all([loadEdits(rid), loadFlags(rid)])
 
   const codes = [...new Set([...program.map((p) => p.questionnaire_code), ...grades.map((g) => g.questionnaire_code)])]
   const qs = await step('אינדקס השאלונים', fetchAll<Questionnaire>((f, t) =>
@@ -643,6 +738,48 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     tracking: new Map(tracking.map((t) => [t.student_id, t])),
     actionCounts,
     edits,
+    flags,
+  }
+}
+
+/** דגלים אדומים. לפני 041 (אין טבלה) — אין דגלים, לא שגיאה. */
+async function loadFlags(roundId: string): Promise<BagrutFlag[]> {
+  try {
+    return await fetchAll<BagrutFlag>((f, t) =>
+      supabase.from('bagrut_flags').select(FLAG_COLS).eq('round_id', roundId).order('student_id').range(f, t))
+  } catch {
+    return []
+  }
+}
+
+export interface StudentRows {
+  student: BagrutStudent
+  subjectRows: SubjectRow[]
+  grades: GradeRow[]
+  flags: BagrutFlag[]
+}
+
+/**
+ * כל השורות של תלמיד אחד — אחרי עדכון ציון. המסד כבר חישב מחדש הכול (041),
+ * ולכן קוראים מה שהוא שמר (מלכודת 26), לא מחשבים בדפדפן.
+ */
+export async function fetchStudentRows(round: BagrutRound, studentId: string): Promise<StudentRows> {
+  const rid = round.id
+  const [st, sub, gr, fl] = await Promise.all([
+    supabase.from('bagrut_students').select('*').eq('round_id', rid).eq('student_id', studentId).single(),
+    supabase.from('bagrut_subjects').select(subjectCols).eq('round_id', rid).eq('student_id', studentId).order('subject_key').returns<SubjectRow[]>(),
+    supabase.from('bagrut_grades').select(GRADE_COLS).eq('round_id', rid).eq('student_id', studentId)
+      .order('subject_key').order('questionnaire_code'),
+    supabase.from('bagrut_flags').select(FLAG_COLS).eq('round_id', rid).eq('student_id', studentId),
+  ])
+  if (st.error) throw new Error(`טעינת התלמיד מחדש נכשלה: ${st.error.message}`)
+  if (sub.error) throw new Error(`טעינת המקצועות מחדש נכשלה: ${sub.error.message}`)
+  if (gr.error) throw new Error(`טעינת הציונים מחדש נכשלה: ${gr.error.message}`)
+  return {
+    student: plainStudent(st.data as BagrutStudent),
+    subjectRows: sub.data ?? [],
+    grades: (gr.data ?? []) as GradeRow[],
+    flags: fl.error ? [] : ((fl.data ?? []) as BagrutFlag[]),
   }
 }
 
@@ -688,8 +825,8 @@ export async function saveTracking(
 // ─────────────────────────────── מחזור ההתערבות ───────────────────────────────
 //
 // תוכנית פעולה ויומן מעקב לתלמיד (מיגרציה 029, docs/bagrut-intervention-design.md).
-// לפי בית ספר + ת"ז, בלי סבב — כמו המעקב. ⚠️ זכאות נקבעת רק לפי T2
-// (decisions/014 §8): פעולה מטפלת בפריט מההתערבות של T2, ואינה מבטיחה זכאות.
+// לפי בית ספר + ת"ז, בלי סבב — כמו המעקב. פעולה מטפלת בפריט מההתערבות שמנוע
+// הזכאות מפיק (041), ואינה מבטיחה זכאות.
 
 export interface BagrutAction {
   id: string

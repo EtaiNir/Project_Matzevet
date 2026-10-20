@@ -17,7 +17,7 @@ import {
   type GradeRow,
   type RoundSubject,
   type SubjectRow,
-  canEditBagrutData,
+  canEditBagrutGrades,
 } from '@/lib/bagrut'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CompletionMark, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
@@ -375,7 +375,7 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
 
 // ─────────────────────────────── מצטיינת וטק ───────────────────────────────
 
-/** בגרות מצטיינת וטק — מחושבות אצלנו מעל ניתוח הזכאות (decisions/019) */
+/** בגרות מצטיינת וטק — מחושבות אצלנו מעל הזכאות המחושבת (decisions/019, 041) */
 function HonorsCard({ sid }: { sid: string }) {
   const { index } = useBagrut()
   const h = computeHonors(index, index.studentById.get(sid)!)
@@ -425,14 +425,15 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
   const order = index.questionnairesBySubject.get(sub.subject_key) ?? []
   const rows = [...grades].sort((a, b) => order.indexOf(a.questionnaire_code) - order.indexOf(b.questionnaire_code))
   const tone = gradeTone(m?.final_grade ?? m?.cumulative_grade)
-  // עריכה ידנית (משימה 7): מדד מקצוע — רק כשיש לו שורה בסבב; ציון שאלון — לכל שורה
+  // עדכון (041): ציון ומשקל של שאלון, ויח"ל המקצוע. המצטבר, הסופי והמצב — מחושבים
+  // מהשאלונים; ציון סופי ידני — רק במקצוע בלי שאלונים. הכול נבדק שוב במסד.
   const subRef = (field: string) => ({ target: 'subject' as const, studentId: sid, subjectKey: sub.subject_key, field })
   const gradeRef = (g: GradeRow, field: string) => ({ target: 'grade' as const, studentId: sid, subjectKey: sub.subject_key, questionnaireCode: g.questionnaire_code, field })
   const border = !passed && tone === 'fail' ? 'border-rose-200' : !passed && tone === 'blocked' ? 'border-orange-300' : comp === 'progress' ? 'border-amber-200' : 'border-slate-200'
 
   return (
-    // עריכה ידנית לכל הריבוע — עיפרון אחד בפינה (אייל, 18.10)
-    <EditGroup allowed={canEditBagrutData(profile, sub.subject_key)}>
+    // עדכון לכל הריבוע — עיפרון אחד בפינה (אייל, 18.10)
+    <EditGroup allowed={canEditBagrutGrades(profile)}>
     {({ toggle, actions }) => (
     <div className={`rounded-2xl border bg-white shadow-sm ${border}`}>
       {/* האריח תמיד פתוח — בלי חץ לקיפול (אייל, 6.10) */}
@@ -448,13 +449,13 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
             // אין עדיין ציון סופי — הציון המשוקלל המצטבר הוא המספר הבולט
             <>
               <div className="text-xl font-extrabold tabular-nums text-slate-800">
-                <EditableField edit={subRef('cumulative_grade')} value={m.cumulative_grade} numeric>{fmt(m.cumulative_grade)}</EditableField>
+                <EditableField readOnly edit={subRef('cumulative_grade')} value={m.cumulative_grade}>{fmt(m.cumulative_grade)}</EditableField>
               </div>
               <div className="text-[11px] text-slate-400">משוקלל מצטבר</div>
             </>
           ) : (
             m ? (
-              <EditableField edit={subRef('final_grade')} value={m.final_grade} numeric><Grade value={m.final_grade ?? null} strong /></EditableField>
+              <EditableField readOnly={rows.length > 0} edit={subRef('final_grade')} value={m.final_grade} numeric><Grade value={m.final_grade ?? null} strong /></EditableField>
             ) : (
               <Grade value={null} strong />
             )
@@ -480,18 +481,24 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
                 </td>
                 <td className="text-center"><EditableField edit={gradeRef(g, 'grade')} value={g.grade} numeric><Grade value={g.grade} boxed /></EditableField></td>
                 <td className="text-center text-xs tabular-nums text-slate-500"><EditableField edit={gradeRef(g, 'weight')} value={g.weight} percent>{g.weight != null ? `${Math.round(g.weight * 100)}%` : ''}</EditableField></td>
-                <td className="text-center font-semibold tabular-nums text-slate-700"><EditableField edit={gradeRef(g, 'weighted')} value={g.weighted} numeric>{fmt(g.weighted, 1)}</EditableField></td>
+                <td className="text-center font-semibold tabular-nums text-slate-700"><EditableField readOnly edit={gradeRef(g, 'weighted')} value={g.weighted}>{fmt(g.weighted, 1)}</EditableField></td>
               </tr>
             ))}
           </tbody>
         </table>
         {m && (
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span>משקל מצטבר <EditableField edit={subRef('cumulative_weight')} value={m.cumulative_weight} percent>{m.cumulative_weight != null ? `${Math.round(m.cumulative_weight * 100)}%` : '—'}</EditableField></span>
-            <span>ציון מצטבר <EditableField edit={subRef('cumulative_grade')} value={m.cumulative_grade} numeric>{fmt(m.cumulative_grade) || '—'}</EditableField></span>
+            <span>משקל מצטבר <EditableField readOnly edit={subRef('cumulative_weight')} value={m.cumulative_weight} percent>{m.cumulative_weight != null ? `${Math.round(m.cumulative_weight * 100)}%` : '—'}</EditableField></span>
+            <span>ציון מצטבר <EditableField readOnly edit={subRef('cumulative_grade')} value={m.cumulative_grade}>{fmt(m.cumulative_grade) || '—'}</EditableField></span>
             <span>יח״ל <EditableField edit={subRef('units')} value={m.units} numeric>{m.units ?? '—'}</EditableField></span>
-            <span>מצב <EditableField edit={subRef('completion_status')} value={m.completion_status}>{m.completion_status ?? '—'}</EditableField></span>
+            <span>מצב <EditableField readOnly edit={subRef('completion_status')} value={m.completion_status}>{m.completion_status ?? '—'}</EditableField></span>
           </div>
+        )}
+        {/* הציון הסופי מחושב מהשאלונים (041). שונה ממה שהגיע בעיבוד הציונים — אומרים */}
+        {m?.t1_original && m.t1_original.final_grade !== undefined && (m.t1_original.final_grade ?? null) !== (m.final_grade ?? null) && (
+          <p className="mt-1 text-xs text-amber-700">
+            בעיבוד הציונים: ציון סופי {m.t1_original.final_grade ?? 'אין'} · מחושב עכשיו: {m.final_grade ?? 'אין'}
+          </p>
         )}
         {actions}
       </div>

@@ -1055,6 +1055,22 @@ def main():
                                       values %s on conflict (authority_code, school_code, student_id)
                                       do nothing""",
                                [tuple({**t, "authority_code": code}[k] for k in tcols) for t in tracking])
+
+            # מנוע הזכאות (מיגרציה 041): מחשב את המקצועות, הזכאות והמצטיינת/טק מהציונים,
+            # שומר את ניתוח הזכאות המקורי להשוואה, ומרים דגלים — באותה טרנזקציה. מסד
+            # בלי 041 — מדלגים, והאתר מציג את ניתוח הזכאות כפי שהגיע.
+            c.execute("savepoint engine")
+            try:
+                c.execute("select public.bagrut_recompute_round(%s)", (rid,))
+                engine = c.fetchone()[0]
+                c.execute("release savepoint engine")
+                report["engine"] = engine
+                print(f"  מנוע הזכאות: {engine.get('students')} תלמידים חושבו, {engine.get('flags')} דגלים אדומים")
+            except psycopg2.Error as e:
+                if e.pgcode != "42883":  # undefined_function — כל שגיאה אחרת עוצרת את הטעינה
+                    raise
+                c.execute("rollback to savepoint engine")
+                print("  ⚠ מנוע הזכאות (מיגרציה 041) אינו במסד — הזכאות נשארת כפי שהגיעה")
         pg.commit()
         report["round_id"] = str(rid)
         write_report(a.report_json, report)
