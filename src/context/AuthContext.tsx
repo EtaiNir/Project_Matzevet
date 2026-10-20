@@ -124,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false)
           return
         }
-        if (!remaining()) startSession()
+        if (remaining() == null) startSession()
       }
       setSession(data.session)
       if (data.session) {
@@ -135,7 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      if (event === 'SIGNED_IN' && !remaining()) startSession()
+      if (event === 'SIGNED_IN' && remaining() == null) startSession()
       if (event === 'SIGNED_OUT') clearSessionClock()
       setSession(newSession)
 
