@@ -13,7 +13,9 @@ import {
   createLogEntry,
   deleteAction,
   deleteLogEntry,
+  analysisKind,
   eligibilityKind,
+  ELIGIBILITY_META,
   fetchLatestAi,
   fetchStudentCycle,
   requestAi,
@@ -31,7 +33,7 @@ import {
 } from '@/lib/bagrut'
 import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
-import { saveLogPdf } from '@/lib/printLog'
+import { saveBriefPdf, saveLogPdf, type BriefInput } from '@/lib/printLog'
 
 /**
  * לשונית המעקב כמחזור התערבות — מצב → תוכנית → מעקב
@@ -114,7 +116,7 @@ export default function CycleTab({ sid }: { sid: string }) {
         ))}
       </div>
       {inner === 'plan' && <PlanView sid={sid} actions={actions} onActions={changeActions} ai={ai} onAi={setAi} />}
-      {inner === 'log' && <LogView sid={sid} log={log} onLog={setLog} />}
+      {inner === 'log' && <LogView sid={sid} log={log} onLog={setLog} actions={actions} ai={ai} onAi={setAi} />}
     </div>
   )
 }
@@ -731,7 +733,15 @@ function ManualAction({ sid, onCancel, onSaved }: { sid: string; onCancel: () =>
 
 // ─────────────────────────────── יומן מעקב ───────────────────────────────
 
-function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLog: (l: BagrutLogEntry[]) => void }) {
+function LogView({ sid, log, onLog, actions, ai, onAi }: {
+  sid: string
+  log: BagrutLogEntry[]
+  onLog: (l: BagrutLogEntry[]) => void
+  /** לסיכום ותוכנית: התוכנית וניתוח ה-AI שבמסך — וההצעות שייווצרו חוזרות אליו */
+  actions: BagrutAction[]
+  ai: AiState
+  onAi: (a: AiState) => void
+}) {
   const { round, data, index, canEditTracking, applyTracking } = useBagrut()
   const student = index.studentById.get(sid)
   // ייצוא ל-PDF — רשומה בודדת או כל היומן (משימה 4): ישר לחלון "שמירה בשם"
@@ -751,6 +761,81 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
       setErr((e as Error).message)
     } finally {
       setPdfBusy(null)
+    }
+  }
+  // ── סיכום ותוכנית (אייל, 21.10): הפגישה האחרונה + ניתוח הזכאות (הרקע לשיחה) +
+  // תוכנית ההתערבות. אין תוכנית (לא פעולות ולא הצעות) — ה-AI יוצר הצעות, כמו
+  // הכפתור "יצירת ניתוח": הן נשמרות ומופיעות בכרטיס התוכנית כהצעות לאישור, והמורה
+  // מחליט מה נכנס. במסמך — "הצעה — טרם אושרה".
+  const [briefStage, setBriefStage] = useState<string | null>(null)
+  const exportBrief = async () => {
+    setPdfBusy('brief')
+    setBriefStage('יוצר קובץ…')
+    setErr(null)
+    try {
+      await saveBriefPdf(student ? displayName(student) : sid, async (): Promise<BriefInput> => {
+        const approved = actions.filter((a) => a.status !== 'dismissed')
+        let plan = ai.plan
+        let generatedNow = false
+        if (!approved.length && !plan) {
+          setBriefStage('ה-AI בונה תוכנית — עד דקה…')
+          try {
+            plan = await requestAi<AiPlan>(round, sid, 'plan')
+          } catch (e) {
+            throw new Error(`יצירת התוכנית ב-AI נכשלה: ${(e as Error).message}`)
+          }
+          generatedNow = true
+          onAi({ ...ai, plan })
+          setBriefStage('יוצר קובץ…')
+        }
+        const taken = new Set(actions.map((a) => a.suggest_key).filter(Boolean))
+        const suggestions = (plan?.content.actions ?? []).filter((x) => !taken.has(aiKey(x)))
+        // "הפגישה האחרונה" — שיחה או ישיבה; "עדכון" רק כשאין אחרת. היומן ממוין מהחדש
+        const last = log.find((e) => e.kind !== 'update') ?? log[0] ?? null
+        const s = student
+        const kind = s ? eligibilityKind(s) : 'not_graduating'
+        const o = s?.override
+        return {
+          studentName: s ? displayName(s) : sid,
+          className: s?.class_name ?? null,
+          school: round.school_name ?? round.school_code,
+          roundLabel: `${round.season} ${round.school_year}`,
+          lastEntry: last,
+          eligibility: {
+            graduating: Boolean(s?.in_t2),
+            status: ELIGIBILITY_META[kind].label,
+            manual: s && o
+              ? `הסטטוס שונה ידנית${o.set_by_email ? ` ע"י ${o.set_by_email}` : ''} ב-${fmtDate(o.set_at)} · סיבה: ${o.reason} · בניתוח הזכאות: ${ELIGIBILITY_META[analysisKind(s)].label}`
+              : null,
+            // הסטטוס כבר בראש הפרק; שאר השדות — כפי שהגיעו, ריק נשאר ריק
+            fields: T2_FIELDS.filter((f) => f.key !== 'status').map((f) => {
+              const v = s?.[f.key]
+              return { label: f.label, value: v == null || String(v).trim() === '' ? null : String(v), short: Boolean(f.short) }
+            }),
+          },
+          plan: {
+            approved: approved
+              .sort((a, b) => (a.status === b.status ? a.created_at.localeCompare(b.created_at) : a.status === 'active' ? -1 : 1))
+              .map((a) => ({
+                title: a.title, detail: a.detail, status: a.status === 'done' ? 'done' : 'active', actionType: a.action_type,
+                owner: a.owner, due: a.due_label, requiredGrade: a.required_grade, outcome: a.outcome,
+              })),
+            suggestions: suggestions.map((x) => ({
+              title: x.title, why: x.why || null, how: x.how || null,
+              subject: x.subject ? `${x.subject}${x.questionnaire_code ? ` · ${x.questionnaire_code}` : ''}` : null,
+              owner: x.owner || null, requiredGrade: x.required_grade,
+            })),
+            aiNote: plan?.content.note || null,
+            aiAt: plan?.created_at ?? null,
+            generatedNow,
+          },
+        }
+      })
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setPdfBusy(null)
+      setBriefStage(null)
     }
   }
   const empty = { kind: 'student' as LogKind, happened_on: todayIso(), participants: '', summary: '', agreements: '', next_step: '', next_followup: '' }
@@ -824,19 +909,29 @@ function LogView({ sid, log, onLog }: { sid: string; log: BagrutLogEntry[]; onLo
       )}
 
       <div className={`flex flex-col gap-3 ${canEditTracking ? 'lg:col-span-3' : 'lg:col-span-5'}`}>
-        {log.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">{log.length} רשומות</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {log.length > 0 && <span className="text-xs text-slate-500">{log.length} רשומות</span>}
+          <span className="mr-auto" />
+          {/* שני מסמכים (אייל, 21.10): היומן כולו — כמו שהיה; סיכום ותוכנית — לשיחה */}
+          {log.length > 0 && (
             <button
               disabled={pdfBusy !== null}
               onClick={() => exportPdf(log, 'all')}
-              title="שמירת כל היומן כקובץ PDF"
-              className="mr-auto rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-sky-400 hover:text-sky-800 disabled:opacity-50"
+              title="שמירת כל היומן כקובץ PDF — כל הרשומות, מהחדשה לישנה"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:border-sky-400 hover:text-sky-800 disabled:opacity-50"
             >
               {pdfBusy === 'all' ? 'יוצר קובץ…' : 'ייצוא היומן ל-PDF'}
             </button>
-          </div>
-        )}
+          )}
+          <button
+            disabled={pdfBusy !== null}
+            onClick={exportBrief}
+            title="הפגישה האחרונה, ניתוח הזכאות ותוכנית ההתערבות במסמך אחד. אין תוכנית — ה-AI יוצר הצעות, והן נשמרות גם בכרטיס התוכנית לאישור"
+            className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 hover:border-sky-500 hover:bg-sky-100 disabled:opacity-50"
+          >
+            {pdfBusy === 'brief' ? briefStage ?? 'יוצר קובץ…' : 'סיכום ותוכנית ל-PDF'}
+          </button>
+        </div>
         {err && !canEditTracking && <p className="text-sm text-rose-700">{err}</p>}
         {log.length === 0 ? (
           <Card><p className="text-sm text-slate-400">עוד אין רשומות ביומן. אחרי שיחה עם התלמיד — כתבו מה עלה, על מה הוסכם, ומתי המעקב הבא.</p></Card>
