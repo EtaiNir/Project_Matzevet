@@ -14,6 +14,7 @@ import {
   type BagrutStudent,
   type GradeRow,
   type SubjectRow,
+  studentPath,
 } from '@/lib/bagrut'
 
 interface Row {
@@ -199,7 +200,7 @@ export default function BagrutSubject() {
           storageKey="subject"
           onRowClick={(r, _i, sorted) => {
             const state: CardNavState = { ids: sorted.map((x) => x.s.student_id), fromLabel: subject.subject_name, backTo: location.pathname }
-            navigate(`${base}/student/${r.s.student_id}`, { state })
+            navigate(studentPath(base, round, r.s.student_id), { state })
           }}
         />
       </div>

@@ -146,7 +146,7 @@ export default function Home() {
     })
   }, [access.bagrut, codes])
 
-  // ── ניהול תקציב (020): הכרטסת האחרונה לכל רשות, וקליטות שמחכות לטיפול
+  // ── ניהול תקציב (022): הכרטסת האחרונה לכל רשות, וקליטות שמחכות לטיפול
   useEffect(() => {
     if (codes == null) return
     if (!access.budget || !codes.length) return setBudget({ rows: [], todos: [] })

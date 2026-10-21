@@ -22,7 +22,7 @@ const STATUS: Record<BudgetUpload['status'], { text: string; tone: string }> = {
 const KIND_OPTIONS: BudgetKind[] = ['cards', 'actions', 'orders', 'unknown']
 
 /**
- * קליטת קובצי התקציב — דוחות EPR ו-ZIP מיתר (החלטה 020 §5).
+ * קליטת קובצי התקציב — דוחות EPR ו-ZIP מיתר (החלטה 022 §5).
  *
  * בדפוס קליטת הגנים: העלאה → הסוכן מזהה כל דוח ומציע התאמת כותרות → אישור
  * כאן → טעינה. התבנית שאושרה נשמרת, וקובץ באותן כותרות נקלט בפעם הבאה

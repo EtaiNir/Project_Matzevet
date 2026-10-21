@@ -15,6 +15,7 @@ import {
   type EligibilityKind,
 } from '@/lib/bagrut'
 import { Card, Donut, KIND_ORDER, Kpi, StackedBar, TONE, type Segment } from '@/components/bagrut/ui'
+import { HONOR_KEYS, HONOR_META, honorsMap, type HonorKey } from '@/lib/bagrutHonors'
 
 /**
  * "תמונת מצב" — הדף הראשון במודול. עונה על "איפה אנחנו עומדים?" במבט
@@ -66,7 +67,7 @@ export default function BagrutHome() {
   )
 }
 
-/** השכבה המסיימת — לפי ניתוח הזכאות (T2). */
+/** השכבה המסיימת — לפי מנוע הזכאות (041), שמחושב מהציונים. */
 function GraduatingView() {
   const { data, index, round, base } = useBagrut()
   const navigate = useNavigate()
@@ -139,7 +140,7 @@ function GraduatingView() {
   return (
     <>
       <p className="-mt-3 text-sm text-slate-500">
-        תמונת הזכאות של שכבה {round.graduating_grade} ({grad.length} תלמידים), לפי ניתוח הזכאות. כל מספר כאן נפתח לרשימת התלמידים שמאחוריו.
+        תמונת הזכאות של שכבה {round.graduating_grade} ({grad.length} תלמידים), מחושבת מהציונים ומחוקת הזכאות. כל מספר כאן נפתח לרשימת התלמידים שמאחוריו.
       </p>
 
       {/* ── מדדים ── */}
@@ -224,6 +225,8 @@ function GraduatingView() {
           )}
         </Card>
       </div>
+
+      <HonorsCard />
 
       {/* ── מקצועות ── */}
       <Card title={`השלמת מקצועות — שכבה ${round.graduating_grade ?? ''}`}>
@@ -412,6 +415,82 @@ const PROGRESS_ITEMS: [string, string][] = [
 ]
 
 /** מקרא אחיד לכל כרטיס בדף: נקודות צבע, ומתחתן שורה שמסבירה מה כל מספר. */
+// ── בגרות מצטיינת וטק — טבעת לכל מדד, מתוך תלמידי השכבה המסיימת
+const HONOR_PARTS: { key: 'yes' | 'near' | 'rest'; label: string; color: string }[] = [
+  { key: 'yes', label: 'עומדים בתנאים', color: '#10b981' },
+  { key: 'near', label: 'חסר תנאי אחד', color: '#f59e0b' },
+  { key: 'rest', label: 'לא עומדים', color: '#cbd5e1' },
+]
+
+/**
+ * אחוזי בגרות מצטיינת, טק וטק ללא אנגלית בשכבה המסיימת. החישוב — של אייל,
+ * ב-lib/bagrutHonors (decisions/019): מעל הזכאות המחושבת (041), לא במקומה. לחיצה על
+ * מדד או על שורה במקרא פותחת את מסך "מצטיינת וטק" מסונן.
+ */
+function HonorsCard() {
+  const { data, index, base } = useBagrut()
+  const navigate = useNavigate()
+  const grad = useMemo(() => data.students.filter((s) => s.in_t2), [data.students])
+  const counts = useMemo(() => {
+    const honors = honorsMap(index, grad)
+    const out = {} as Record<HonorKey, { yes: number; near: number; rest: number }>
+    for (const k of HONOR_KEYS) {
+      let yes = 0
+      let near = 0
+      for (const s of grad) {
+        const r = honors.get(s.student_id)?.results[k]
+        if (r?.ok) yes++
+        else if (r?.missing === 1) near++
+      }
+      out[k] = { yes, near, rest: grad.length - yes - near }
+    }
+    return out
+  }, [index, grad])
+  if (!grad.length) return null
+  const pct = (n: number) => `${Math.round((n / grad.length) * 100)}%`
+  const open = (k: HonorKey, show: 'yes' | 'near' | 'all') => navigate(`${base}/honors?type=${k}&show=${show}`)
+
+  return (
+    <Card title="בגרות מצטיינת וטק — בשכבה המסיימת">
+      <Legend
+        items={HONOR_PARTS.map((p) => [p.color, p.label])}
+        note={`האחוזים — מתוך ${grad.length} תלמידי השכבה המסיימת · רק תלמיד זכאי יכול לעמוד בתנאים · לחיצה פותחת את רשימת התלמידים`}
+      />
+      <div className="grid gap-6 sm:grid-cols-3">
+        {HONOR_KEYS.map((k) => {
+          const c = counts[k]
+          return (
+            <div key={k} className="flex items-center gap-4">
+              <button onClick={() => open(k, 'yes')} title={`${HONOR_META[k].label} — לרשימת העומדים בתנאים`} className="shrink-0 rounded-full transition hover:opacity-80">
+                <Donut
+                  size={96}
+                  segments={HONOR_PARTS.map((p) => ({ key: p.key, value: c[p.key], color: p.color, label: p.label }))}
+                  center={<span className="text-lg font-extrabold tabular-nums text-slate-800">{pct(c.yes)}</span>}
+                />
+              </button>
+              <div className="min-w-0 text-sm">
+                <div className="font-bold text-slate-800">{HONOR_META[k].label}</div>
+                {HONOR_PARTS.map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => open(k, p.key === 'rest' ? 'all' : p.key)}
+                    className="mt-0.5 flex w-full items-center gap-1.5 text-right text-xs text-slate-600 hover:text-sky-700"
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color }} />
+                    <span className="truncate">{p.label}</span>
+                    <span className="mr-auto font-semibold tabular-nums text-slate-700">{c[p.key]}</span>
+                    <span className="w-9 shrink-0 text-left tabular-nums text-slate-400">{pct(c[p.key])}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
+
 function Legend({ items, note }: { items: [string, string][]; note: string }) {
   return (
     <div className="mb-3 text-xs">

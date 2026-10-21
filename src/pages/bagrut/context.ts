@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { ActionCounts, BagrutRound, EditRef, ManualEdit, RoundData, RoundIndex, Tracking } from '@/lib/bagrut'
+import type { ActionCounts, BagrutFlag, BagrutRound, EditRef, ManualEdit, RoundData, RoundIndex, StudentRows, Tracking } from '@/lib/bagrut'
 
 export interface BagrutContextValue {
   authorityCode: string
@@ -14,6 +14,15 @@ export interface BagrutContextValue {
   applyActionCounts: (studentId: string, counts: ActionCounts) => void
   /** עריכה ידנית שנשמרה (037) — מחילים את תשובת השרת על המסך (מלכודת 26) */
   applyDataEdit: (ref: EditRef, value: string | null, edit: ManualEdit | null) => void
+  /**
+   * אחרי עדכון ציון: כל השורות של התלמיד כפי שהמסד חישב אותן מחדש (041) —
+   * המקצועות, הזכאות, המצטיינת/טק והדגלים. תמונת המצב והרשימות נספרות מהן.
+   */
+  applyStudentRows: (rows: StudentRows) => void
+  /** דגל אדום אחרי "נבדק" / הערה */
+  applyFlag: (flag: BagrutFlag) => void
+  /** רשאי לעדכן ציונים ולטפל בדגלים — מנהל־על ורכז/ת בגרויות (תצוגה; האכיפה במסד) */
+  canEditGrades: boolean
   /** נתיב בסיס למסכי המודול: /bagrut/:code */
   base: string
 }

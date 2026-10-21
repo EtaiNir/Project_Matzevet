@@ -11,11 +11,13 @@ import {
   parseBlockers,
   questionnaireLabel,
   SUBJECT_GROUPS,
+  studentPath,
+  studentUrlKey,
   TRACKING_FLAGS,
   type GradeRow,
   type RoundSubject,
   type SubjectRow,
-  canEditBagrutData,
+  canEditBagrutGrades,
 } from '@/lib/bagrut'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CompletionMark, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
@@ -23,6 +25,7 @@ import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import CycleTab from './BagrutCycle'
 import EditableField, { EditGroup } from '@/components/bagrut/EditableField'
 import { setLastStudent } from '@/lib/lastStudent'
+import { maskId, useCanSeeIds } from '@/lib/idVisibility'
 import { computeHonors, HONOR_KEYS, HONOR_META } from '@/lib/bagrutHonors'
 
 type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
@@ -35,19 +38,27 @@ type Tab = 'summary' | 'subjects' | 'all' | 'tracking'
  * "בתהליך" פתוח ובולט. הקודם/הבא מדפדפים ברשימה שממנה הגעת.
  */
 export default function BagrutStudent() {
-  const { id = '' } = useParams()
+  const { id: param = '' } = useParams()
   const { data, index, base, round } = useBagrut()
   const navigate = useNavigate()
   const location = useLocation()
+  const showIds = useCanSeeIds('bagrut')
   const nav = location.state as CardNavState | null
   const [tab, setTab] = useState<Tab>('summary')
+
+  // בכתובת — קוד, לא ת"ז (studentPath). קישור ישן עם ת"ז עדיין נפתח, ומוחלף לקוד
+  const byKey = useMemo(() => new Map(data.students.map((x) => [studentUrlKey(round, x.student_id), x.student_id])), [data.students, round])
+  const id = byKey.get(param) ?? (index.studentById.has(param) ? param : '')
+  useEffect(() => {
+    if (id && id === param) navigate(studentPath(base, round, id), { state: nav, replace: true })
+  }, [id, param, base, round, nav, navigate])
 
   const s = index.studentById.get(id)
   const ids = nav?.ids ?? data.students.map((x) => x.student_id)
   const pos = ids.indexOf(id)
   const go = (i: number) => {
     const next = ids[i]
-    if (next) navigate(`${base}/student/${next}`, { state: nav, replace: true })
+    if (next) navigate(studentPath(base, round, next), { state: nav, replace: true })
   }
 
   useEffect(() => {
@@ -131,7 +142,7 @@ export default function BagrutStudent() {
         >
           <span className="truncate font-bold text-slate-800">{displayName(s)}</span>
           <span className="shrink-0 text-xs text-slate-500">
-            כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{s.student_id}</span>
+            כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{showIds ? s.student_id : maskId(s.student_id)}</span>
           </span>
           {s.in_t2 && <StatusBadge kind={kind} />}
           <span className="mr-auto" />
@@ -178,7 +189,7 @@ export default function BagrutStudent() {
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-extrabold text-slate-800">{displayName(s)}</h1>
             <div className="text-sm text-slate-500">
-              כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{s.student_id}</span>
+              כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{showIds ? s.student_id : maskId(s.student_id)}</span>
               {s.track && <> · מגמת {s.track}</>}
               {s.missing_status && <> · {s.missing_status}</>}
             </div>
@@ -364,7 +375,7 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
 
 // ─────────────────────────────── מצטיינת וטק ───────────────────────────────
 
-/** בגרות מצטיינת וטק — מחושבות אצלנו מעל ניתוח הזכאות (decisions/019) */
+/** בגרות מצטיינת וטק — מחושבות אצלנו מעל הזכאות המחושבת (decisions/019, 041) */
 function HonorsCard({ sid }: { sid: string }) {
   const { index } = useBagrut()
   const h = computeHonors(index, index.studentById.get(sid)!)
@@ -414,14 +425,15 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
   const order = index.questionnairesBySubject.get(sub.subject_key) ?? []
   const rows = [...grades].sort((a, b) => order.indexOf(a.questionnaire_code) - order.indexOf(b.questionnaire_code))
   const tone = gradeTone(m?.final_grade ?? m?.cumulative_grade)
-  // עריכה ידנית (משימה 7): מדד מקצוע — רק כשיש לו שורה בסבב; ציון שאלון — לכל שורה
+  // עדכון (041): ציון ומשקל של שאלון, ויח"ל המקצוע. המצטבר, הסופי והמצב — מחושבים
+  // מהשאלונים; ציון סופי ידני — רק במקצוע בלי שאלונים. הכול נבדק שוב במסד.
   const subRef = (field: string) => ({ target: 'subject' as const, studentId: sid, subjectKey: sub.subject_key, field })
   const gradeRef = (g: GradeRow, field: string) => ({ target: 'grade' as const, studentId: sid, subjectKey: sub.subject_key, questionnaireCode: g.questionnaire_code, field })
   const border = !passed && tone === 'fail' ? 'border-rose-200' : !passed && tone === 'blocked' ? 'border-orange-300' : comp === 'progress' ? 'border-amber-200' : 'border-slate-200'
 
   return (
-    // עריכה ידנית לכל הריבוע — עיפרון אחד בפינה (אייל, 18.10)
-    <EditGroup allowed={canEditBagrutData(profile, sub.subject_key)}>
+    // עדכון לכל הריבוע — עיפרון אחד בפינה (אייל, 18.10)
+    <EditGroup allowed={canEditBagrutGrades(profile)}>
     {({ toggle, actions }) => (
     <div className={`rounded-2xl border bg-white shadow-sm ${border}`}>
       {/* האריח תמיד פתוח — בלי חץ לקיפול (אייל, 6.10) */}
@@ -437,13 +449,13 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
             // אין עדיין ציון סופי — הציון המשוקלל המצטבר הוא המספר הבולט
             <>
               <div className="text-xl font-extrabold tabular-nums text-slate-800">
-                <EditableField edit={subRef('cumulative_grade')} value={m.cumulative_grade} numeric>{fmt(m.cumulative_grade)}</EditableField>
+                <EditableField readOnly edit={subRef('cumulative_grade')} value={m.cumulative_grade}>{fmt(m.cumulative_grade)}</EditableField>
               </div>
               <div className="text-[11px] text-slate-400">משוקלל מצטבר</div>
             </>
           ) : (
             m ? (
-              <EditableField edit={subRef('final_grade')} value={m.final_grade} numeric><Grade value={m.final_grade ?? null} strong /></EditableField>
+              <EditableField readOnly={rows.length > 0} edit={subRef('final_grade')} value={m.final_grade} numeric><Grade value={m.final_grade ?? null} strong /></EditableField>
             ) : (
               <Grade value={null} strong />
             )
@@ -469,18 +481,24 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
                 </td>
                 <td className="text-center"><EditableField edit={gradeRef(g, 'grade')} value={g.grade} numeric><Grade value={g.grade} boxed /></EditableField></td>
                 <td className="text-center text-xs tabular-nums text-slate-500"><EditableField edit={gradeRef(g, 'weight')} value={g.weight} percent>{g.weight != null ? `${Math.round(g.weight * 100)}%` : ''}</EditableField></td>
-                <td className="text-center font-semibold tabular-nums text-slate-700"><EditableField edit={gradeRef(g, 'weighted')} value={g.weighted} numeric>{fmt(g.weighted, 1)}</EditableField></td>
+                <td className="text-center font-semibold tabular-nums text-slate-700"><EditableField readOnly edit={gradeRef(g, 'weighted')} value={g.weighted}>{fmt(g.weighted, 1)}</EditableField></td>
               </tr>
             ))}
           </tbody>
         </table>
         {m && (
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span>משקל מצטבר <EditableField edit={subRef('cumulative_weight')} value={m.cumulative_weight} percent>{m.cumulative_weight != null ? `${Math.round(m.cumulative_weight * 100)}%` : '—'}</EditableField></span>
-            <span>ציון מצטבר <EditableField edit={subRef('cumulative_grade')} value={m.cumulative_grade} numeric>{fmt(m.cumulative_grade) || '—'}</EditableField></span>
+            <span>משקל מצטבר <EditableField readOnly edit={subRef('cumulative_weight')} value={m.cumulative_weight} percent>{m.cumulative_weight != null ? `${Math.round(m.cumulative_weight * 100)}%` : '—'}</EditableField></span>
+            <span>ציון מצטבר <EditableField readOnly edit={subRef('cumulative_grade')} value={m.cumulative_grade}>{fmt(m.cumulative_grade) || '—'}</EditableField></span>
             <span>יח״ל <EditableField edit={subRef('units')} value={m.units} numeric>{m.units ?? '—'}</EditableField></span>
-            <span>מצב <EditableField edit={subRef('completion_status')} value={m.completion_status}>{m.completion_status ?? '—'}</EditableField></span>
+            <span>מצב <EditableField readOnly edit={subRef('completion_status')} value={m.completion_status}>{m.completion_status ?? '—'}</EditableField></span>
           </div>
+        )}
+        {/* הציון הסופי מחושב מהשאלונים (041). שונה ממה שהגיע בעיבוד הציונים — אומרים */}
+        {m?.t1_original && m.t1_original.final_grade !== undefined && (m.t1_original.final_grade ?? null) !== (m.final_grade ?? null) && (
+          <p className="mt-1 text-xs text-amber-700">
+            בעיבוד הציונים: ציון סופי {m.t1_original.final_grade ?? 'אין'} · מחושב עכשיו: {m.final_grade ?? 'אין'}
+          </p>
         )}
         {actions}
       </div>

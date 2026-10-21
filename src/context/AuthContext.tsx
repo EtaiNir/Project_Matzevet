@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
+import { clearSessionClock, remaining, sessionExpired, setLogoutReason, startSession } from '@/lib/session'
 import { supabase } from '@/lib/supabase'
 
 export interface UserProfile {
@@ -39,7 +40,7 @@ export interface UserProfile {
   bagrut_title?: 'principal' | null
   bagrut_subject_keys?: string[]
   /**
-   * תפקיד בניהול התקציב (מיגרציה 040). null = אין גישה למוצר.
+   * תפקיד בניהול התקציב (מיגרציה 042). null = אין גישה למוצר.
    * manager — רואה ועורך הכול; owner — רק כרטיסים בקטגוריות שלו; viewer — צפייה.
    */
   budget_role?: 'manager' | 'owner' | 'viewer' | null
@@ -65,9 +66,9 @@ export function productAccess(p: UserProfile | null) {
 }
 
 /**
- * עמודות התקציב (מיגרציה 040) נטענות בבקשה **נפרדת**.
+ * עמודות התקציב (מיגרציה 042) נטענות בבקשה **נפרדת**.
  *
- * אילו נוספו ל-EXTENDED_COLUMNS, מסד שעוד אין בו 040 היה מכשיל את כל הבקשה
+ * אילו נוספו ל-EXTENDED_COLUMNS, מסד שעוד אין בו 042 היה מכשיל את כל הבקשה
  * המורחבת — והמשתמש היה מאבד בשקט גם את הרשאות הבגרות ואת פרטי הפרופיל
  * (הנפילה לעמודות הבסיס). כך כשל כאן משמעו רק "אין תקציב".
  */
@@ -135,6 +136,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return
+      // כרטיסייה ששוחזרה אחרי סגירה (Ctrl+Shift+T) מחזירה גם את הטוקן — לבדוק
+      // כמה זמן עבר. סשן שקדם לשעון (לפני השינוי) מתחיל אותו עכשיו.
+      if (data.session) {
+        const expired = sessionExpired()
+        if (expired) {
+          setLogoutReason(expired)
+          await supabase.auth.signOut()
+          setLoading(false)
+          return
+        }
+        if (remaining() == null) startSession()
+      }
       setSession(data.session)
       if (data.session) {
         loadedFor.current = data.session.user.id
@@ -143,7 +156,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false)
     })
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (event === 'SIGNED_IN' && remaining() == null) startSession()
+      if (event === 'SIGNED_OUT') clearSessionClock()
       setSession(newSession)
 
       const userId = newSession?.user.id ?? null

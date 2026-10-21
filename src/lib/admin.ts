@@ -152,7 +152,7 @@ export function bagrutSubjectsOnly(u: BagrutScopeFields | null | undefined): boo
   )
 }
 
-/** תפקיד בניהול התקציב (מיגרציה 040). null = אין גישה לתקציב. */
+/** תפקיד בניהול התקציב (מיגרציה 042). null = אין גישה לתקציב. */
 export type BudgetRole = 'manager' | 'owner' | 'viewer'
 
 export const BUDGET_ROLE_LABELS: Record<BudgetRole, string> = {
@@ -219,7 +219,7 @@ export interface ManagedUser {
   bagrut_subject_keys: string[]
   /** כותרת לתצוגה (039): 'principal' = מנהל/ת בית ספר, עם "כל בית הספר" */
   bagrut_title?: BagrutTitle | null
-  /** ניהול תקציב (040). null = אין גישה; קיימים רק אחרי המיגרציה */
+  /** ניהול תקציב (042). null = אין גישה; קיימים רק אחרי המיגרציה */
   budget_role?: BudgetRole | null
   budget_categories?: string[]
 }
@@ -527,7 +527,7 @@ const USER_PROFILE_COLUMNS =
 export async function fetchUsers(): Promise<{
   users: ManagedUser[]
   hasProfileFields: boolean
-  /** עמודות התקציב קיימות (מיגרציה 040) — אחרת לשונית התקציב לא מעניקה גישה */
+  /** עמודות התקציב קיימות (מיגרציה 042) — אחרת לשונית התקציב לא מעניקה גישה */
   hasBudgetFields: boolean
 }> {
   const [base, budget] = await Promise.all([fetchUsersBase(), fetchBudgetFields()])
@@ -559,7 +559,7 @@ async function fetchUsersBase(): Promise<{ users: ManagedUser[]; hasProfileField
 
 /**
  * עמודות התקציב בבקשה נפרדת — לא בתוך USER_BASE_COLUMNS: שם עמודה שאינה
- * קיימת (מסד בלי 040) הייתה מכשילה את כל רשימת המשתמשים, בלי fallback.
+ * קיימת (מסד בלי 042) הייתה מכשילה את כל רשימת המשתמשים, בלי fallback.
  */
 async function fetchBudgetFields(): Promise<Map<string, Pick<ManagedUser, 'budget_role' | 'budget_categories'>> | null> {
   const { data, error } = await supabase.from('users').select('id, budget_role, budget_categories')

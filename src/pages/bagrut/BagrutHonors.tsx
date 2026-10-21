@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useBagrut, type CardNavState } from './context'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import { Empty, Kpi, StatusBadge } from '@/components/bagrut/ui'
-import { classSortKey, displayName, eligibilityKind, ELIGIBILITY_META, fmt, type BagrutStudent } from '@/lib/bagrut'
+import { classSortKey, displayName, eligibilityKind, ELIGIBILITY_META, fmt, type BagrutStudent, studentPath } from '@/lib/bagrut'
 import {
   EXCELLENCE_AVERAGE,
   HONOR_KEYS,
@@ -13,6 +13,7 @@ import {
   type HonorKey,
   type Honors,
 } from '@/lib/bagrutHonors'
+import { useCanSeeIds } from '@/lib/idVisibility'
 
 type Show = 'yes' | 'near' | 'all'
 const SHOW_LABELS: Record<Show, string> = { yes: 'עומדים בתנאים', near: 'חסר תנאי אחד', all: 'כל השכבה המסיימת' }
@@ -20,7 +21,7 @@ const SHOW_LABELS: Record<Show, string> = { yes: 'עומדים בתנאים', ne
 /**
  * בגרות מצטיינת ובגרות טק — מסך סינון (אייל, 19.10). שלושה מדדים, ולכל אחד
  * מי שעומד בתנאים, מי שחסר לו תנאי אחד (שם אפשר לעבוד), וכל השכבה המסיימת.
- * החישוב ב-lib/bagrutHonors — מעל ניתוח הזכאות, לא במקומו (decisions/019).
+ * החישוב ב-lib/bagrutHonors — מעל הזכאות המחושבת (041), לא במקומה (decisions/019).
  * הסינון ב-URL, כמו ברשימת התלמידים: "חזרה" מהכרטיס מחזיר לאותה רשימה.
  */
 export default function BagrutHonors() {
@@ -28,6 +29,7 @@ export default function BagrutHonors() {
   const [params, setParams] = useSearchParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const showIds = useCanSeeIds('bagrut')
 
   const type = (HONOR_KEYS as string[]).includes(params.get('type') ?? '') ? (params.get('type') as HonorKey) : 'excellence'
   const show = (['yes', 'near', 'all'] as string[]).includes(params.get('show') ?? '') ? (params.get('show') as Show) : 'yes'
@@ -134,7 +136,7 @@ export default function BagrutHonors() {
       <div>
         <h1 className="text-xl font-extrabold text-slate-800">בגרות מצטיינת ובגרות טק</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          שכבה {round.graduating_grade} · {graduating.length} תלמידים · מחושב במערכת מעל ניתוח הזכאות
+          שכבה {round.graduating_grade} · {graduating.length} תלמידים · מחושב במערכת מעל פרטי הזכאות
         </p>
       </div>
 
@@ -171,7 +173,7 @@ export default function BagrutHonors() {
       <BagrutTable
         key={type}
         rows={rows}
-        columns={columns}
+        columns={columns.filter((c) => showIds || c.key !== 'id')}
         rowKey={(s) => s.student_id}
         exportName={`בגרות_${round.school_name ?? round.school_code}_${label}`}
         initialSort={{ key: 'class', dir: 'asc' }}
@@ -184,12 +186,12 @@ export default function BagrutHonors() {
             fromLabel: label,
             backTo: location.pathname + location.search,
           }
-          navigate(`${base}/student/${s.student_id}`, { state })
+          navigate(studentPath(base, round, s.student_id), { state })
         }}
       />
 
       <p className="text-[11px] leading-relaxed text-slate-400">
-        המדדים אינם מגיעים בקבצים — המערכת מחשבת אותם: זכאות לפי ניתוח הזכאות, ומעליה המקצועות שהושלמו בציון 55 ומעלה.
+        המדדים אינם מגיעים בקבצים — המערכת מחשבת אותם: זכאות לפי מנוע הזכאות, ומעליה המקצועות שהושלמו בציון 55 ומעלה.
         הממוצע משוקלל לפי יח״ל, בלי בונוס. במצטיינת נדרשת גם הצלחה במעורבות החברתית — היא אינה בנתונים ואינה נבדקת כאן.
       </p>
     </div>

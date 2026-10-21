@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { LOGOUT_MESSAGES, takeLogoutReason } from '@/lib/session'
 import { Link } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { SITE } from '@/config/site'
@@ -12,6 +13,8 @@ export default function Login() {
   const [details, setDetails] = useState<string[] | null>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [busy, setBusy] = useState(false)
+  // ניתוק אוטומטי (lib/session) — לומר למה, אחרת זה נראה כמו תקלה
+  const [logoutReason] = useState(takeLogoutReason)
   // "במסך הלוג-אין, לאפשר גם את העין לצפייה בסיסמה" (הערה 15)
   const [showPassword, setShowPassword] = useState(false)
 
@@ -86,6 +89,9 @@ export default function Login() {
             </div>
           </div>
 
+          {logoutReason && !error && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">{LOGOUT_MESSAGES[logoutReason]}</p>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <button

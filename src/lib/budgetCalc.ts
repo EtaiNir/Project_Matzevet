@@ -2,7 +2,7 @@
 //
 // ⚠️ סימנים: בקובצי EPR ההוצאות **שליליות** (תקציב הוצאות −1,135,000, ביצוע
 // −745,393). האחסון נשאר כמו בקובץ; כאן הכול מוחזר בערך "טבעי" לתצוגה —
-// תקציב והוצאה חיוביים, ניצול באחוזים. ראה מלכודת 38 ב-CLAUDE.md.
+// תקציב והוצאה חיוביים, ניצול באחוזים. ראה מלכודת 41 ב-CLAUDE.md.
 import type { BudgetCard, CardMeta, CardPlan, MonthlyRow } from './budget'
 
 export type Direction = 'income' | 'expense'
@@ -34,7 +34,7 @@ export interface CardRow {
   name: string
   dir: Direction
   parts: [string, string, string]
-  /** התקציב המאושר (השערה 020 §4), בערך טבעי */
+  /** התקציב המאושר (022 §4 — אומת מול האקסס), בערך טבעי */
   budget: number | null
   /** הביצוע לתקופה שנבחרה, בערך טבעי */
   executed: number | null

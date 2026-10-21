@@ -1,5 +1,7 @@
 -- ═══════════════════════════════════════════════════════════════
--- 040 — מודול התקציב: תקציב ומעקב, מיתר ורכש (החלטה 020)
+-- 042 — מודול התקציב: תקציב ומעקב, מיתר ורכש (החלטה 022)
+-- ⚠️ הוחלה על המסד החי ב-20.10 בשם 040_budget.sql. במיזוג עם הענף bagrut-engine
+-- התברר ש-040 תפוס (040_id_visibility) — הקובץ שונה ל-042. אין להחיל שוב.
 -- ═══════════════════════════════════════════════════════════════
 -- מוצר שלישי בפורטל, לצד המצבת והבגרות. כמו הבגרות (014 §2, 016):
 -- טבלאות משותפות לכל הרשויות עם authority_code, ולא טבלה לכל רשות —
@@ -23,7 +25,7 @@
 -- ⚠️ ה-`::text[]` חובה: `any((select f()))` בלעדיו נקרא כתת-שאילתה של שורות,
 -- ו-Postgres נכשל ב-"operator does not exist: text = text[]" (נתפס בהחלה, 20.10).
 --
--- ⚠️ ההשערה "תכנית שנה נוכחית = התקציב המאושר" (020 §4): התקציב נקלט
+-- ⚠️ ההשערה "תכנית שנה נוכחית = התקציב המאושר" (022 §4): התקציב נקלט
 -- מקובץ הכרטיסים (budget_cards.budget_*) ואינו נערך באתר. אם סבא יגיד
 -- אחרת — עמודה בשכבת המשתמש, לא שינוי בשכבת הקבצים.
 
@@ -38,7 +40,7 @@ alter table public.users add constraint users_budget_role_check
   check (budget_role is null or budget_role in ('manager', 'owner', 'viewer'));
 
 comment on column public.users.budget_role is
-  'תפקיד בניהול התקציב (040). null = אין גישה. manager / owner (לפי budget_categories) / viewer';
+  'תפקיד בניהול התקציב (042). null = אין גישה. manager / owner (לפי budget_categories) / viewer';
 comment on column public.users.budget_categories is
   'לאחראי תקציב (owner): ערכי "קטגוריה 1" של הכרטיסים שבאחריותו. מערך ריק = אף כרטיס';
 
@@ -207,7 +209,7 @@ create table if not exists public.budget_cards (
   fiscal_year    int  not null check (fiscal_year between 2000 and 2100),
   card_code      text not null check (card_code ~ '^\d+$'),
   card_name      text,
-  budget_expense numeric,   -- "תקציב הוצאות" — התקציב המאושר (020 §4, השערה)
+  budget_expense numeric,   -- "תקציב הוצאות" — התקציב המאושר (022 §4, השערה)
   budget_income  numeric,   -- "תקציב הכנסות"
   budget_period  numeric,   -- "תקציב תקופתי"
   executed       numeric,   -- "ביצוע" = Σ(זכות − חובה) של תנועות השנה
