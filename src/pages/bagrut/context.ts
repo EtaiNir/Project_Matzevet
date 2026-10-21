@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { ActionCounts, BagrutRound, EditRef, ManualEdit, RoundData, RoundIndex, Tracking } from '@/lib/bagrut'
+import type { ActionCounts, BagrutRound, RoundData, RoundIndex, StatusOverride, Tracking } from '@/lib/bagrut'
 
 export interface BagrutContextValue {
   authorityCode: string
@@ -12,8 +12,13 @@ export interface BagrutContextValue {
   applyTracking: (t: Tracking) => void
   /** ספירות התוכנית של תלמיד אחרי שינוי בלשונית המעקב — לרשימה ולסרגל */
   applyActionCounts: (studentId: string, counts: ActionCounts) => void
-  /** עריכה ידנית שנשמרה (037) — מחילים את תשובת השרת על המסך (מלכודת 26) */
-  applyDataEdit: (ref: EditRef, value: string | null, edit: ManualEdit | null) => void
+  /**
+   * שינוי ידני של הסטטוס שנשמר (043) — כפי שהמסד החזיר (מלכודת 26). null =
+   * חזרה לניתוח הזכאות. תמונת המצב, המצטיינת/טק והרשימות נספרות מחדש מעצמן.
+   */
+  applyStatusOverride: (studentId: string, override: StatusOverride | null) => void
+  /** רשאי לשנות סטטוס — מנהל־על ורכז/ת בגרויות (תצוגה; האכיפה במסד) */
+  canOverrideStatus: boolean
   /** נתיב בסיס למסכי המודול: /bagrut/:code */
   base: string
 }

@@ -170,9 +170,9 @@ export default function BagrutStudents() {
     ...t1Columns,
     {
       key: 'status', group: 't2', groupTitle: 'ניתוח זכאות', header: 'סטטוס זכאות', width: 118,
-      render: (s) => (s.in_t2 ? <StatusBadge kind={eligibilityKind(s)} /> : <span className="text-xs text-slate-300">—</span>),
+      render: (s) => (s.in_t2 ? <StatusBadge kind={eligibilityKind(s)} manual={Boolean(s.override)} /> : <span className="text-xs text-slate-300">—</span>),
       sortValue: (s) => ['not_eligible', 'one_negative', 'eligible', 'not_graduating'].indexOf(eligibilityKind(s)),
-      exportValue: (s) => (s.in_t2 ? ELIGIBILITY_META[eligibilityKind(s)].label : ''),
+      exportValue: (s) => (s.in_t2 ? `${ELIGIBILITY_META[eligibilityKind(s)].label}${s.override ? ' (שונה ידנית)' : ''}` : ''),
     },
     {
       key: 'neg', group: 't2', header: 'שליליים', width: 64, align: 'center',

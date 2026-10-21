@@ -94,6 +94,67 @@ export interface BagrutStudent {
   reinforced_subject: string | null
   total_units: string | null
   reason: string | null
+  /**
+   * שינוי ידני של הסטטוס (מיגרציה 043) — בתוקף, אם יש. לא עמודה בטבלה: נטען
+   * מ-bagrut_status_overrides ומוצמד כאן, כדי ש-eligibilityKind — וכל מה שנספר
+   * ממנה — יראו אותו. הסטטוס של ניתוח הזכאות (status) אינו משתנה.
+   */
+  override?: StatusOverride | null
+}
+
+// ─────────────────────────────── שינוי ידני של הסטטוס (043) ───────────────────────────────
+
+export interface StatusOverride {
+  kind: 'eligible' | 'not_eligible'
+  reason: string
+  set_by_email: string | null
+  set_at: string
+}
+
+/**
+ * מי משנה סטטוס זכאות — מנהל־על ורכז/ת בגרויות, כולל מנהל/ת בית ספר (אייל, 21.10).
+ * לתצוגה בלבד; האכיפה ב-may_override_bagrut_status במסד (מלכודת 16).
+ */
+export function canOverrideStatus(profile: { role?: string; bagrut_role?: string | null } | null): boolean {
+  return profile?.role === 'super_admin' || profile?.bagrut_role === 'coordinator'
+}
+
+/**
+ * שינוי הסטטוס. kind ריק = חזרה לניתוח הזכאות. מחזיר את מה שבתוקף אחרי השינוי
+ * כפי שהמסד שמר (מלכודת 26); changed=false — לא נרשם כלום (אותו מצב ואותה סיבה).
+ * השינוי נמחק בקליטת הסבב הבא.
+ */
+export async function setStudentStatus(
+  round: BagrutRound, studentId: string, kind: StatusOverride['kind'] | null, reason: string,
+): Promise<{ changed: boolean; override: StatusOverride | null }> {
+  const { data, error } = await supabase.rpc('bagrut_set_status', {
+    p_round: round.id, p_student: studentId, p_kind: kind, p_reason: reason,
+  })
+  if (error) {
+    if (error.code === 'PGRST202') throw new Error('שינוי הסטטוס עדיין לא הופעל במסד (מיגרציה 043)')
+    throw new Error(`השמירה נכשלה: ${error.message}`)
+  }
+  const d = data as { changed: boolean; kind?: StatusOverride['kind'] | null; reason?: string; set_by_email?: string | null; set_at?: string }
+  // לא השתנה — מה שבתוקף נשאר; המסך לא נוגע בו
+  if (!d.changed) return { changed: false, override: null }
+  return {
+    changed: true,
+    override: d.kind ? { kind: d.kind, reason: d.reason ?? '', set_by_email: d.set_by_email ?? null, set_at: d.set_at ?? new Date().toISOString() } : null,
+  }
+}
+
+/** השינויים שבתוקף — האחרון לכל תלמיד; "חזרה" (kind ריק) מבטלת. לפני 043 — אין, לא שגיאה. */
+async function loadOverrides(roundId: string): Promise<Map<string, StatusOverride>> {
+  const { data, error } = await supabase.from('bagrut_status_overrides')
+    .select('student_id, kind, reason, set_by_email, set_at')
+    .eq('round_id', roundId).order('set_at')
+  const m = new Map<string, StatusOverride>()
+  if (error) return m
+  for (const r of (data ?? []) as (Omit<StatusOverride, 'kind'> & { student_id: string; kind: StatusOverride['kind'] | null })[]) {
+    if (r.kind) m.set(r.student_id, { kind: r.kind, reason: r.reason, set_by_email: r.set_by_email, set_at: r.set_at })
+    else m.delete(r.student_id)
+  }
+  return m
 }
 
 // ─────────────────────────────── מונחים ───────────────────────────────
@@ -228,107 +289,6 @@ export interface RoundData {
   tracking: Map<string, Tracking>
   /** תוכנית ההתערבות לכל תלמיד — ספירות בלבד, לרשימה ולפס המצב */
   actionCounts: Map<string, ActionCounts>
-  /** עריכות ידניות בסבב (מיגרציה 038) — האחרונה לכל שדה, לפי editKey */
-  edits: Map<string, ManualEdit>
-}
-
-// ─────────────────────────────── עריכה ידנית (משימה 7) ───────────────────────────────
-
-/** student = שדה בניתוח הזכאות · subject = מדד מקצוע · grade = ציון שאלון */
-export type EditTarget = 'student' | 'subject' | 'grade'
-
-export interface ManualEdit {
-  target: EditTarget
-  student_id: string
-  subject_key: string | null
-  questionnaire_code: number | null
-  field: string
-  old_value: string | null
-  new_value: string | null
-  edited_by_email: string | null
-  edited_at: string
-}
-
-export interface EditRef {
-  target: EditTarget
-  studentId: string
-  subjectKey?: string | null
-  questionnaireCode?: number | null
-  field: string
-}
-
-export const editKey = (e: EditRef) =>
-  `${e.target}|${e.studentId}|${e.subjectKey ?? ''}|${e.questionnaireCode ?? ''}|${e.field}`
-
-/**
- * מי רשאי לערוך — לתצוגה בלבד (כפתור העריכה). האכיפה ב-may_edit_bagrut_data
- * במסד (מלכודת 16, מיגרציה 038), לפי מה שסומן (037): רכז בגרויות — הכול;
- * שכבות שסומנו — כל שדה (המסד בודק שהתלמיד בשכבה); מקצועות שסומנו — רק שדה של
- * מקצוע שלו, לא ניתוח הזכאות. כיתות (מחנך) ומועצתי — לא עורכים.
- */
-export function canEditBagrutData(
-  profile: { role?: string; bagrut_role?: string | null; bagrut_grades?: string[]; bagrut_subject_keys?: string[] } | null,
-  subjectKey: string | null,
-): boolean {
-  if (!profile) return false
-  if (profile.role === 'super_admin') return true
-  if (profile.bagrut_role === 'coordinator') return true
-  if (!profile.bagrut_role || profile.bagrut_role === 'council') return false
-  if (profile.bagrut_grades?.length) return true
-  return subjectKey != null && (profile.bagrut_subject_keys ?? []).includes(subjectKey)
-}
-
-export interface EditResult {
-  changed: boolean
-  value: string | null
-  edit: ManualEdit | null
-}
-
-/** עריכת שדה אחד. העריכה נמחקת בקליטת הסבב הבא — כך במסך, כך במסד. */
-export async function editBagrutField(round: BagrutRound, ref: EditRef, value: string): Promise<EditResult> {
-  const { data, error } = await supabase.rpc('bagrut_edit_field', {
-    p_round: round.id, p_student: ref.studentId, p_target: ref.target,
-    p_subject: ref.target === 'student' ? null : ref.subjectKey ?? null,
-    p_questionnaire: ref.target === 'grade' ? ref.questionnaireCode ?? null : null,
-    p_field: ref.field, p_value: value,
-  })
-  if (error) {
-    // הפונקציה עוד לא במסד — אומרים את זה, לא "שגיאה" (מלכודת 15)
-    if (error.code === 'PGRST202' || /bagrut_edit_field/.test(error.message)) {
-      throw new Error('העריכה הידנית עדיין לא הופעלה במסד (מיגרציה 038)')
-    }
-    throw new Error(`השמירה נכשלה: ${error.message}`)
-  }
-  const d = data as { changed: boolean; value: string | null; old?: string | null; edited_by_email?: string | null; edited_at?: string }
-  return {
-    changed: d.changed,
-    value: d.value,
-    edit: d.changed
-      ? {
-          target: ref.target, student_id: ref.studentId,
-          subject_key: ref.target === 'student' ? null : ref.subjectKey ?? null,
-          questionnaire_code: ref.target === 'grade' ? ref.questionnaireCode ?? null : null,
-          field: ref.field, old_value: d.old ?? null, new_value: d.value,
-          edited_by_email: d.edited_by_email ?? null, edited_at: d.edited_at ?? new Date().toISOString(),
-        }
-      : null,
-  }
-}
-
-/** העריכות של הסבב. טבלה שעוד לא קיימת (לפני 038) = אין עריכות, לא שגיאה. */
-async function loadEdits(roundId: string): Promise<Map<string, ManualEdit>> {
-  const { data, error } = await supabase.from('bagrut_manual_edits')
-    .select('target, student_id, subject_key, questionnaire_code, field, old_value, new_value, edited_by_email, edited_at')
-    .eq('round_id', roundId).order('edited_at')
-  const m = new Map<string, ManualEdit>()
-  if (error) return m
-  for (const e of (data ?? []) as ManualEdit[]) {
-    const key = editKey({ target: e.target, studentId: e.student_id, subjectKey: e.subject_key, questionnaireCode: e.questionnaire_code, field: e.field })
-    const prev = m.get(key)
-    // כמה עריכות לאותו שדה: המוצג הוא האחרון, וה"היה" — הערך המקורי מהקובץ
-    m.set(key, prev ? { ...e, old_value: prev.old_value } : e)
-  }
-  return m
 }
 
 export interface ActionCounts {
@@ -364,6 +324,15 @@ export const ELIGIBILITY_META: Record<
 }
 
 export function eligibilityKind(s: BagrutStudent): EligibilityKind {
+  if (!s.in_t2) return 'not_graduating'
+  // שינוי ידני של רכז/ת הבגרויות (043) גובר — וכל מה שנספר מכאן (אחוזים,
+  // מצטיינת/טק, על הסף, הסרגל, הייצוא) מתעדכן איתו
+  if (s.override) return s.override.kind
+  return analysisKind(s)
+}
+
+/** הסטטוס כפי שקבע ניתוח הזכאות — בלי שינוי ידני */
+export function analysisKind(s: BagrutStudent): EligibilityKind {
   if (!s.in_t2 || !s.status) return 'not_graduating'
   const t = s.status
   if (t.includes('אין זכאות')) return 'not_eligible'
@@ -594,7 +563,7 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     }
   }
 
-  const [subjects, program, students, grades, subjectRows, tracking, actions] = await Promise.all([
+  const [subjects, program, students, grades, subjectRows, tracking, actions, overrides] = await Promise.all([
     step('מקצועות הסבב', fetchAll<RoundSubject>((f, t) =>
       supabase.from('bagrut_round_subjects').select('*').eq('round_id', rid).order('sort').range(f, t))),
     step('המצפן', fetchAll<ProgramRow>((f, t) =>
@@ -615,6 +584,7 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
       supabase.from('bagrut_actions').select('student_id, status')
         .eq('authority_code', round.authority_code).eq('school_code', round.school_code)
         .neq('status', 'dismissed').order('student_id').range(f, t))),
+    loadOverrides(rid),
   ])
 
   const actionCounts = new Map<string, ActionCounts>()
@@ -624,8 +594,6 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     else if (a.status === 'done') c.done++
     actionCounts.set(a.student_id, c)
   }
-
-  const edits = await loadEdits(rid)
 
   const codes = [...new Set([...program.map((p) => p.questionnaire_code), ...grades.map((g) => g.questionnaire_code)])]
   const qs = await step('אינדקס השאלונים', fetchAll<Questionnaire>((f, t) =>
@@ -637,12 +605,11 @@ async function doLoadRound(round: BagrutRound): Promise<RoundData> {
     subjects,
     program,
     questionnaires: new Map(qs.map((q) => [q.code, q])),
-    students: students.map(plainStudent),
+    students: students.map((s) => ({ ...plainStudent(s), override: overrides.get(s.student_id) ?? null })),
     grades,
     subjectRows,
     tracking: new Map(tracking.map((t) => [t.student_id, t])),
     actionCounts,
-    edits,
   }
 }
 

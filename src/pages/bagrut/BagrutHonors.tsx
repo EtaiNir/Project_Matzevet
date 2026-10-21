@@ -77,9 +77,9 @@ export default function BagrutHonors() {
     { key: 'id', header: 'ת"ז', width: 100, render: (s) => <span className="tabular-nums text-slate-500">{s.student_id}</span>, sortValue: (s) => s.student_id },
     {
       key: 'status', header: 'סטטוס זכאות', width: 118,
-      render: (s) => <StatusBadge kind={eligibilityKind(s)} />,
+      render: (s) => <StatusBadge kind={eligibilityKind(s)} manual={Boolean(s.override)} />,
       sortValue: (s) => ['not_eligible', 'one_negative', 'eligible'].indexOf(eligibilityKind(s)),
-      exportValue: (s) => ELIGIBILITY_META[eligibilityKind(s)].label,
+      exportValue: (s) => `${ELIGIBILITY_META[eligibilityKind(s)].label}${s.override ? ' (שונה ידנית)' : ''}`,
     },
     {
       key: 'english', header: 'אנגלית', width: 80, align: 'center',

@@ -28,13 +28,10 @@ import {
   type BagrutLogEntry,
   type LogKind,
   type TrackingFlag,
-  canEditBagrutData,
 } from '@/lib/bagrut'
-import { useAuth } from '@/context/AuthContext'
 import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
 import { saveLogPdf } from '@/lib/printLog'
-import EditableField, { EditGroup } from '@/components/bagrut/EditableField'
 
 /**
  * לשונית המעקב כמחזור התערבות — מצב → תוכנית → מעקב
@@ -151,7 +148,7 @@ function StatusStrip({ sid, actions }: { sid: string; actions: BagrutAction[] })
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
-      {kind === 'not_graduating' ? <span className="text-slate-500">לא בשכבה המסיימת</span> : <StatusBadge kind={kind} long />}
+      {kind === 'not_graduating' ? <span className="text-slate-500">לא בשכבה המסיימת</span> : <StatusBadge kind={kind} long manual={Boolean(s.override)} />}
       {s.total_units && <Stat label='יח"ל' value={`${s.total_units} / 21`} />}
       {kind !== 'not_graduating' && <Stat label="חסמים" value={blockers} warn={blockers > 0} />}
       {s.negatives_count != null && kind !== 'not_graduating' && <Stat label="שליליים" value={s.negatives_count} warn={s.negatives_count > 0} />}
@@ -214,7 +211,6 @@ function PlanView({ sid, actions, onActions, ai, onAi }: {
  */
 function T2Card({ sid }: { sid: string }) {
   const { index } = useBagrut()
-  const { profile } = useAuth()
   const s = index.studentById.get(sid)!
   const value = (f: T2Field) => {
     const v = s[f.key]
@@ -223,10 +219,7 @@ function T2Card({ sid }: { sid: string }) {
   const short = T2_FIELDS.filter((f) => f.short)
   const long = T2_FIELDS.filter((f) => !f.short)
   return (
-    // עריכה ידנית לכל הכרטיס — עיפרון אחד בפינה (אייל, 18.10)
-    <EditGroup allowed={s.in_t2 && canEditBagrutData(profile, null)}>
-    {({ toggle, actions }) => (
-    <Card title="ניתוח הזכאות" action={<span className="flex items-center gap-2"><span className="text-xs text-slate-400">כפי שהגיע, בלי עיבוד</span>{toggle}</span>}>
+    <Card title="ניתוח הזכאות" action={<span className="text-xs text-slate-400">כפי שהגיע, בלי עיבוד</span>}>
       {!s.in_t2 ? (
         <p className="text-sm text-slate-500">לתלמיד הזה אין ניתוח זכאות — הוא נעשה לשכבה המסיימת בלבד.</p>
       ) : (
@@ -236,7 +229,7 @@ function T2Card({ sid }: { sid: string }) {
               <div key={f.key} className="min-w-0">
                 <dt className="text-[11px] font-semibold leading-tight text-slate-500">{f.label}</dt>
                 <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>
-                  <EditableField edit={{ target: 'student', studentId: sid, field: f.key }} value={value(f)} numeric={f.key === 'negatives_count' || f.key === 'core_units'}>{value(f) ?? '—'}</EditableField>
+                  {value(f) ?? '—'}
                 </dd>
               </div>
             ))}
@@ -246,17 +239,14 @@ function T2Card({ sid }: { sid: string }) {
               <div key={f.key}>
                 <dt className="text-xs font-bold text-slate-500">{f.label}</dt>
                 <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>
-                  <EditableField edit={{ target: 'student', studentId: sid, field: f.key }} value={value(f)} multiline className="w-full">{value(f) ?? '—'}</EditableField>
+                  {value(f) ?? '—'}
                 </dd>
               </div>
             ))}
           </dl>
-          {actions}
         </>
       )}
     </Card>
-    )}
-    </EditGroup>
   )
 }
 
