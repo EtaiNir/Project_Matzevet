@@ -27,14 +27,16 @@ export const TONE = {
 
 export const KIND_ORDER: EligibilityKind[] = ['eligible', 'one_negative', 'not_eligible']
 
-export function StatusBadge({ kind, long = false }: { kind: EligibilityKind; long?: boolean }) {
+/** manual — הסטטוס שונה ידנית (043): ✎ בתג, וההסבר בריחוף */
+export function StatusBadge({ kind, long = false, manual = false }: { kind: EligibilityKind; long?: boolean; manual?: boolean }) {
   const meta = ELIGIBILITY_META[kind]
   return (
     <span
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 ring-inset ${TONE[meta.tone].chip}`}
-      title={meta.label}
+      title={manual ? `${meta.label} — שונה ידנית` : meta.label}
     >
       {long ? meta.label : meta.short}
+      {manual && <span aria-label="שונה ידנית">✎</span>}
     </span>
   )
 }

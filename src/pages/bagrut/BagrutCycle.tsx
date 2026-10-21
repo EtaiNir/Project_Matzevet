@@ -28,9 +28,6 @@ import {
   type BagrutLogEntry,
   type LogKind,
   type TrackingFlag,
-  ELIGIBILITY_META,
-  parseBlockers,
-  type BagrutStudent,
 } from '@/lib/bagrut'
 import { fmtDate, relDays, todayIso } from '@/lib/bagrutCycle'
 import { Card, StatusBadge } from '@/components/bagrut/ui'
@@ -41,8 +38,8 @@ import { saveLogPdf } from '@/lib/printLog'
  * (docs/bagrut-intervention-design.md).
  *
  * "מצב התלמיד" ו"תוכנית התערבות" מיוצרים ע"י AI — בכפתור, רק לתלמיד שהמורה
- * בוחר (Edge Function bagrut-ai, מיגרציה 031). הזכאות — ממנוע הזכאות (041,
- * decisions/021): הניתוח מנסח ומתכנן, ואינו קובע זכאות.
+ * בוחר (Edge Function bagrut-ai, מיגרציה 031). ⚠️ זכאות נקבעת רק לפי T2
+ * (decisions/014 §8): הניתוח מנסח ומתכנן, ואינו קובע זכאות.
  *
  * למורה בלבד — לתלמידים אין גישה למערכת.
  */
@@ -151,7 +148,7 @@ function StatusStrip({ sid, actions }: { sid: string; actions: BagrutAction[] })
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
-      {kind === 'not_graduating' ? <span className="text-slate-500">לא בשכבה המסיימת</span> : <StatusBadge kind={kind} long />}
+      {kind === 'not_graduating' ? <span className="text-slate-500">לא בשכבה המסיימת</span> : <StatusBadge kind={kind} long manual={Boolean(s.override)} />}
       {s.total_units && <Stat label='יח"ל' value={`${s.total_units} / 21`} />}
       {kind !== 'not_graduating' && <Stat label="חסמים" value={blockers} warn={blockers > 0} />}
       {s.negatives_count != null && kind !== 'not_graduating' && <Stat label="שליליים" value={s.negatives_count} warn={s.negatives_count > 0} />}
@@ -195,7 +192,7 @@ function PlanView({ sid, actions, onActions, ai, onAi }: {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* פרטי הזכאות (מחושבים, 041), ולצידם ניתוח ה-AI — שני החלקים זה לצד זה (סבא, 14.10) */}
+      {/* ניתוח הזכאות כפי שהגיע, ולצידו ניתוח ה-AI — שני החלקים זה לצד זה (סבא, 14.10) */}
       <div className="grid items-start gap-4 lg:grid-cols-2">
         <T2Card sid={sid} />
         <PictureCard sid={sid} analysis={ai.picture} onNew={(a) => onAi({ ...ai, picture: a })} />
@@ -208,17 +205,13 @@ function PlanView({ sid, actions, onActions, ai, onAi }: {
 }
 
 /**
- * פרטי הזכאות — מחושבים במנוע הזכאות מהציונים, מחוקת הזכאות וממבנה הבגרות
- * (041, decisions/021), ומתעדכנים מיד כשציון מתעדכן. אינם נערכים ישירות.
- *
- * ניתוח הזכאות של סבא נשמר כמו שהגיע (t2_original). כשהמנוע אינו מסכים איתו
- * בשדה מהותי (סטטוס, יח"ל, מלל, שליליים, סוגי החסמים) — הערך המקורי מוצג מתחת;
- * כל השדות המקוריים — בקיפול בתחתית. שדה ריק נשאר ריק ("—").
+ * ניתוח הזכאות (T2) — כל השדות, בכותרות ובתוכן המקוריים, בלי AI ובלי עיבוד.
+ * סבא: "השקענו הרבה מאוד מחשבה ביצירה של 10 השדות האלה". שדה ריק נשאר ריק
+ * (מסומן "—"), לא ממלאים ולא מסכמים. הזכאות — רק לפי מה שכתוב כאן (014 §8).
  */
 function T2Card({ sid }: { sid: string }) {
   const { index } = useBagrut()
   const s = index.studentById.get(sid)!
-  const t2 = s.t2_original
   const value = (f: T2Field) => {
     const v = s[f.key]
     return v == null || String(v).trim() === '' ? null : String(v)
@@ -226,7 +219,7 @@ function T2Card({ sid }: { sid: string }) {
   const short = T2_FIELDS.filter((f) => f.short)
   const long = T2_FIELDS.filter((f) => !f.short)
   return (
-    <Card title="פרטי הזכאות" action={<span className="text-xs text-slate-400">{t2 ? 'מחושב מהציונים ומחוקת הזכאות' : 'כפי שהגיע בניתוח הזכאות'}</span>}>
+    <Card title="ניתוח הזכאות" action={<span className="text-xs text-slate-400">כפי שהגיע, בלי עיבוד</span>}>
       {!s.in_t2 ? (
         <p className="text-sm text-slate-500">לתלמיד הזה אין ניתוח זכאות — הוא נעשה לשכבה המסיימת בלבד.</p>
       ) : (
@@ -235,8 +228,9 @@ function T2Card({ sid }: { sid: string }) {
             {short.map((f) => (
               <div key={f.key} className="min-w-0">
                 <dt className="text-[11px] font-semibold leading-tight text-slate-500">{f.label}</dt>
-                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
-                <Original s={s} field={f.key} />
+                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>
+                  {value(f) ?? '—'}
+                </dd>
               </div>
             ))}
           </dl>
@@ -244,57 +238,15 @@ function T2Card({ sid }: { sid: string }) {
             {long.map((f) => (
               <div key={f.key}>
                 <dt className="text-xs font-bold text-slate-500">{f.label}</dt>
-                <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>{value(f) ?? '—'}</dd>
-                <Original s={s} field={f.key} />
+                <dd className={`mt-0.5 whitespace-pre-wrap text-sm leading-relaxed ${value(f) ? 'text-slate-700' : 'text-slate-300'}`}>
+                  {value(f) ?? '—'}
+                </dd>
               </div>
             ))}
           </dl>
-          {t2 && (
-            <details className="mt-4 rounded-xl border border-slate-200 px-3 py-2 text-sm">
-              <summary className="cursor-pointer text-xs font-bold text-slate-500">ניתוח הזכאות המקורי — כפי שהגיע בקבצים</summary>
-              <dl className="mt-2 flex flex-col gap-2">
-                {T2_FIELDS.filter((f) => f.key in t2).map((f) => (
-                  <div key={f.key}>
-                    <dt className="text-[11px] font-semibold text-slate-500">{f.label}</dt>
-                    <dd className="whitespace-pre-wrap text-slate-600">{t2[f.key] == null || String(t2[f.key]).trim() === '' ? '—' : String(t2[f.key])}</dd>
-                  </div>
-                ))}
-              </dl>
-            </details>
-          )}
         </>
       )}
     </Card>
-  )
-}
-
-/**
- * הערך מניתוח הזכאות המקורי — רק כשהמנוע אינו מסכים איתו במהות: סטטוס לפי
- * הסוג (לא לפי הנוסח), מספרים לפי הערך, חסמים לפי הסוגים. בשדות הטקסט האחרים
- * הנוסח שונה תמיד, וההשוואה — בקיפול "ניתוח הזכאות המקורי".
- */
-function Original({ s, field }: { s: BagrutStudent; field: string }) {
-  const t2 = s.t2_original
-  if (!t2 || !(field in t2)) return null
-  const orig = t2[field as keyof typeof t2]
-  const num = (v: unknown) => (v == null || String(v).trim() === '' ? null : Number.parseFloat(String(v)))
-  let differs = false
-  let shown: string | null = orig == null ? null : String(orig)
-  if (field === 'status') {
-    const k = eligibilityKind({ ...s, calc_kind: null, status: orig as string | null })
-    differs = k !== eligibilityKind(s)
-    shown = ELIGIBILITY_META[k].label
-  } else if (field === 'total_units' || field === 'core_units' || field === 'negatives_count') {
-    differs = num(orig) !== num(s[field])
-  } else if (field === 'blockers') {
-    const kinds = (t: string | null) => [...new Set(parseBlockers(t).map((b) => b.kind))].sort().join(',')
-    differs = kinds(orig as string | null) !== kinds(s.blockers)
-  }
-  if (!differs) return null
-  return (
-    <p className="mt-0.5 text-[11px] font-normal leading-snug text-amber-700" title="ניתוח הזכאות מהקבצים — המנוע הגיע לתוצאה אחרת">
-      בניתוח הזכאות: {shown ?? '—'}
-    </p>
   )
 }
 
@@ -340,7 +292,7 @@ function AiMeta({ analysis }: { analysis: AiAnalysis }) {
   const stale = analysis.round_id && analysis.round_id !== round.id
   return (
     <p className="mt-4 text-[11px] text-slate-400">
-      ניתוח AI · {new Date(analysis.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })} — לבדיקת המורה. הזכאות עצמה — לפי פרטי הזכאות המחושבים.
+      ניתוח AI · {new Date(analysis.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })} — לבדיקת המורה. הזכאות עצמה — רק לפי ניתוח הזכאות.
       {stale && <span className="mr-1 rounded bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-800">נוצר על סבב קודם — כדאי לנתח מחדש</span>}
     </p>
   )

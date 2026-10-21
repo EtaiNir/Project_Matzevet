@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { ActionCounts, BagrutFlag, BagrutRound, EditRef, ManualEdit, RoundData, RoundIndex, StudentRows, Tracking } from '@/lib/bagrut'
+import type { ActionCounts, BagrutRound, RoundData, RoundIndex, StatusOverride, Tracking } from '@/lib/bagrut'
 
 export interface BagrutContextValue {
   authorityCode: string
@@ -12,17 +12,13 @@ export interface BagrutContextValue {
   applyTracking: (t: Tracking) => void
   /** ספירות התוכנית של תלמיד אחרי שינוי בלשונית המעקב — לרשימה ולסרגל */
   applyActionCounts: (studentId: string, counts: ActionCounts) => void
-  /** עריכה ידנית שנשמרה (037) — מחילים את תשובת השרת על המסך (מלכודת 26) */
-  applyDataEdit: (ref: EditRef, value: string | null, edit: ManualEdit | null) => void
   /**
-   * אחרי עדכון ציון: כל השורות של התלמיד כפי שהמסד חישב אותן מחדש (041) —
-   * המקצועות, הזכאות, המצטיינת/טק והדגלים. תמונת המצב והרשימות נספרות מהן.
+   * שינוי ידני של הסטטוס שנשמר (043) — כפי שהמסד החזיר (מלכודת 26). null =
+   * חזרה לניתוח הזכאות. תמונת המצב, המצטיינת/טק והרשימות נספרות מחדש מעצמן.
    */
-  applyStudentRows: (rows: StudentRows) => void
-  /** דגל אדום אחרי "נבדק" / הערה */
-  applyFlag: (flag: BagrutFlag) => void
-  /** רשאי לעדכן ציונים ולטפל בדגלים — מנהל־על ורכז/ת בגרויות (תצוגה; האכיפה במסד) */
-  canEditGrades: boolean
+  applyStatusOverride: (studentId: string, override: StatusOverride | null) => void
+  /** רשאי לשנות סטטוס — מנהל־על ורכז/ת בגרויות (תצוגה; האכיפה במסד) */
+  canOverrideStatus: boolean
   /** נתיב בסיס למסכי המודול: /bagrut/:code */
   base: string
 }

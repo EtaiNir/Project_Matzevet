@@ -20,7 +20,6 @@ import BagrutStudent from './pages/bagrut/BagrutStudent'
 import BagrutProgram from './pages/bagrut/BagrutProgram'
 import BagrutUpload from './pages/bagrut/BagrutUpload'
 import BagrutHonors from './pages/bagrut/BagrutHonors'
-import BagrutFlags from './pages/bagrut/BagrutFlags'
 import BudgetShell from './pages/budget/BudgetShell'
 import BudgetHome from './pages/budget/BudgetHome'
 import BudgetCards from './pages/budget/BudgetCards'
@@ -101,7 +100,6 @@ export default function App() {
           <Route path="student/:id" element={<BagrutStudent />} />
           <Route path="program" element={<BagrutProgram />} />
           <Route path="honors" element={<BagrutHonors />} />
-          <Route path="flags" element={<BagrutFlags />} />
           <Route path="upload" element={<BagrutUpload />} />
         </Route>
       </Route>

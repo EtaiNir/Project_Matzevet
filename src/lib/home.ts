@@ -5,7 +5,7 @@
 // מהרשימה כולה (סבא, על "הכפתור האדום").
 //
 // כל הקריאות רצות בהרשאות של המשתמש (RLS), ולכן הספירות הן בדיוק מה שהוא
-// רשאי לראות. זכאות — ספירה של מה שמנוע הזכאות חישב (041, decisions/021).
+// רשאי לראות. זכאות — רק ספירה של מה ש-T2 אמר (decisions/014 §8).
 
 import { supabase } from '@/lib/supabase'
 import { fetchClients, fetchUsers, type Authority, type MoeUpload } from '@/lib/admin'
@@ -338,7 +338,7 @@ export async function loadBagrutOverviews(codes: string[], role: string, general
       const notEligible = grad.filter((s) => eligibilityKind(s) === 'not_eligible').length
       stats = [
         { label: 'אחוז זכאות', sub: `${eligible} זכאים מתוך ${grad.length}`, value: `${Math.round((eligible / grad.length) * 100)}%` },
-        { label: 'ללא זכאות', sub: 'מחושב מהציונים', value: notEligible },
+        { label: 'ללא זכאות', sub: 'לפי ניתוח הזכאות', value: notEligible },
         { label: 'על הסף', sub: 'ללא זכאות, חסם אחד', value: grad.filter(isOnTheEdge).length },
       ]
     } else {

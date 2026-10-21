@@ -17,13 +17,11 @@ import {
   type GradeRow,
   type RoundSubject,
   type SubjectRow,
-  canEditBagrutGrades,
 } from '@/lib/bagrut'
-import { useAuth } from '@/context/AuthContext'
 import { Card, CompletionMark, Empty, Grade, StatusBadge } from '@/components/bagrut/ui'
+import StatusOverrideCard from '@/components/bagrut/StatusOverrideCard'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import CycleTab from './BagrutCycle'
-import EditableField, { EditGroup } from '@/components/bagrut/EditableField'
 import { setLastStudent } from '@/lib/lastStudent'
 import { maskId, useCanSeeIds } from '@/lib/idVisibility'
 import { computeHonors, HONOR_KEYS, HONOR_META } from '@/lib/bagrutHonors'
@@ -144,7 +142,7 @@ export default function BagrutStudent() {
           <span className="shrink-0 text-xs text-slate-500">
             כיתה {s.class_name ?? '—'} · ת״ז <span className="tabular-nums">{showIds ? s.student_id : maskId(s.student_id)}</span>
           </span>
-          {s.in_t2 && <StatusBadge kind={kind} />}
+          {s.in_t2 && <StatusBadge kind={kind} manual={Boolean(s.override)} />}
           <span className="mr-auto" />
           <nav className="hidden shrink-0 gap-0.5 md:flex">
             {tabs.map(([k, label]) => (
@@ -195,7 +193,7 @@ export default function BagrutStudent() {
             </div>
           </div>
           <span className="mr-auto" />
-          {s.in_t2 && <StatusBadge kind={kind} long />}
+          {s.in_t2 && <StatusBadge kind={kind} long manual={Boolean(s.override)} />}
           {honorBadges.map((h) => (
             <span key={h} className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-900 ring-1 ring-inset ring-amber-300">
               ★ {HONOR_META[h].label}
@@ -306,6 +304,7 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-5">
+      <StatusOverrideCard s={s} />
       <Card title="בדרך לזכאות" className="lg:col-span-3">
         <div className="grid gap-2 sm:grid-cols-2">
           <Check ok={!missing} label="מקצועות חובה" detail={missing ? `חסרים: ${missing.subjects?.join(', ')}` : 'כל מקצועות החובה במגזר'} />
@@ -375,7 +374,7 @@ function Summary({ sid, onSubjects }: { sid: string; onSubjects: () => void }) {
 
 // ─────────────────────────────── מצטיינת וטק ───────────────────────────────
 
-/** בגרות מצטיינת וטק — מחושבות אצלנו מעל הזכאות המחושבת (decisions/019, 041) */
+/** בגרות מצטיינת וטק — מחושבות אצלנו מעל ניתוח הזכאות (decisions/019) */
 function HonorsCard({ sid }: { sid: string }) {
   const { index } = useBagrut()
   const h = computeHonors(index, index.studentById.get(sid)!)
@@ -416,25 +415,17 @@ function HonorsCard({ sid }: { sid: string }) {
 
 // ─────────────────────────────── אריח מקצוע ───────────────────────────────
 
-function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; grades: GradeRow[]; m: SubjectRow | undefined }) {
+function SubjectTile({ sub, grades, m }: { sid: string; sub: RoundSubject; grades: GradeRow[]; m: SubjectRow | undefined }) {
   const { index, data } = useBagrut()
-  const { profile } = useAuth()
   const comp = completion(m?.completion_status)
   const passed = comp === 'done' && gradeTone(m?.final_grade) === 'pass'
 
   const order = index.questionnairesBySubject.get(sub.subject_key) ?? []
   const rows = [...grades].sort((a, b) => order.indexOf(a.questionnaire_code) - order.indexOf(b.questionnaire_code))
   const tone = gradeTone(m?.final_grade ?? m?.cumulative_grade)
-  // עדכון (041): ציון ומשקל של שאלון, ויח"ל המקצוע. המצטבר, הסופי והמצב — מחושבים
-  // מהשאלונים; ציון סופי ידני — רק במקצוע בלי שאלונים. הכול נבדק שוב במסד.
-  const subRef = (field: string) => ({ target: 'subject' as const, studentId: sid, subjectKey: sub.subject_key, field })
-  const gradeRef = (g: GradeRow, field: string) => ({ target: 'grade' as const, studentId: sid, subjectKey: sub.subject_key, questionnaireCode: g.questionnaire_code, field })
   const border = !passed && tone === 'fail' ? 'border-rose-200' : !passed && tone === 'blocked' ? 'border-orange-300' : comp === 'progress' ? 'border-amber-200' : 'border-slate-200'
 
   return (
-    // עדכון לכל הריבוע — עיפרון אחד בפינה (אייל, 18.10)
-    <EditGroup allowed={canEditBagrutGrades(profile)}>
-    {({ toggle, actions }) => (
     <div className={`rounded-2xl border bg-white shadow-sm ${border}`}>
       {/* האריח תמיד פתוח — בלי חץ לקיפול (אייל, 6.10) */}
       <div className="flex w-full items-center gap-3 p-4 text-right">
@@ -443,19 +434,18 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
           <div className="truncate font-bold text-slate-800">{sub.subject_name}</div>
           <div className="text-xs text-slate-500">{m?.questionnaires ? `${m.questionnaires} שאלונים` : ''}{m?.units ? ` · ${m.units} יח״ל` : ''}</div>
         </div>
-        {toggle}
         <div className="text-left">
           {m?.final_grade == null && m?.cumulative_grade != null ? (
             // אין עדיין ציון סופי — הציון המשוקלל המצטבר הוא המספר הבולט
             <>
               <div className="text-xl font-extrabold tabular-nums text-slate-800">
-                <EditableField readOnly edit={subRef('cumulative_grade')} value={m.cumulative_grade}>{fmt(m.cumulative_grade)}</EditableField>
+                {fmt(m.cumulative_grade)}
               </div>
               <div className="text-[11px] text-slate-400">משוקלל מצטבר</div>
             </>
           ) : (
             m ? (
-              <EditableField readOnly={rows.length > 0} edit={subRef('final_grade')} value={m.final_grade} numeric><Grade value={m.final_grade ?? null} strong /></EditableField>
+              <Grade value={m.final_grade ?? null} strong />
             ) : (
               <Grade value={null} strong />
             )
@@ -479,32 +469,23 @@ function SubjectTile({ sid, sub, grades, m }: { sid: string; sub: RoundSubject; 
                   <span className="font-semibold tabular-nums">{g.questionnaire_code}</span>
                   <span className="mr-1 text-[11px] text-slate-400">{questionnaireLabel(data.questionnaires.get(g.questionnaire_code), null)}</span>
                 </td>
-                <td className="text-center"><EditableField edit={gradeRef(g, 'grade')} value={g.grade} numeric><Grade value={g.grade} boxed /></EditableField></td>
-                <td className="text-center text-xs tabular-nums text-slate-500"><EditableField edit={gradeRef(g, 'weight')} value={g.weight} percent>{g.weight != null ? `${Math.round(g.weight * 100)}%` : ''}</EditableField></td>
-                <td className="text-center font-semibold tabular-nums text-slate-700"><EditableField readOnly edit={gradeRef(g, 'weighted')} value={g.weighted}>{fmt(g.weighted, 1)}</EditableField></td>
+                <td className="text-center"><Grade value={g.grade} boxed /></td>
+                <td className="text-center text-xs tabular-nums text-slate-500">{g.weight != null ? `${Math.round(g.weight * 100)}%` : ''}</td>
+                <td className="text-center font-semibold tabular-nums text-slate-700">{fmt(g.weighted, 1)}</td>
               </tr>
             ))}
           </tbody>
         </table>
         {m && (
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span>משקל מצטבר <EditableField readOnly edit={subRef('cumulative_weight')} value={m.cumulative_weight} percent>{m.cumulative_weight != null ? `${Math.round(m.cumulative_weight * 100)}%` : '—'}</EditableField></span>
-            <span>ציון מצטבר <EditableField readOnly edit={subRef('cumulative_grade')} value={m.cumulative_grade}>{fmt(m.cumulative_grade) || '—'}</EditableField></span>
-            <span>יח״ל <EditableField edit={subRef('units')} value={m.units} numeric>{m.units ?? '—'}</EditableField></span>
-            <span>מצב <EditableField readOnly edit={subRef('completion_status')} value={m.completion_status}>{m.completion_status ?? '—'}</EditableField></span>
+            <span>משקל מצטבר {m.cumulative_weight != null ? `${Math.round(m.cumulative_weight * 100)}%` : '—'}</span>
+            <span>ציון מצטבר {fmt(m.cumulative_grade) || '—'}</span>
+            <span>יח״ל {m.units ?? '—'}</span>
+            <span>מצב {m.completion_status ?? '—'}</span>
           </div>
         )}
-        {/* הציון הסופי מחושב מהשאלונים (041). שונה ממה שהגיע בעיבוד הציונים — אומרים */}
-        {m?.t1_original && m.t1_original.final_grade !== undefined && (m.t1_original.final_grade ?? null) !== (m.final_grade ?? null) && (
-          <p className="mt-1 text-xs text-amber-700">
-            בעיבוד הציונים: ציון סופי {m.t1_original.final_grade ?? 'אין'} · מחושב עכשיו: {m.final_grade ?? 'אין'}
-          </p>
-        )}
-        {actions}
       </div>
     </div>
-    )}
-    </EditGroup>
   )
 }
 
@@ -517,16 +498,12 @@ function AllQuestionnaires({ sid }: { sid: string }) {
     { key: 'code', header: 'שאלון', width: 80, render: (g) => <span className="font-semibold tabular-nums">{g.questionnaire_code}</span>, sortValue: (g) => g.questionnaire_code },
     { key: 'sub', header: 'מקצוע', width: 170, render: (g) => index.subjectByKey.get(g.subject_key)?.subject_name, sortValue: (g) => index.subjectByKey.get(g.subject_key)?.subject_name },
     { key: 'form', header: 'צורת היבחנות', width: 150, render: (g) => <span className="text-xs text-slate-500">{data.questionnaires.get(g.questionnaire_code)?.exam_form}</span>, sortValue: (g) => data.questionnaires.get(g.questionnaire_code)?.exam_form },
-    // הטבלה צפופה מכדי לערוך בתוכה — כאן רק הסימון "נערך"; העריכה באריחי "מקצועות"
     ...(['grade', 'weight', 'weighted'] as const).map((field): Column<GradeRow> => ({
       key: field === 'grade' ? 'grade' : field === 'weight' ? 'w' : 'x',
       header: field === 'grade' ? 'ציון' : field === 'weight' ? 'משקל' : 'משוקלל',
       width: field === 'weighted' ? 96 : 84, align: 'center',
-      render: (g) => (
-        <EditableField readOnly edit={{ target: 'grade', studentId: sid, subjectKey: g.subject_key, questionnaireCode: g.questionnaire_code, field }} value={g[field]}>
-          {field === 'grade' ? <Grade value={g.grade} /> : field === 'weight' ? (g.weight != null ? `${Math.round(g.weight * 100)}%` : '') : fmt(g.weighted, 1)}
-        </EditableField>
-      ),
+      render: (g) =>
+        field === 'grade' ? <Grade value={g.grade} /> : field === 'weight' ? (g.weight != null ? `${Math.round(g.weight * 100)}%` : '') : fmt(g.weighted, 1),
       sortValue: (g) => g[field],
     })),
   ]

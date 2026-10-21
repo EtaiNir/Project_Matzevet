@@ -21,7 +21,7 @@ const SHOW_LABELS: Record<Show, string> = { yes: 'עומדים בתנאים', ne
 /**
  * בגרות מצטיינת ובגרות טק — מסך סינון (אייל, 19.10). שלושה מדדים, ולכל אחד
  * מי שעומד בתנאים, מי שחסר לו תנאי אחד (שם אפשר לעבוד), וכל השכבה המסיימת.
- * החישוב ב-lib/bagrutHonors — מעל הזכאות המחושבת (041), לא במקומה (decisions/019).
+ * החישוב ב-lib/bagrutHonors — מעל ניתוח הזכאות, לא במקומו (decisions/019).
  * הסינון ב-URL, כמו ברשימת התלמידים: "חזרה" מהכרטיס מחזיר לאותה רשימה.
  */
 export default function BagrutHonors() {
@@ -77,9 +77,9 @@ export default function BagrutHonors() {
     { key: 'id', header: 'ת"ז', width: 100, render: (s) => <span className="tabular-nums text-slate-500">{s.student_id}</span>, sortValue: (s) => s.student_id },
     {
       key: 'status', header: 'סטטוס זכאות', width: 118,
-      render: (s) => <StatusBadge kind={eligibilityKind(s)} />,
+      render: (s) => <StatusBadge kind={eligibilityKind(s)} manual={Boolean(s.override)} />,
       sortValue: (s) => ['not_eligible', 'one_negative', 'eligible'].indexOf(eligibilityKind(s)),
-      exportValue: (s) => ELIGIBILITY_META[eligibilityKind(s)].label,
+      exportValue: (s) => `${ELIGIBILITY_META[eligibilityKind(s)].label}${s.override ? ' (שונה ידנית)' : ''}`,
     },
     {
       key: 'english', header: 'אנגלית', width: 80, align: 'center',
@@ -136,7 +136,7 @@ export default function BagrutHonors() {
       <div>
         <h1 className="text-xl font-extrabold text-slate-800">בגרות מצטיינת ובגרות טק</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          שכבה {round.graduating_grade} · {graduating.length} תלמידים · מחושב במערכת מעל פרטי הזכאות
+          שכבה {round.graduating_grade} · {graduating.length} תלמידים · מחושב במערכת מעל ניתוח הזכאות
         </p>
       </div>
 
@@ -191,7 +191,7 @@ export default function BagrutHonors() {
       />
 
       <p className="text-[11px] leading-relaxed text-slate-400">
-        המדדים אינם מגיעים בקבצים — המערכת מחשבת אותם: זכאות לפי מנוע הזכאות, ומעליה המקצועות שהושלמו בציון 55 ומעלה.
+        המדדים אינם מגיעים בקבצים — המערכת מחשבת אותם: זכאות לפי ניתוח הזכאות, ומעליה המקצועות שהושלמו בציון 55 ומעלה.
         הממוצע משוקלל לפי יח״ל, בלי בונוס. במצטיינת נדרשת גם הצלחה במעורבות החברתית — היא אינה בנתונים ואינה נבדקת כאן.
       </p>
     </div>
