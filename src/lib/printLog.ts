@@ -63,6 +63,12 @@ const BASE_CSS = `
   /* padding-bottom: כל חלק מצולם בנפרד בגבולות הקופסה שלו — בלי ריווח מתחת לשורה
      האחרונה, תחתית האותיות נחתכת (קרה בתחתית, 18.10) */
   footer { margin-top: 16px; color: #94a3b8; font-size: 8.5pt; line-height: 1.8; border-top: 1px solid #e2e8f0; padding: 6px 0 6px; }
+  /* כל חלק מצולם בגבולות הקופסה שלו, ו-html2canvas מצייר טקסט נמוך מעט מהדפדפן —
+     השורה האחרונה של חלק בלי ריווח תחתון נחתכת (21.10: שדות ארוכים ו"אין עדיין
+     רשומה" בסיכום ותוכנית). flow-root — שה-margin של פסקה בתוך החלק לא "יברח"
+     מחוץ לקופסה; padding-bottom — מקום לשורה האחרונה. */
+  .blk { display: flow-root; padding-bottom: 8px; }
+  .blk p { margin: 0; }
 `
 
 function entryHtml(e: BagrutLogEntry): string {
