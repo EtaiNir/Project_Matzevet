@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   BAGRUT_TITLE_LABELS,
+  BUDGET_ROLE_HINTS,
+  BUDGET_ROLE_LABELS,
   bagrutTitle,
   primaryBagrutRole,
   ROLE_LABELS,
@@ -9,6 +11,7 @@ import {
   type BagrutRole,
   type BagrutScopeOptions,
   type BagrutTitle,
+  type BudgetRole,
   type ScopeLevel,
   type ScopeOption,
   type UserRole,
@@ -276,6 +279,52 @@ export function BagrutFields({ options, value, onChange }: {
             <p className="text-xs text-slate-500">כותרת: <strong className="text-violet-800">{title}</strong></p>
           )}
         </>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────── ניהול תקציב ───────────────────────────────
+
+export interface BudgetValue {
+  budget_role: BudgetRole | null
+  budget_categories: string[]
+}
+
+/**
+ * תפקיד בתקציב (מיגרציה 040). אחראי תקציב רואה רק כרטיסים שקטגוריה 1 שלהם
+ * סומנה כאן — הקטגוריות מוגדרות בכרטסת עצמה, ולכן הרשימה נבנית ממה שכבר סווג.
+ */
+export function BudgetFields({ categories, value, onChange }: {
+  /** ערכי "קטגוריה 1" שבכרטסת הרשות; null = בטעינה */
+  categories: ScopeOption[] | null
+  value: BudgetValue
+  onChange: (v: BudgetValue) => void
+}) {
+  const role = value.budget_role ?? 'manager'
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-3">
+        {(Object.keys(BUDGET_ROLE_LABELS) as BudgetRole[]).map((r) => (
+          <label key={r} className={`flex cursor-pointer flex-col rounded-xl border p-3 text-sm transition ${role === r ? 'border-emerald-400 bg-emerald-50 ring-1 ring-emerald-200' : 'border-slate-200 hover:border-emerald-300'}`}>
+            <span className="flex items-center gap-2 font-semibold text-slate-800">
+              <input type="radio" name="budget-role" checked={role === r} className="accent-emerald-600"
+                onChange={() => onChange({ budget_role: r, budget_categories: r === 'owner' ? value.budget_categories : [] })} />
+              {BUDGET_ROLE_LABELS[r]}
+            </span>
+            <span className="mt-1 text-xs text-slate-500">{BUDGET_ROLE_HINTS[r]}</span>
+          </label>
+        ))}
+      </div>
+      {role === 'owner' && (
+        <MultiPick label="קטגוריות (קטגוריה 1)" options={categories ?? []} loading={categories == null}
+          selected={value.budget_categories} onChange={(v) => onChange({ ...value, budget_role: 'owner', budget_categories: v })}
+          emptyWarning="לא נבחרה קטגוריה — האחראי לא יראה אף כרטיס." />
+      )}
+      {role === 'owner' && categories && categories.length === 0 && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          עוד לא סווגו כרטיסים. מנהל התקציב קובע את "קטגוריה 1" בכרטסת, ואז אפשר לבחור כאן.
+        </p>
       )}
     </div>
   )

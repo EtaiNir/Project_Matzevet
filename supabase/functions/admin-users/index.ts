@@ -28,6 +28,8 @@ const ROLES = ['viewer', 'admin', 'super_admin']
 const SCOPES = ['none', 'council', 'locality', 'school']
 // תפקידי הבגרות (026, 030). null = אין גישה לבגרות.
 const BAGRUT_ROLES = ['council', 'coordinator', 'grade_coordinator', 'subject_coordinator', 'homeroom']
+// תפקידי התקציב (040). null = אין גישה לתקציב.
+const BUDGET_ROLES = ['manager', 'owner', 'viewer']
 
 const strArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []
@@ -115,15 +117,17 @@ Deno.serve(async (req) => {
       const scopeValues = scopeLevel === 'none' || scopeLevel === 'council' ? [] : strArray(body.scope_values)
       const bagrutRole = body.bagrut_role ? String(body.bagrut_role) : null
       const bagrutScoped = Boolean(bagrutRole) && bagrutRole !== 'council' && bagrutRole !== 'coordinator'
+      const budgetRole = body.budget_role ? String(body.budget_role) : null
 
       if (!email || !password) return json({ error: 'חסרים מייל או סיסמה' }, 400)
       if (password.length < 8) return json({ error: 'הסיסמה חייבת להיות באורך 8 תווים לפחות' }, 400)
       if (!ROLES.includes(role)) return json({ error: 'תפקיד לא מוכר' }, 400)
       if (!SCOPES.includes(scopeLevel)) return json({ error: 'היקף לא מוכר' }, 400)
       if (bagrutRole && !BAGRUT_ROLES.includes(bagrutRole)) return json({ error: 'תפקיד בגרות לא מוכר' }, 400)
+      if (budgetRole && !BUDGET_ROLES.includes(budgetRole)) return json({ error: 'תפקיד תקציב לא מוכר' }, 400)
       // מנהל־על רואה הכול ממילא; לכל השאר — מוצר אחד לפחות, אחרת המשתמש לא יראה כלום
-      if (role !== 'super_admin' && scopeLevel === 'none' && !bagrutRole) {
-        return json({ error: 'יש לבחור מוצר אחד לפחות: מצבת תלמידים או זכאות לבגרות' }, 400)
+      if (role !== 'super_admin' && scopeLevel === 'none' && !bagrutRole && !budgetRole) {
+        return json({ error: 'יש לבחור מוצר אחד לפחות: מצבת תלמידים, זכאות לבגרות או ניהול תקציב' }, 400)
       }
 
       const { data, error } = await admin.auth.admin.createUser({
@@ -154,6 +158,13 @@ Deno.serve(async (req) => {
           bagrut_grades: bagrutScoped ? strArray(body.bagrut_grades) : [],
           bagrut_classes: bagrutScoped ? strArray(body.bagrut_classes) : [],
           bagrut_subject_keys: bagrutScoped ? strArray(body.bagrut_subject_keys) : [],
+          // תקציב (040) — רק כשהוענק: כך יצירת משתמש בלי תקציב עובדת גם במסד שעוד אין בו 040
+          ...(budgetRole && role !== 'super_admin'
+            ? {
+                budget_role: budgetRole,
+                budget_categories: budgetRole === 'owner' ? strArray(body.budget_categories) : [],
+              }
+            : {}),
         })
         .eq('id', data.user.id)
       if (updErr) return json({ error: translate(updErr.message) }, 400)

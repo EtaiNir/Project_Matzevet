@@ -146,7 +146,7 @@ export async function loadAdminOverview(authorities: Authority[], students: Map<
   }
 
   // ── משתמשים שנוצרו ולא קיבלו גישה לאף מוצר
-  const noAccess = users.filter((u) => u.role !== 'super_admin' && !u.is_suspended && (u.scope_level ?? 'none') === 'none' && !u.bagrut_role)
+  const noAccess = users.filter((u) => u.role !== 'super_admin' && !u.is_suspended && (u.scope_level ?? 'none') === 'none' && !u.bagrut_role && !u.budget_role)
   if (noAccess.length) {
     const code = noAccess[0].authority_codes[0]
     todos.push({
@@ -380,4 +380,54 @@ export function rememberRound(roundId: string | undefined) {
   } catch {
     /* מצב פרטי — ייפתח הסבב האחרון */
   }
+}
+
+// ─────────────────────────────── ניהול תקציב ───────────────────────────────
+
+export interface BudgetOverviewRow {
+  code: string
+  /** שנת התקציב האחרונה שנקלטה */
+  year: number | null
+  cards: number
+  loadedAt: string | null
+}
+
+/**
+ * לכל רשות: הכרטסת האחרונה שנקלטה — לכרטיס המוצר באזור האישי. ולמנהל
+ * התקציב: קליטות שנכשלו, נתקעו או ממתינות לאישור ההתאמה (020). ה-RLS
+ * מחזיר את budget_uploads רק למי שמנהל את התקציב, כך שאצל אחרים אין משימות.
+ */
+export async function loadBudgetOverview(codes: string[], nameOf: (code: string) => string): Promise<{ rows: BudgetOverviewRow[]; todos: Todo[] }> {
+  const rows: BudgetOverviewRow[] = []
+  for (const code of codes) {
+    const { data } = await supabase.from('budget_cards').select('fiscal_year, loaded_at')
+      .eq('authority_code', code).order('fiscal_year', { ascending: false }).order('loaded_at', { ascending: false }).limit(1)
+    const latest = data?.[0] as { fiscal_year: number; loaded_at: string } | undefined
+    if (!latest) continue
+    const { count } = await supabase.from('budget_cards').select('card_code', { count: 'exact', head: true })
+      .eq('authority_code', code).eq('fiscal_year', latest.fiscal_year)
+    rows.push({ code, year: latest.fiscal_year, cards: count ?? 0, loadedAt: latest.loaded_at })
+  }
+
+  const todos: Todo[] = []
+  if (codes.length) {
+    const { data: uploads } = await supabase.from('budget_uploads').select('id, authority_code, status, uploaded_at, error_message')
+      .in('authority_code', codes).order('uploaded_at', { ascending: false }).limit(50)
+    const seen = new Set<string>()
+    for (const u of (uploads ?? []) as { id: string; authority_code: string; status: string; uploaded_at: string; error_message: string | null }[]) {
+      // רק הקליטה האחרונה של כל רשות — כישלון ישן שכבר תוקן אינו משימה
+      if (seen.has(u.authority_code)) continue
+      seen.add(u.authority_code)
+      const to = `/budget/${u.authority_code}/upload`
+      const source = nameOf(u.authority_code)
+      if (u.status === 'failed') {
+        todos.push({ key: `budget-failed-${u.id}`, tone: 'red', source, to, text: 'קליטת קובצי התקציב נכשלה', detail: u.error_message ?? undefined })
+      } else if (u.status === 'awaiting_approval') {
+        todos.push({ key: `budget-approve-${u.id}`, tone: 'amber', source, to, text: 'קליטת תקציב ממתינה לאישור ההתאמה' })
+      } else if ((u.status === 'pending' || u.status === 'processing') && ageMinutes(u.uploaded_at) > STUCK_MINUTES) {
+        todos.push({ key: `budget-stuck-${u.id}`, tone: 'red', source, to, text: 'קליטת התקציב תקועה יותר משעה', detail: 'סביר שהסוכן אינו רץ' })
+      }
+    }
+  }
+  return { rows, todos }
 }

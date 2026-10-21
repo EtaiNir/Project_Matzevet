@@ -10,11 +10,13 @@
      קובצי משרד החינוך של כל המועצות, מקבץ אותם לפי קוד הרשות, ומעבד כל
      מועצה שהקבצים שלה השתנו. נדרש MATZEVET_WATCH_FOLDER ב-.env.agent.
 
-ועוד שני תורים מהאתר, באותה לולאה:
+ועוד שלושה תורים מהאתר, באותה לולאה:
 
   ג. דרג ב' (גנים) — tier_b_uploads: זיהוי שדות, אישור באתר, טעינה.
   ד. סבב בגרות — bagrut_uploads: T1 + T2 + מצפן, בדיקה וטעינה בריצה
      אחת (מבנה קבוע — בלי שלב אישור). ראה process_bagrut.
+  ה. תקציב — budget_uploads: דוחות EPR ו-ZIP מיתר. התאמת כותרות מאושרת
+     באתר בפעם הראשונה, ואחר כך מתבנית שמורה. ראה process_budget.
 
 בשני המקרים אותה ליבה: pipeline -> גיבוי הטבלה הקיימת -> טעינה ל-Supabase,
 והסטטוס מתועד ב-moe_uploads כך שנראה גם באתר.
@@ -245,14 +247,15 @@ def finish_tier_b(conn, upload_id, status, mapping=None, source=None,
               status, upload_id))
 
 
-def download_one(storage_path: str, target: Path) -> Path:
+def download_one(storage_path: str, target: Path, bucket: str = UPLOADS_BUCKET,
+                 local_name: str | None = None) -> Path:
     """מוריד קובץ בודד מהבאקט. הנתיב כולל את קוד הרשות כחלק ראשון."""
     url = require("SUPABASE_URL").rstrip("/")
-    resp = requests.get(f"{url}/storage/v1/object/{UPLOADS_BUCKET}/{storage_path}",
+    resp = requests.get(f"{url}/storage/v1/object/{bucket}/{storage_path}",
                         headers=storage_headers(), verify=False, timeout=300)
     resp.raise_for_status()
     target.mkdir(parents=True, exist_ok=True)
-    path = target / Path(storage_path).name
+    path = target / (local_name or Path(storage_path).name)
     path.write_bytes(resp.content)
     log.info("   הורד %s (%.1fMB)", path.name, len(resp.content) / 1024 / 1024)
     return path
@@ -470,6 +473,138 @@ def process_bagrut(conn, job) -> None:
             log.exception("לא הצלחתי לעדכן את סטטוס הכישלון")
     finally:
         # הקבצים מכילים ת"ז וציונים של תלמידים — לא נשארים בדיסק
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+# ═══════════════════════════ קליטת תקציב ═══════════════════════════
+#
+# החלטה 020. בדפוס של דרג ב' — שני שלבים:
+#
+#   אין approved_mapping  →  load_budget --emit-mapping מזהה כל קובץ ומציע
+#                            התאמת כותרות. אם לכל הדוחות יש תבנית שמורה
+#                            (אותן כותרות כמו בפעם הקודמת) — טוענים מיד.
+#                            אחרת: awaiting_approval, והמסך באתר מציג את ההצעה.
+#   יש approved_mapping   →  טוען לפי מה שאושר, ושומר אותו כתבנית.
+#
+# הקבצים בבאקט budget-uploads בשם בטוח (מלכודת 31); השם המקורי בעברית שמור
+# ב-files ומשוחזר כאן — הדוח והמיפוי מתייחסים לקובץ בשמו.
+# הסוכן קורא מהבאקט כי חשבונו מנהל־על (budget_manage_codes מחזירה לו הכול).
+
+BUDGET_SCRIPT = DASHBOARD_DIR / "scripts" / "load_budget.py"
+BUDGET_BUCKET = "budget-uploads"
+
+
+def claim_next_budget(conn):
+    with conn.cursor() as cur:
+        cur.execute("""
+            update public.budget_uploads
+               set status = 'processing'
+             where id = (
+                   select id from public.budget_uploads
+                    where status = 'pending'
+                    order by uploaded_at
+                    limit 1
+                    for update skip locked)
+            returning id, authority_code, fiscal_year, files, approved_mapping
+        """)
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "code": row[1], "year": row[2], "files": row[3] or [], "approved": row[4]}
+
+
+def finish_budget(conn, upload_id, status, proposed=None, source=None, report=None, error=None):
+    report = report or {}
+    counts = report.get("counts") or {}
+    with conn.cursor() as cur:
+        cur.execute("""
+            update public.budget_uploads
+               set status           = %s,
+                   proposed_mapping = coalesce(%s::jsonb, proposed_mapping),
+                   mapping_source   = coalesce(%s, mapping_source),
+                   report           = coalesce(%s::jsonb, report),
+                   rows_loaded      = %s,
+                   error_message    = %s,
+                   processed_at     = case when %s in ('done', 'failed') then now() else processed_at end
+             where id = %s
+        """, (status,
+              json.dumps(proposed, ensure_ascii=False, default=str) if proposed else None,
+              source,
+              json.dumps(report, ensure_ascii=False, default=str) if report else None,
+              sum(v for v in counts.values() if isinstance(v, int)) if status == "done" else None,
+              (error or "")[:800] or None,
+              status, upload_id))
+
+
+def run_budget(args_list: list) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(BUDGET_SCRIPT), *args_list],
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+
+
+def process_budget(conn, job) -> None:
+    code = job["code"]
+    log.info("═" * 60)
+    log.info("קליטת תקציב — רשות %s · שנת תקציב %s · %s קבצים", code, job["year"], len(job["files"]))
+
+    work_dir = Path(tempfile.mkdtemp(prefix=f"budget-{code}-"))
+    report_path = work_dir / "report.json"
+    try:
+        log.info("1/3 מוריד את הקבצים…")
+        local_files = []
+        for f in job["files"]:
+            local_files.append(download_one(f["path"], work_dir / "src", bucket=BUDGET_BUCKET,
+                                            local_name=f.get("name") or Path(f["path"]).name))
+        base = ["--code", code, "--year", str(job["year"]), "--upload-id", str(job["id"])]
+        for path in local_files:
+            base += ["--file", str(path)]
+
+        approved = job["approved"]
+        source = "manual"
+        # `is None` ולא `not` — מיפוי ריק שאושר הוא החלטה, לא היעדר אישור (כמו בדרג ב')
+        if approved is None:
+            log.info("2/3 מזהה את הדוחות…")
+            proc = run_budget([*base, "--emit-mapping"])
+            if proc.returncode != 0:
+                out = (proc.stderr or proc.stdout or "").strip().splitlines()
+                raise RuntimeError(out[-1][:800] if out else "זיהוי הדוחות נכשל")
+            result = json.loads(proc.stdout)
+            if not result.get("auto"):
+                finish_budget(conn, job["id"], "awaiting_approval", proposed=result["files"], source="dictionary")
+                log.info("✓ ממתין לאישור ההתאמה באתר")
+                return
+            # לכל הדוחות יש תבנית שמורה — טוענים בלי לעצור
+            approved = {name: {"kind": d["kind"], "mapping": d["mapping"]} for name, d in result["files"].items()}
+            source = "saved"
+            log.info("   כל הדוחות מוכרים מתבנית שמורה — טוען")
+
+        log.info("2/3 בודק וטוען…")
+        mapping_file = work_dir / "mapping.json"
+        mapping_file.write_text(json.dumps(approved, ensure_ascii=False), encoding="utf-8")
+        proc = run_budget([*base, "--mapping", str(mapping_file), "--save-mapping",
+                           "--report-json", str(report_path)])
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+        for w in report.get("warnings", []):
+            log.warning("   ⚠ %s", w.get("text"))
+        if proc.returncode != 0:
+            out = (proc.stderr or proc.stdout or "").strip().splitlines()
+            raise RuntimeError(" · ".join(report.get("errors") or []) or (out[-1][:800] if out else ""))
+
+        log.info("3/3 מעדכן סטטוס…")
+        finish_budget(conn, job["id"], "done", source=source, report=report)
+        log.info("✓ הושלם — %s", report.get("counts"))
+
+    except Exception as exc:
+        log.error("✗ קליטת התקציב נכשלה: %s", exc)
+        log.debug(traceback.format_exc())
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
+            finish_budget(conn, job["id"], "failed", report=report, error=str(exc))
+        except Exception:
+            log.exception("לא הצלחתי לעדכן את סטטוס הכישלון")
+    finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
@@ -1221,10 +1356,11 @@ def main() -> None:
     # ריצה שנקטעה משאירה תיקיית עבודה זמנית. מנקים בעלייה כדי שלא
     # יצטברו עשרות תיקיות של 10MB לאורך חודשים.
     stale = 0
-    for leftover in Path(tempfile.gettempdir()).glob("matzevet-*"):
-        if leftover.is_dir() and time.time() - leftover.stat().st_mtime > 3600:
-            shutil.rmtree(leftover, ignore_errors=True)
-            stale += 1
+    for pattern in ("matzevet-*", "tierb-*", "bagrut-*", "budget-*"):
+        for leftover in Path(tempfile.gettempdir()).glob(pattern):
+            if leftover.is_dir() and time.time() - leftover.stat().st_mtime > 3600:
+                shutil.rmtree(leftover, ignore_errors=True)
+                stale += 1
     if stale:
         log.info("נוקו %s תיקיות עבודה שנשארו מריצות קודמות", stale)
 
@@ -1264,6 +1400,11 @@ def main() -> None:
                     process_bagrut(conn, bagrut)
                 else:
                     log.info("אין סבבי בגרות ממתינים")
+                budget = claim_next_budget(conn)
+                if budget:
+                    process_budget(conn, budget)
+                else:
+                    log.info("אין קליטות תקציב ממתינות")
                 log.info("סבב בדיקה הסתיים")
                 break
 
@@ -1278,6 +1419,12 @@ def main() -> None:
             if bagrut:
                 idle_logged = False
                 process_bagrut(conn, bagrut)
+
+            # קליטת תקציב — תור נפרד, רץ גם ב---tier-b-only (020)
+            budget = claim_next_budget(conn)
+            if budget:
+                idle_logged = False
+                process_budget(conn, budget)
 
             job = None if args.tier_b_only else claim_next_upload(conn)
             if job:

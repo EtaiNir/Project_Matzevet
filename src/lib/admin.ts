@@ -152,12 +152,33 @@ export function bagrutSubjectsOnly(u: BagrutScopeFields | null | undefined): boo
   )
 }
 
+/** תפקיד בניהול התקציב (מיגרציה 040). null = אין גישה לתקציב. */
+export type BudgetRole = 'manager' | 'owner' | 'viewer'
+
+export const BUDGET_ROLE_LABELS: Record<BudgetRole, string> = {
+  manager: 'מנהל/ת תקציב',
+  owner: 'אחראי/ת תקציב',
+  viewer: 'צפייה בתקציב',
+}
+
+export const BUDGET_ROLE_HINTS: Record<BudgetRole, string> = {
+  manager: 'רואה ועורך את כל הכרטיסים, המיתר והרכש, ומעלה קבצים',
+  owner: 'רואה ועורך צפי והערות רק בכרטיסים שבקטגוריות שסומנו לו',
+  viewer: 'רואה הכול, לא עורך',
+}
+
+/** שדות התקציב לשמירה — הקטגוריות רלוונטיות לאחראי בלבד, ומתאפסות אצל השאר */
+export function budgetPatch(role: BudgetRole | null, categories: string[]) {
+  return { budget_role: role, budget_categories: role === 'owner' ? categories : [] }
+}
+
 /** לאיזה מוצר יש למשתמש גישה — נגזר מהשדות; האכיפה עצמה ב-RLS */
-export function userProducts(u: Pick<ManagedUser, 'role' | 'scope_level' | 'bagrut_role'>) {
+export function userProducts(u: Pick<ManagedUser, 'role' | 'scope_level' | 'bagrut_role'> & { budget_role?: BudgetRole | null }) {
   const superAdmin = u.role === 'super_admin'
   return {
     matzevet: superAdmin || (u.scope_level ?? 'none') !== 'none',
     bagrut: superAdmin || Boolean(u.bagrut_role),
+    budget: superAdmin || Boolean(u.budget_role),
   }
 }
 
@@ -198,6 +219,9 @@ export interface ManagedUser {
   bagrut_subject_keys: string[]
   /** כותרת לתצוגה (039): 'principal' = מנהל/ת בית ספר, עם "כל בית הספר" */
   bagrut_title?: BagrutTitle | null
+  /** ניהול תקציב (040). null = אין גישה; קיימים רק אחרי המיגרציה */
+  budget_role?: BudgetRole | null
+  budget_categories?: string[]
 }
 
 export interface MoeUpload {
@@ -503,7 +527,19 @@ const USER_PROFILE_COLUMNS =
 export async function fetchUsers(): Promise<{
   users: ManagedUser[]
   hasProfileFields: boolean
+  /** עמודות התקציב קיימות (מיגרציה 040) — אחרת לשונית התקציב לא מעניקה גישה */
+  hasBudgetFields: boolean
 }> {
+  const [base, budget] = await Promise.all([fetchUsersBase(), fetchBudgetFields()])
+  if (!budget) return { ...base, hasBudgetFields: false }
+  return {
+    ...base,
+    users: base.users.map((u) => ({ ...u, ...(budget.get(u.id) ?? {}) })),
+    hasBudgetFields: true,
+  }
+}
+
+async function fetchUsersBase(): Promise<{ users: ManagedUser[]; hasProfileFields: boolean }> {
   const extended = await supabase
     .from('users')
     .select(`${USER_BASE_COLUMNS}, ${USER_PROFILE_COLUMNS}`)
@@ -519,6 +555,21 @@ export async function fetchUsers(): Promise<{
     .order('email')
   if (error) throw error
   return { users: (data ?? []) as unknown as ManagedUser[], hasProfileFields: false }
+}
+
+/**
+ * עמודות התקציב בבקשה נפרדת — לא בתוך USER_BASE_COLUMNS: שם עמודה שאינה
+ * קיימת (מסד בלי 040) הייתה מכשילה את כל רשימת המשתמשים, בלי fallback.
+ */
+async function fetchBudgetFields(): Promise<Map<string, Pick<ManagedUser, 'budget_role' | 'budget_categories'>> | null> {
+  const { data, error } = await supabase.from('users').select('id, budget_role, budget_categories')
+  if (error) return null
+  return new Map(
+    ((data ?? []) as { id: string; budget_role: BudgetRole | null; budget_categories: string[] | null }[]).map((r) => [
+      r.id,
+      { budget_role: r.budget_role, budget_categories: r.budget_categories ?? [] },
+    ]),
+  )
 }
 
 /**
@@ -565,6 +616,8 @@ export interface NewUserInput {
   bagrut_classes: string[]
   bagrut_subject_keys: string[]
   bagrut_title?: BagrutTitle | null
+  budget_role?: BudgetRole | null
+  budget_categories?: string[]
 }
 
 export async function createUser(input: NewUserInput) {
@@ -607,6 +660,8 @@ export async function updateUserPermissions(
       | 'bagrut_classes'
       | 'bagrut_subject_keys'
       | 'bagrut_title'
+      | 'budget_role'
+      | 'budget_categories'
     >
   >,
 ) {
@@ -768,7 +823,7 @@ export async function fetchUploads(code: string): Promise<MoeUpload[]> {
  * הרישום. ההודעה הזו נראית כמו באג באתר, אבל היא בעצם אומרת שמישהו
  * בדרך (פרוקסי, מסנן תוכן, תוספת דפדפן) החזיר דף HTML במקום התשובה.
  */
-async function step<T>(label: string, run: () => Promise<T>): Promise<T> {
+export async function step<T>(label: string, run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (e) {
@@ -869,7 +924,7 @@ export async function fetchTierBUploads(code: string): Promise<TierBUpload[]> {
  * ⚠️ לא להחיל את זה על `uploadMoeFiles`: שם ה-pipeline והסוכן בוחרים
  * קבצים **לפי הקידומת בשם**, ועיקור היה שובר את הזיהוי.
  */
-function storageSafeName(name: string): string {
+export function storageSafeName(name: string): string {
   const dot = name.lastIndexOf('.')
   const ext = dot > 0 ? name.slice(dot).toLowerCase().replace(/[^a-z0-9.]/g, '') : ''
   const base = (dot > 0 ? name.slice(0, dot) : name)

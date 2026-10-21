@@ -223,6 +223,39 @@ student, school, grade, class, track)` על `bagrut_students`. ציונים ומ
 > מקצוע לפני הציון הראשון. רכז המגמה (`track_coordinator`, `bagrut_tracks`)
 > הוסר ב-030. ראה [014 §4](decisions/014-bagrut-module.md).
 
+## מודול ניהול תקציב (מיגרציה 040)
+
+**טבלאות משותפות לכל הרשויות**, כמו הבגרות. ההחלטה: [020](decisions/020-budget-module.md).
+**הוחלה על המסד החי ב-20.10**, אחרי ריצה מלאה בטרנזקציה מגולגלת ובדיקת RLS לכל תפקיד.
+
+| טבלה | שורה = | מקור | נדרסת בקליטה? |
+|---|---|---|---|
+| `budget_cards` | כרטיס × שנת תקציב: תקציב הכנסות/הוצאות (המאושר — השערה, 020 §4), ביצוע, שריון, יתרה, דרישה. **סימני EPR: הוצאות שליליות** | דוח EPR "ברמת הכרטיס" | לפי (רשות, שנה) |
+| `budget_transactions` | תנועה בכרטסת, עד האסמכתא. `is_opening` = יתרת פתיחה | דוח EPR "ברמת הפעולה" | לפי טווח התאריכים שבקובץ; יתרות הפתיחה מתחלפות |
+| `budget_orders` | הזמנת רכש. עמודה שלא הותאמה → `extra` | דוח הזמנות מ-EPR | כולן |
+| `meitar_runs` | ZIP מיתר אחד: רשות × חודש חישוב | ZIP המיתר | לפי (רשות, חודש) — cascade |
+| `meitar_invoice` | שורה ב-`CHESHBONIT`: נושא × חודש תחולה × חשבות | ZIP | עם הריצה |
+| `meitar_rows` | שורה באחד מ-15 קובצי הפירוט; עמודות ליבה + `extra` | ZIP | עם הריצה |
+| `budget_card_meta` | כרטיס: קטגוריה 1/2/3, אחראי, מקור כספי, נושא מיתר, גפ"ן | המשתמש | **לעולם לא** |
+| `budget_card_plans` | כרטיס × שנה: צפי, תכנית לשנה הבאה, הערות. **בערך טבעי (חיובי)** | המשתמש | **לעולם לא** |
+| `budget_order_notes` | הזמנה: חשבונית, גפ"ן, תב"ר, הערות | המשתמש | **לעולם לא** |
+| `meitar_topic_plans` | נושא × שנה"ל: תקציב, צפי, שנה הבאה | המשתמש | **לעולם לא** |
+| `budget_card_files` | קובץ מצורף לכרטיס (באקט `budget-files`) | המשתמש | **לעולם לא** |
+| `budget_uploads` | תור הקליטה — בדפוס `tier_b_uploads`, עם שלב אישור התאמה | מסך הקליטה | — |
+| `budget_mappings` | תבנית התאמה שאושרה, לפי `(רשות, סוג, headers_hash)` | הסוכן אחרי טעינה | — |
+
+**הרשאות:** `users.budget_role` ∈ manager / owner / viewer (null = בלי גישה),
+ו-`budget_categories` לאחראי. שלוש פונקציות definer שמחזירות **מערך** ונקראות
+ב-`(select …)` — פעם אחת לבקשה (מלכודת 34):
+`budget_full_codes()` (מנהל, צופה, מנהל־על), `budget_manage_codes()` (מנהל, מנהל־על),
+`budget_owner_cards()` (`'קוד:כרטיס'` לאחראי, לפי קטגוריה 1). קטגוריות — רק מנהל;
+צפי ותכנית — מנהל, או אחראי בכרטיסים שלו; מיתר — לא לאחראי. שכבת הקבצים — הסוכן
+בלבד (חיבור ישיר). ביצוע חודשי מסוכם ב-`budget_monthly(code, from, to)` —
+security invoker, כך שה-RLS חל.
+
+**Storage:** `budget-uploads` (`{code}/{stamp}/…` — מנהל התקציב) ו-`budget-files`
+(`{code}/{card}/…`). נפרדים מ-`moe-uploads`, שכתיבה אליו דורשת `may_update_moe`.
+
 ## שדות מחושבים
 
 ארבעה שדות אינם מגיעים ישירות ממשרד החינוך. הראשון מחושב **בטעינה**
@@ -362,6 +395,8 @@ student, school, grade, class, track)` על `bagrut_students`. ציונים ומ
 | 029 | `bagrut_cycle` | מחזור ההתערבות: `bagrut_actions`, `bagrut_log`, מעקב הבא וגורמים ב-`bagrut_tracking` |
 | 030 | `subject_replaces_track_coordinator` | רכז מקצוע מחליף את רכז המגמה, ורואה את כל בית הספר; `users.bagrut_tracks` נמחקה |
 | 031 | `bagrut_ai_analysis` | ניתוח AI לתלמיד — מצב ותוכנית, נשמר עם היסטוריה |
+| 032–039 | — | ראה [dev-log](dev-log.md): מצבת בלי גישה, בתי ספר בבגרות, ספירות, רכזי מקצוע, היקפים משולבים, עריכה ידנית, כותרת מנהל |
+| 040 | `budget` | מודול ניהול תקציב: 13 טבלאות, תפקידי תקציב, שני באקטים, `budget_monthly` ([020](decisions/020-budget-module.md)). הוחלה 20.10 |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.

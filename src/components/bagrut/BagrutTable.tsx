@@ -101,6 +101,7 @@ export default function BagrutTable<T>({
   countLabel = 'שורות',
   rowTitle,
   storageKey,
+  sheetName = 'בגרות',
 }: {
   rows: T[]
   columns: Column<T>[]
@@ -115,6 +116,8 @@ export default function BagrutTable<T>({
   rowTitle?: (row: T) => string
   /** שם הטבלה לשמירת רוחב העמודות בדפדפן. בלעדיו הרוחב נשמר עד שעוזבים את המסך */
   storageKey?: string
+  /** שם הגיליון בקובץ האקסל (מודול התקציב משתמש באותה טבלה) */
+  sheetName?: string
 }) {
   const [sort, setSort] = useState(initialSort ?? null)
 
@@ -290,7 +293,7 @@ export default function BagrutTable<T>({
       if (data.length && data.every((row) => row[i] == null || row[i] === '' || typeof row[i] === 'number')) numeric.add(i)
     })
     const stamp = new Date().toISOString().slice(0, 10)
-    downloadWorkbook({ sheetName: 'בגרות', headers, rows: data, numericColumns: numeric }, `${exportName}_${stamp}.xlsx`)
+    downloadWorkbook({ sheetName: sheetName.slice(0, 31), headers, rows: data, numericColumns: numeric }, `${exportName}_${stamp}.xlsx`)
   }
 
   return (

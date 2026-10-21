@@ -20,6 +20,13 @@ import BagrutStudent from './pages/bagrut/BagrutStudent'
 import BagrutProgram from './pages/bagrut/BagrutProgram'
 import BagrutUpload from './pages/bagrut/BagrutUpload'
 import BagrutHonors from './pages/bagrut/BagrutHonors'
+import BudgetShell from './pages/budget/BudgetShell'
+import BudgetHome from './pages/budget/BudgetHome'
+import BudgetCards from './pages/budget/BudgetCards'
+import BudgetCard from './pages/budget/BudgetCard'
+import BudgetMeitar from './pages/budget/BudgetMeitar'
+import BudgetOrders from './pages/budget/BudgetOrders'
+import BudgetUpload from './pages/budget/BudgetUpload'
 import Home from './pages/Home'
 import RequireProduct from './components/RequireProduct'
 
@@ -55,6 +62,7 @@ export default function App() {
   const home = '/home'
   const matzevet = (el: JSX.Element) => <RequireProduct product="matzevet">{el}</RequireProduct>
   const bagrut = (el: JSX.Element) => <RequireProduct product="bagrut">{el}</RequireProduct>
+  const budget = (el: JSX.Element) => <RequireProduct product="budget">{el}</RequireProduct>
 
   return (
     <Routes>
@@ -94,6 +102,17 @@ export default function App() {
           <Route path="honors" element={<BagrutHonors />} />
           <Route path="upload" element={<BagrutUpload />} />
         </Route>
+      </Route>
+
+      {/* ניהול תקציב (החלטה 020) — ברמת הרשות; המעטפת טוענת את הכרטסת פעם אחת */}
+      <Route path="/budget" element={budget(<BudgetShell />)} />
+      <Route path="/budget/:code" element={budget(<BudgetShell />)}>
+        <Route index element={<BudgetHome />} />
+        <Route path="cards" element={<BudgetCards />} />
+        <Route path="card/:card" element={<BudgetCard />} />
+        <Route path="meitar" element={<BudgetMeitar />} />
+        <Route path="orders" element={<BudgetOrders />} />
+        <Route path="upload" element={<BudgetUpload />} />
       </Route>
 
       <Route

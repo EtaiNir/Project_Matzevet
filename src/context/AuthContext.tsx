@@ -38,13 +38,21 @@ export interface UserProfile {
   /** כותרת לתצוגה (039): 'principal' = מנהל/ת בית ספר */
   bagrut_title?: 'principal' | null
   bagrut_subject_keys?: string[]
+  /**
+   * תפקיד בניהול התקציב (מיגרציה 040). null = אין גישה למוצר.
+   * manager — רואה ועורך הכול; owner — רק כרטיסים בקטגוריות שלו; viewer — צפייה.
+   */
+  budget_role?: 'manager' | 'owner' | 'viewer' | null
+  /** לאחראי תקציב: ערכי "קטגוריה 1" של הכרטיסים שבאחריותו */
+  budget_categories?: string[]
 }
 
 const BASE_COLUMNS = 'id, email, display_name, role, authority_codes, scope_level'
 
 /**
  * לאיזה מוצר יש למשתמש גישה — לניתוב ולתצוגה בלבד. האכיפה עצמה ב-RLS
- * (מלכודת 16): מצבת — scope_level ≠ 'none'; בגרות — bagrut_role.
+ * (מלכודת 16): מצבת — scope_level ≠ 'none'; בגרות — bagrut_role;
+ * תקציב — budget_role.
  */
 export function productAccess(p: UserProfile | null) {
   const superAdmin = p?.role === 'super_admin'
@@ -52,8 +60,18 @@ export function productAccess(p: UserProfile | null) {
     superAdmin,
     matzevet: Boolean(p) && (superAdmin || (p!.scope_level ?? 'council') !== 'none'),
     bagrut: Boolean(p) && (superAdmin || Boolean(p!.bagrut_role)),
+    budget: Boolean(p) && (superAdmin || Boolean(p!.budget_role)),
   }
 }
+
+/**
+ * עמודות התקציב (מיגרציה 040) נטענות בבקשה **נפרדת**.
+ *
+ * אילו נוספו ל-EXTENDED_COLUMNS, מסד שעוד אין בו 040 היה מכשיל את כל הבקשה
+ * המורחבת — והמשתמש היה מאבד בשקט גם את הרשאות הבגרות ואת פרטי הפרופיל
+ * (הנפילה לעמודות הבסיס). כך כשל כאן משמעו רק "אין תקציב".
+ */
+const BUDGET_COLUMNS = 'budget_role, budget_categories'
 /**
  * שדות התפקיד והמוסד תלויים במיגרציה שטרם הורצה על המסד.
  * הבקשה מנסה אותם קודם, ואם העמודות אינן קיימות היא נופלת בחזרה לבסיסיות —
@@ -72,14 +90,18 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
-async function loadProfile(userId: string): Promise<UserProfile | null> {
-  const extended = await supabase
-    .from('users')
-    .select(EXTENDED_COLUMNS)
-    .eq('id', userId)
-    .single()
+async function loadBudgetFields(userId: string): Promise<Partial<UserProfile>> {
+  const { data, error } = await supabase.from('users').select(BUDGET_COLUMNS).eq('id', userId).single()
+  return error || !data ? {} : (data as unknown as Partial<UserProfile>)
+}
 
-  if (!extended.error) return extended.data as unknown as UserProfile
+async function loadProfile(userId: string): Promise<UserProfile | null> {
+  const [extended, budget] = await Promise.all([
+    supabase.from('users').select(EXTENDED_COLUMNS).eq('id', userId).single(),
+    loadBudgetFields(userId),
+  ])
+
+  if (!extended.error) return { ...(extended.data as unknown as UserProfile), ...budget }
 
   const { data, error } = await supabase
     .from('users')
@@ -91,7 +113,7 @@ async function loadProfile(userId: string): Promise<UserProfile | null> {
     console.error('שגיאה בטעינת פרופיל המשתמש:', error.message)
     return null
   }
-  return data as unknown as UserProfile
+  return { ...(data as unknown as UserProfile), ...budget }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {

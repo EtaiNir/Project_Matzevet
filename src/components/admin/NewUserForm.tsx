@@ -1,12 +1,15 @@
 import { useState } from 'react'
-import { createUser, type BagrutScopeOptions } from '@/lib/admin'
-import { BagrutFields, MatzevetFields, type BagrutValue, type MatzevetValue } from './ProductFields'
+import { createUser, type BagrutScopeOptions, type ScopeOption } from '@/lib/admin'
+import { BagrutFields, BudgetFields, MatzevetFields, type BagrutValue, type BudgetValue, type MatzevetValue } from './ProductFields'
 
 interface Props {
   authorityCode: string
   /** לרשות בלי מצבת (למשל לקוח בגרות בלבד) — אין מה להעניק */
   hasMatzevet: boolean
   bagrutOptions: BagrutScopeOptions | null
+  /** עמודות התקציב קיימות במסד (מיגרציה 040) */
+  hasBudget: boolean
+  budgetCategories: ScopeOption[] | null
   onCreated: () => void
   onCancel: () => void
 }
@@ -22,12 +25,14 @@ export function suggestPassword() {
  * משתמש חדש: פרטים משותפים, ואז **סימון מפורש של כל מוצר** (אייל, 11.10).
  * בלי סימון — אין גישה. מוצר אחד לפחות נדרש (נאכף גם ב-admin-users).
  */
-export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions, onCreated, onCancel }: Props) {
+export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions, hasBudget, budgetCategories, onCreated, onCancel }: Props) {
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [password, setPassword] = useState(suggestPassword)
   const [withMatzevet, setWithMatzevet] = useState(false)
   const [withBagrut, setWithBagrut] = useState(false)
+  const [withBudget, setWithBudget] = useState(false)
+  const [budget, setBudget] = useState<BudgetValue>({ budget_role: 'manager', budget_categories: [] })
   const [matzevet, setMatzevet] = useState<MatzevetValue>({ role: 'viewer', scope_level: 'council', scope_values: [] })
   const [bagrut, setBagrut] = useState<BagrutValue>({
     bagrut_role: 'coordinator', bagrut_schools: [], bagrut_grades: [], bagrut_classes: [], bagrut_subject_keys: [], bagrut_title: null,
@@ -36,7 +41,8 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
   const [error, setError] = useState<string | null>(null)
 
   const superAdmin = withMatzevet && matzevet.role === 'super_admin'
-  const ready = email.trim() && password.length >= 8 && (withMatzevet || withBagrut)
+  const budgetOn = withBudget && hasBudget && !superAdmin
+  const ready = email.trim() && password.length >= 8 && (withMatzevet || withBagrut || budgetOn)
 
   async function submit() {
     setBusy(true)
@@ -58,6 +64,10 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
         bagrut_classes: b?.bagrut_classes ?? [],
         bagrut_subject_keys: b?.bagrut_subject_keys ?? [],
         bagrut_title: b?.bagrut_role === 'coordinator' ? b.bagrut_title ?? null : null,
+        // תקציב (040) — נשלח רק כשסומן, כך שיצירה בלי תקציב עובדת גם לפני המיגרציה
+        ...(budgetOn
+          ? { budget_role: budget.budget_role, budget_categories: budget.budget_role === 'owner' ? budget.budget_categories : [] }
+          : {}),
       })
       onCreated()
     } catch (e) {
@@ -94,14 +104,18 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
       </div>
 
       <div className="mt-5 text-sm font-bold text-slate-700">גישה למוצרים <span className="font-normal text-slate-500">— בלי סימון אין גישה</span></div>
-      <div className="mt-2 grid gap-3 lg:grid-cols-2">
+      <div className="mt-2 grid gap-3 lg:grid-cols-3">
         <ProductBox title="מצבת תלמידים" checked={withMatzevet} onToggle={setWithMatzevet}
           disabledReason={hasMatzevet ? null : 'לרשות הזו אין מצבת'}>
           <MatzevetFields code={authorityCode} value={matzevet} onChange={setMatzevet} />
         </ProductBox>
         <ProductBox title="זכאות לבגרות" checked={withBagrut && !superAdmin} onToggle={setWithBagrut}
-          disabledReason={superAdmin ? 'מנהל־על רואה ממילא את שני המוצרים' : bagrutOptions && !bagrutOptions.schools.length ? 'לרשות הזו אין עדיין סבב בגרות' : null}>
+          disabledReason={superAdmin ? 'מנהל־על רואה ממילא את כל המוצרים' : bagrutOptions && !bagrutOptions.schools.length ? 'לרשות הזו אין עדיין סבב בגרות' : null}>
           <BagrutFields options={bagrutOptions} value={bagrut} onChange={setBagrut} />
+        </ProductBox>
+        <ProductBox title="ניהול תקציב" checked={budgetOn} onToggle={setWithBudget}
+          disabledReason={superAdmin ? 'מנהל־על רואה ממילא את כל המוצרים' : !hasBudget ? 'מודול התקציב עוד לא הותקן במסד' : null}>
+          <BudgetFields categories={budgetCategories} value={budget} onChange={setBudget} />
         </ProductBox>
       </div>
 
@@ -112,7 +126,7 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
         </button>
         <button onClick={onCancel} className="rounded-lg px-3 py-2 text-sm text-slate-500 transition hover:bg-slate-100">ביטול</button>
         <span className="mr-auto text-xs text-slate-500">
-          {!withMatzevet && !withBagrut ? 'יש לסמן מוצר אחד לפחות' : 'רשום את הסיסמה — היא לא תוצג שוב'}
+          {!withMatzevet && !withBagrut && !budgetOn ? 'יש לסמן מוצר אחד לפחות' : 'רשום את הסיסמה — היא לא תוצג שוב'}
         </span>
       </div>
     </div>

@@ -4,6 +4,8 @@ import {
   ROLE_LABELS,
   authorityHasMatzevet,
   bagrutPatch,
+  budgetPatch,
+  BUDGET_ROLE_LABELS,
   deleteUser,
   fetchBagrutScopeOptions,
   fetchUsers,
@@ -13,16 +15,18 @@ import {
   userProducts,
   type BagrutScopeOptions,
   type ManagedUser,
+  type ScopeOption,
 } from '@/lib/admin'
 import NewUserForm, { ProductBox, suggestPassword } from './NewUserForm'
-import { BagrutFields, MatzevetFields } from './ProductFields'
+import { BagrutFields, BudgetFields, MatzevetFields } from './ProductFields'
+import { PRODUCTS, PRODUCT_LABELS, type ProductKey } from '@/config/products'
+import { fetchBudgetCategories } from '@/lib/budget'
 
 interface Props {
   code: string
 }
 
-type Product = 'matzevet' | 'bagrut'
-const PRODUCT_LABELS: Record<Product, string> = { matzevet: 'מצבת תלמידים', bagrut: 'זכאות לבגרות' }
+type Product = ProductKey
 
 /**
  * מסך 2 — ניהול הרשאות, מפוצל לשני המוצרים (אייל, 11.10).
@@ -38,6 +42,9 @@ export default function PermissionsTab({ code }: Props) {
   const [hasProfileFields, setHasProfileFields] = useState(false)
   const [hasMatzevet, setHasMatzevet] = useState(true)
   const [bagrutOptions, setBagrutOptions] = useState<BagrutScopeOptions | null>(null)
+  // עמודות התקציב קיימות במסד (מיגרציה 040) — אחרת אין מה להעניק
+  const [hasBudgetFields, setHasBudgetFields] = useState(true)
+  const [budgetCategories, setBudgetCategories] = useState<ScopeOption[] | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState<ManagedUser | null>(null)
   // בעריכה: האם יש גישה למוצר שבלשונית
@@ -55,12 +62,14 @@ export default function PermissionsTab({ code }: Props) {
     const r = await fetchUsers()
     setUsers(r.users)
     setHasProfileFields(r.hasProfileFields)
+    setHasBudgetFields(r.hasBudgetFields)
   }
 
   useEffect(() => {
     reload().catch((e) => setError(e.message))
     authorityHasMatzevet(code).then(setHasMatzevet)
     fetchBagrutScopeOptions(code).then(setBagrutOptions).catch(() => setBagrutOptions({ schools: [], grades: [], classes: [], subjects: [] }))
+    fetchBudgetCategories(code).then(setBudgetCategories).catch(() => setBudgetCategories([]))
   }, [code])
 
   // מעבר בין מוצרים סוגר עריכה פתוחה — היא שייכת למוצר הקודם
@@ -86,6 +95,10 @@ export default function PermissionsTab({ code }: Props) {
       d.scope_values = []
     }
     if (grant && product === 'bagrut') d.bagrut_role = 'coordinator'
+    if (grant && product === 'budget') {
+      d.budget_role = 'manager'
+      d.budget_categories = []
+    }
     setDraft(d)
     setAccess(has || grant)
     setEditing(user.id)
@@ -117,8 +130,13 @@ export default function PermissionsTab({ code }: Props) {
           scope_values: on && !superAdmin && draft.scope_level !== 'council' ? draft.scope_values : [],
           ...(hasProfileFields ? { can_edit_extra: on && draft.role === 'viewer' ? Boolean(draft.can_edit_extra) : false } : {}),
         })
-      } else {
+      } else if (product === 'bagrut') {
         await updateUserPermissions(draft.id, { ...shared, ...bagrutPatch(access ? draft.bagrut_role ?? 'coordinator' : null, draft) })
+      } else {
+        await updateUserPermissions(draft.id, {
+          ...shared,
+          ...budgetPatch(access ? draft.budget_role ?? 'manager' : null, draft.budget_categories ?? []),
+        })
       }
       if (newPassword) {
         await setUserPassword(draft.id, newPassword)
@@ -162,7 +180,9 @@ export default function PermissionsTab({ code }: Props) {
     ? 'לרשות הזו אין מצבת — אין מה להעניק.'
     : product === 'bagrut' && bagrutOptions && !bagrutOptions.schools.length
       ? 'לרשות הזו אין עדיין סבב בגרות — אפשר להעניק גישה אחרי הקליטה הראשונה.'
-      : null
+      : product === 'budget' && !hasBudgetFields
+        ? 'מודול התקציב עוד לא הותקן במסד (מיגרציה 040) — אין עדיין מה להעניק.'
+        : null
 
   return (
     <div className="space-y-6">
@@ -181,10 +201,10 @@ export default function PermissionsTab({ code }: Props) {
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-0.5 rounded-xl bg-slate-100 p-1">
-            {(Object.keys(PRODUCT_LABELS) as Product[]).map((p) => (
+            {PRODUCTS.map(({ key: p, label }) => (
               <button key={p} onClick={() => setProduct(p)}
                 className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${product === p ? 'bg-white text-sky-800 shadow-sm' : 'text-slate-500 hover:text-sky-700'}`}>
-                {PRODUCT_LABELS[p]}
+                {label}
               </button>
             ))}
           </div>
@@ -198,7 +218,9 @@ export default function PermissionsTab({ code }: Props) {
         <p className="mb-4 text-sm text-slate-500">
           {product === 'matzevet'
             ? <>התפקיד קובע מה מותר לעשות; ההיקף קובע <strong>אילו תלמידים</strong> נראים.</>
-            : <>התפקיד קובע <strong>אילו תלמידים</strong> נראים ומי עורך מעקב.</>}
+            : product === 'bagrut'
+              ? <>התפקיד קובע <strong>אילו תלמידים</strong> נראים ומי עורך מעקב.</>
+              : <>התפקיד קובע מי עורך צפי ותכנון; לאחראי תקציב — <strong>אילו כרטיסים</strong> נראים.</>}
           {' '}{withAccess} מתוך {inRashut.length} משתמשים עם גישה. כל מוצר מוענק בנפרד, והאכיפה במסד הנתונים (RLS) — לא רק בתצוגה.
         </p>
         {productBlocked && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{productBlocked}</p>}
@@ -206,6 +228,7 @@ export default function PermissionsTab({ code }: Props) {
         {adding && (
           <div className="mb-4">
             <NewUserForm authorityCode={code} hasMatzevet={hasMatzevet} bagrutOptions={bagrutOptions}
+              hasBudget={hasBudgetFields} budgetCategories={budgetCategories}
               onCreated={async () => { setAdding(false); await reload(); setNotice('המשתמש נוצר. מסור לו את הסיסמה שרשמת.') }}
               onCancel={() => setAdding(false)} />
           </div>
@@ -263,10 +286,14 @@ export default function PermissionsTab({ code }: Props) {
                     <ProductBox title={`גישה ל${PRODUCT_LABELS[product]}`}
                       checked={product === 'matzevet' && draft.role === 'super_admin' ? true : access}
                       onToggle={setAccess}
-                      disabledReason={product === 'bagrut' && draft.role === 'super_admin' ? 'מנהל־על רואה ממילא את שני המוצרים' : productBlocked}>
+                      disabledReason={product !== 'matzevet' && draft.role === 'super_admin' ? 'מנהל־על רואה ממילא את כל המוצרים' : productBlocked}>
                       {product === 'matzevet' ? (
                         <MatzevetFields code={code} showEditExtra={hasProfileFields}
                           value={{ role: draft.role, scope_level: draft.scope_level === 'none' ? 'council' : draft.scope_level, scope_values: draft.scope_values, can_edit_extra: draft.can_edit_extra }}
+                          onChange={(v) => setDraft({ ...draft, ...v })} />
+                      ) : product === 'budget' ? (
+                        <BudgetFields categories={budgetCategories}
+                          value={{ budget_role: draft.budget_role ?? 'manager', budget_categories: draft.budget_categories ?? [] }}
                           onChange={(v) => setDraft({ ...draft, ...v })} />
                       ) : (
                         <BagrutFields options={bagrutOptions}
@@ -277,7 +304,7 @@ export default function PermissionsTab({ code }: Props) {
 
                     {/* פרטים משותפים לשני המוצרים — תיאוריים בלבד, וסיסמה */}
                     <details className="rounded-xl border border-slate-200 p-3">
-                      <summary className="cursor-pointer text-sm font-medium text-slate-600">פרטים וסיסמה (משותפים לשני המוצרים)</summary>
+                      <summary className="cursor-pointer text-sm font-medium text-slate-600">פרטים וסיסמה (משותפים לכל המוצרים)</summary>
                       <div className="mt-3 space-y-4">
                         {hasProfileFields && (
                           <div className="grid gap-3 sm:grid-cols-3">
@@ -337,6 +364,20 @@ function AccessChips({ user, product, bagrutOptions }: { user: ManagedUser; prod
   const chip = 'rounded-full px-3 py-1'
   if (user.role === 'super_admin') return <span className={`${chip} bg-slate-100 text-slate-600`}>מנהל־על — גישה מלאה</span>
   if (!userProducts(user)[product]) return <span className={`${chip} text-slate-400`}>— אין גישה ל{PRODUCT_LABELS[product]} —</span>
+
+  if (product === 'budget') {
+    const role = user.budget_role ?? 'viewer'
+    return (
+      <>
+        <span className={`${chip} bg-emerald-50 text-emerald-800`}>{BUDGET_ROLE_LABELS[role]}</span>
+        {role === 'owner' && (
+          <span className={`${chip} max-w-xs truncate bg-sky-50 text-sky-700`} title={(user.budget_categories ?? []).join(', ')}>
+            {(user.budget_categories ?? []).join(', ') || 'לא נבחרה קטגוריה'}
+          </span>
+        )}
+      </>
+    )
+  }
 
   if (product === 'matzevet') {
     return (

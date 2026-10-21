@@ -462,7 +462,7 @@ export function displayName(s: BagrutStudent): string {
 // ─────────────────────────────── טעינה ───────────────────────────────
 
 /** שליפה בדפים של 1000 — הגבול של PostgREST לבקשה אחת. */
-async function fetchAll<T>(
+export async function fetchAll<T>(
   build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
   const out: T[] = []

@@ -4,9 +4,10 @@ import { productAccess, useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import LastStudentLink from '@/components/bagrut/LastStudentLink'
 import { IconGraduation, IconLandmark, IconLock, IconRoster } from '@/components/brand/Icons'
+import { PRODUCT_LABELS } from '@/config/products'
 import { supabase } from '@/lib/supabase'
-import { bagrutGeneralScope, bagrutSubjectsOnly, bagrutTitle, fetchAuthorities, fetchStudentCounts, ROLE_LABELS, type Authority } from '@/lib/admin'
-import { loadAdminOverview, loadBagrutOverviews, loadManagerOverview, type AdminOverview, type BagrutOverview, type ManagerOverview, type Todo } from '@/lib/home'
+import { bagrutGeneralScope, bagrutSubjectsOnly, bagrutTitle, BUDGET_ROLE_LABELS, fetchAuthorities, fetchStudentCounts, ROLE_LABELS, type Authority } from '@/lib/admin'
+import { loadAdminOverview, loadBagrutOverviews, loadBudgetOverview, loadManagerOverview, type AdminOverview, type BagrutOverview, type BudgetOverviewRow, type ManagerOverview, type Todo } from '@/lib/home'
 import { AuthoritiesSection, BagrutSection, ManagerSection, TodoSection } from '@/components/home/RoleBlocks'
 
 /**
@@ -79,6 +80,7 @@ export default function Home() {
   const [matzevet, setMatzevet] = useState<MatzevetStat[] | null>(null)
   const [countsFailed, setCountsFailed] = useState(false)
   const [bagrut, setBagrut] = useState<BagrutStat[] | null>(null)
+  const [budget, setBudget] = useState<{ rows: BudgetOverviewRow[]; todos: Todo[] } | null>(null)
 
   useEffect(() => {
     fetchAuthorities().then(setAuthorities).catch(() => setAuthorities([]))
@@ -144,6 +146,16 @@ export default function Home() {
     })
   }, [access.bagrut, codes])
 
+  // ── ניהול תקציב (020): הכרטסת האחרונה לכל רשות, וקליטות שמחכות לטיפול
+  useEffect(() => {
+    if (codes == null) return
+    if (!access.budget || !codes.length) return setBudget({ rows: [], todos: [] })
+    loadBudgetOverview(codes, (c) => authorities?.find((a) => a.code === c)?.name ?? `רשות ${c}`)
+      .then(setBudget).catch(() => setBudget({ rows: [], todos: [] }))
+    // השם מתעדכן ברינדור; אין צורך לטעון מחדש כשהרשויות נטענות
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [access.budget, codes])
+
   // ── תוכן לפי תפקיד: מנהל־על · מנהל רשות · רכז בגרויות / רכז שכבה / מחנך
   // רכז מקצוע לא מקבל את בלוק "הרשות שלי" גם כשיש לו גם תפקיד מנהל במצבת (אייל, 13.10)
   const isManager = !access.superAdmin && profile?.role === 'admin' && access.matzevet && !bagrutSubjectsOnly(profile)
@@ -171,11 +183,13 @@ export default function Home() {
     loadBagrutOverviews(codes, profile?.bagrut_role ?? '', bagrutGeneralScope(profile)).then(setBagrutOv).catch(() => setBagrutOv([]))
   }, [bagrutWorker, codes, profile])
 
-  const roleBased = access.superAdmin || isManager || bagrutWorker
+  const budgetManager = access.superAdmin || profile?.budget_role === 'manager'
+  const roleBased = access.superAdmin || isManager || bagrutWorker || budgetManager
   const todos: Todo[] = [
     ...(admin?.todos ?? []),
     ...(managers ?? []).flatMap((m) => m.todos),
     ...(bagrutOv ?? []).flatMap((o) => o.todos),
+    ...(budgetManager ? budget?.todos ?? [] : []),
   ]
   const todosLoading = (access.superAdmin && !admin) || (isManager && !managers) || (bagrutWorker && !bagrutOv)
 
@@ -185,8 +199,9 @@ export default function Home() {
   const roles = [
     access.superAdmin ? 'מנהל־על' : access.matzevet && profile ? `מצבת: ${ROLE_LABELS[profile.role]}` : null,
     !access.superAdmin && profile?.bagrut_role ? `זכאות לבגרות: ${bagrutTitle(profile)}` : null,
+    !access.superAdmin && profile?.budget_role ? `${PRODUCT_LABELS.budget}: ${BUDGET_ROLE_LABELS[profile.budget_role]}` : null,
   ].filter(Boolean)
-  const none = !access.matzevet && !access.bagrut
+  const none = !access.matzevet && !access.bagrut && !access.budget
 
   // מספרים מרכזיים לפס העליון — בגודל העולם של המשתמש, לפי התפקיד
   let stats: { label: string; value: number | string | null; sub?: string }[] = []
@@ -215,6 +230,7 @@ export default function Home() {
       stats.push({ label: 'בתי ספר בבגרות', value: schools })
       stats.push({ label: 'למעקב השבוע', value: bagrut ? bagrut.reduce((s, b) => s + b.followups, 0) : null })
     }
+    if (access.budget) stats.push({ label: 'כרטיסי תקציב', value: budget ? budget.rows.reduce((s, r) => s + r.cards, 0) : null })
   }
 
   return (
@@ -330,8 +346,21 @@ export default function Home() {
                   <LockedCard icon={<IconGraduation />} title="זכאות לבגרות" />
                 )}
 
+                {access.budget ? (
+                  <ProductCard icon={<IconLandmark />} title={PRODUCT_LABELS.budget} tone="emerald" delay={3}
+                    description="תכנון מול ביצוע, צפי לסוף השנה ותכנון לשנה הבאה — מהנהלת החשבונות, המיתר והרכש."
+                    loading={budget == null}
+                    rows={(budget?.rows ?? []).map((r) => ({
+                      key: r.code, to: `/budget/${r.code}`, title: nameOf(r.code),
+                      detail: [`תקציב ${r.year}`, `${fmt(r.cards)} כרטיסים`, r.loadedAt ? ago(r.loadedAt) : ''].filter(Boolean).join(' · '),
+                    }))}
+                    empty="אין עדיין נתוני תקציב ברשויות שלך." />
+                ) : (
+                  <LockedCard icon={<IconLandmark />} title={PRODUCT_LABELS.budget} />
+                )}
+
                 {access.superAdmin && (
-                  <ProductCard icon={<IconLandmark />} title="ניהול לקוחות" tone="slate" delay={3}
+                  <ProductCard icon={<IconLandmark />} title="ניהול לקוחות" tone="slate" delay={4}
                     description="רשויות, משתמשים והרשאות, העלאת נתונים והיסטוריית עדכונים."
                     rows={[{
                       key: 'admin', to: '/admin', title: 'לכל הלקוחות',
@@ -387,6 +416,7 @@ function BannerArt() {
 const TONES = {
   sky: { ring: 'hover:border-sky-300 hover:shadow-sky-100', stripe: 'from-sky-400 to-sky-600', icon: 'from-sky-500 to-blue-600 shadow-sky-200', link: 'text-sky-700' },
   violet: { ring: 'hover:border-violet-300 hover:shadow-violet-100', stripe: 'from-violet-400 to-indigo-600', icon: 'from-violet-500 to-indigo-600 shadow-violet-200', link: 'text-violet-700' },
+  emerald: { ring: 'hover:border-emerald-300 hover:shadow-emerald-100', stripe: 'from-emerald-400 to-teal-600', icon: 'from-emerald-500 to-teal-600 shadow-emerald-200', link: 'text-emerald-700' },
   slate: { ring: 'hover:border-slate-300 hover:shadow-slate-200', stripe: 'from-slate-300 to-slate-500', icon: 'from-slate-500 to-slate-700 shadow-slate-200', link: 'text-slate-700' },
 }
 

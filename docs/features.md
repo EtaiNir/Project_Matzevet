@@ -420,3 +420,19 @@ SVG בקווי מתאר. **כל הגרפיקה מוטבעת** — אין קרי�
 
 רץ 24/7 על מחשב נפרד ומעבד את הקבצים שהועלו. פרטים:
 [agent/README.md](../agent/README.md) · [decisions/004](decisions/004-admin-interface-and-agent.md).
+
+## מודול ניהול תקציב (20.10 — נבנה מקומית, טרם הותקן)
+
+מוצר שלישי בפורטל, [החלטה 020](decisions/020-budget-module.md).
+
+| פיצ'ר | קובץ עיקרי | סטטוס |
+|--------|-----------|--------|
+| קליטת שני דוחות EPR, דוח הזמנות ו-ZIP מיתר; התאמת כותרות ותבנית שמורה | `scripts/load_budget.py`, `components/budget/BudgetUploadPanel.tsx` | 🟡 נבדק ביבש על קובצי מנשה |
+| הצלבה: ביצוע מול תנועות; מיתר: חשבונית מול פירוט | `scripts/load_budget.py` | 🟡 410/410 · 62/63 |
+| תמונת תקציב — ניצול מול הקצב, גרעון מתוכנן, צפי, חריגות | `pages/budget/BudgetHome.tsx` | 🟡 |
+| כרטסת עם עריכה בשורה (צפי, תכנית שנה הבאה, קטגוריה) | `pages/budget/BudgetCards.tsx` | 🟡 |
+| כרטיס: סיווג ותכנון, ביצוע חודשי, תנועות, קבצים | `pages/budget/BudgetCard.tsx` | 🟡 |
+| מיתר — הפרש חודשי מוביל, רטרואקטיבי, תכנון לנושא | `pages/budget/BudgetMeitar.tsx` | 🟡 |
+| רכש — הזמנות, חשבונית, גפ"ן, תב"ר | `pages/budget/BudgetOrders.tsx` | 🟡 ממתין לדוח ההזמנות |
+| שלושה תפקידים: מנהל / אחראי לפי קטגוריות / צופה | `040_budget.sql`, `components/admin/ProductFields.tsx` | 🟡 |
+

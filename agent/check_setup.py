@@ -29,7 +29,7 @@ def check_packages():
     print("\nספריות:")
     for module, label in [("pandas", "pandas"), ("numpy", "numpy"),
                           ("openpyxl", "openpyxl"), ("psycopg2", "psycopg2"),
-                          ("requests", "requests")]:
+                          ("requests", "requests"), ("xlrd", "xlrd")]:
         try:
             mod = __import__(module)
             ver = getattr(mod, "__version__", "")

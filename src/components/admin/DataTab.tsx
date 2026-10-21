@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BagrutData from '@/components/admin/BagrutData'
+import BudgetUploadPanel from '@/components/budget/BudgetUploadPanel'
+import { PRODUCTS, type ProductKey } from '@/config/products'
 import {
   countStudents,
   fetchUploads,
@@ -21,8 +23,7 @@ const STATUS_LABELS: Record<MoeUpload['status'], { text: string; tone: string }>
   failed: { text: 'נכשל', tone: 'bg-red-100 text-red-800' },
 }
 
-type Product = 'matzevet' | 'bagrut'
-const PRODUCT_LABELS: Record<Product, string> = { matzevet: 'מצבת תלמידים', bagrut: 'זכאות לבגרות' }
+type Product = ProductKey
 
 /**
  * מסך 3 — נתוני הלקוח, מוצר מוצר. המצבת היא ברמת הרשות; הבגרות — ברמת בית
@@ -54,10 +55,10 @@ export default function DataTab({ code }: Props) {
   return (
     <div className="space-y-6">
       <div className="flex w-fit items-center gap-0.5 rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200">
-        {(Object.keys(PRODUCT_LABELS) as Product[]).map((p) => (
+        {PRODUCTS.map(({ key: p, label }) => (
           <button key={p} onClick={() => select(p)}
             className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${product === p ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-500 hover:text-sky-700'}`}>
-            {PRODUCT_LABELS[p]}
+            {label}
           </button>
         ))}
       </div>
@@ -73,6 +74,8 @@ export default function DataTab({ code }: Props) {
         </>
       )}
       {product === 'bagrut' && <BagrutData code={code} />}
+      {/* התקציב ברמת הרשות, כמו המצבת (020) */}
+      {product === 'budget' && <BudgetUploadPanel code={code} />}
     </div>
   )
 }
