@@ -7,7 +7,7 @@ interface Props {
   /** לרשות בלי מצבת (למשל לקוח בגרות בלבד) — אין מה להעניק */
   hasMatzevet: boolean
   bagrutOptions: BagrutScopeOptions | null
-  /** עמודות התקציב קיימות במסד (מיגרציה 044) */
+  /** עמודות התקציב קיימות במסד (מיגרציה 045) */
   hasBudget: boolean
   budgetCategories: ScopeOption[] | null
   onCreated: () => void
@@ -64,7 +64,7 @@ export default function NewUserForm({ authorityCode, hasMatzevet, bagrutOptions,
         bagrut_classes: b?.bagrut_classes ?? [],
         bagrut_subject_keys: b?.bagrut_subject_keys ?? [],
         bagrut_title: b?.bagrut_role === 'coordinator' ? b.bagrut_title ?? null : null,
-        // תקציב (044) — נשלח רק כשסומן, כך שיצירה בלי תקציב עובדת גם לפני המיגרציה
+        // תקציב (045) — נשלח רק כשסומן, כך שיצירה בלי תקציב עובדת גם לפני המיגרציה
         ...(budgetOn
           ? { budget_role: budget.budget_role, budget_categories: budget.budget_role === 'owner' ? budget.budget_categories : [] }
           : {}),

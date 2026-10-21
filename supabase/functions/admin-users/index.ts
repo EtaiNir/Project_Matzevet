@@ -28,7 +28,7 @@ const ROLES = ['viewer', 'admin', 'super_admin']
 const SCOPES = ['none', 'council', 'locality', 'school']
 // תפקידי הבגרות (026, 030). null = אין גישה לבגרות.
 const BAGRUT_ROLES = ['council', 'coordinator', 'grade_coordinator', 'subject_coordinator', 'homeroom']
-// תפקידי התקציב (044). null = אין גישה לתקציב.
+// תפקידי התקציב (045). null = אין גישה לתקציב.
 const BUDGET_ROLES = ['manager', 'owner', 'viewer']
 
 const strArray = (v: unknown): string[] =>
@@ -158,7 +158,7 @@ Deno.serve(async (req) => {
           bagrut_grades: bagrutScoped ? strArray(body.bagrut_grades) : [],
           bagrut_classes: bagrutScoped ? strArray(body.bagrut_classes) : [],
           bagrut_subject_keys: bagrutScoped ? strArray(body.bagrut_subject_keys) : [],
-          // תקציב (044) — רק כשהוענק: כך יצירת משתמש בלי תקציב עובדת גם במסד שעוד אין בו 044
+          // תקציב (045) — רק כשהוענק: כך יצירת משתמש בלי תקציב עובדת גם במסד שעוד אין בו 045
           ...(budgetRole && role !== 'super_admin'
             ? {
                 budget_role: budgetRole,

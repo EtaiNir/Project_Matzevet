@@ -68,10 +68,10 @@ UPDATE על `bagrut_students/grades/subjects` למשתמשים, ואסור לה�
 הזכאות ב-`bagrut_students` אינו נוגע. נמחק עם הסבב (cascade) — בכוונה.
 ⚠️ `bagrut-ai` קורא את `bagrut_students.status` ואינו רואה את השינוי.
 
-## מודול ניהול התקציב — כללים משלו (044)
+## מודול ניהול התקציב — כללים משלו (045)
 
 טבלאות `budget_*` ו-`meitar_*` **משותפות** עם `authority_code`, כמו הבגרות —
-ראה [decisions/023](../docs/decisions/023-budget-module.md). הוחלה ב-20.10 בשם 040_budget; המספר שונה ל-044 במיזוג עם הענף bagrut-engine, שבו 040–043 תפוסים.
+ראה [decisions/023](../docs/decisions/023-budget-module.md). הוחלה ב-20.10 בשם 040_budget; המספר שונה ל-044 במיזוג עם הענף bagrut-engine, שבו 040–043 תפוסים, ושוב ל-045 כשמתן דחף 044 משלו (21.10).
 - **ההרשאה ב-`users.budget_role`** (manager / owner / viewer; null = בלי גישה) ו-`budget_categories`
   לאחראי. נפרדת מהמצבת ומהבגרות.
 - **שלוש פונקציות שמחזירות מערך:** `budget_full_codes()`, `budget_manage_codes()`,
@@ -180,6 +180,6 @@ users                        — טבלת משתמשים + שיוך לרשויו
 43. **`x = any((select f()))` אינו "x בתוך המערך ש-f מחזירה".** סוגריים כפולים
     נקראים כתת-שאילתה של שורות, ו-Postgres נכשל ב-`operator does not exist:
     text = text[]`. הנכון: `any((select f())::text[])` — עדיין initplan, פעם אחת
-    לבקשה. נתפס בהחלת 044 (מודול התקציב); הבדיקה התחבירית (`pglast`) לא תפסה, כי זו שגיאת
+    לבקשה. נתפס בהחלת 045 (מודול התקציב); הבדיקה התחבירית (`pglast`) לא תפסה, כי זו שגיאת
     טיפוסים ולא תחביר. **מיגרציה חדשה — קודם הרצה מלאה מול המסד בטרנזקציה
     שמסתיימת ב-ROLLBACK**, ורק אז `run_migrations.py --only`.

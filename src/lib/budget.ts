@@ -1,4 +1,4 @@
-// שכבת הנתונים של מודול התקציב (החלטה 023, מיגרציה 044).
+// שכבת הנתונים של מודול התקציב (החלטה 023, מיגרציה 045).
 //
 // שתי שכבות:
 //   קבצים  — budget_cards, budget_transactions, budget_orders, meitar_*: קריאה בלבד;
@@ -31,7 +31,7 @@ export interface BudgetCard {
   reserved: number | null
   balance: number | null
   demand: number | null
-  /** עד מתי הנתונים — מהשם של דוח ה-EPR (מיגרציה 045) */
+  /** עד מתי הנתונים — מהשם של דוח ה-EPR (מיגרציה 046) */
   as_of: string | null
   loaded_at: string
 }
@@ -49,7 +49,7 @@ export interface CardMeta {
   money_source: string | null
   meitar_topic: string | null
   gefen: boolean
-  /** הדגלים מהתוספתיים (045). is_income / is_expense ריקים = נגזר מהתקציב */
+  /** הדגלים מהתוספתיים (046). is_income / is_expense ריקים = נגזר מהתקציב */
   in_meitar: boolean
   is_income: boolean | null
   is_expense: boolean | null
@@ -323,11 +323,11 @@ export interface BudgetUpload {
 
 // ─────────────────────────── עזר ───────────────────────────
 
-/** שגיאת מסד שאומרת "הטבלה/הפונקציה לא קיימת" — מיגרציה 044 טרם הוחלה */
+/** שגיאת מסד שאומרת "הטבלה/הפונקציה לא קיימת" — מיגרציה 045 טרם הוחלה */
 function explain(e: { message: string; code?: string } | null, what: string): Error {
   if (!e) return new Error(what)
   if (e.code === '42P01' || e.code === 'PGRST205' || e.code === 'PGRST202' || /does not exist|schema cache/i.test(e.message)) {
-    return new Error(`${what} — מודול התקציב עוד לא הותקן במסד (מיגרציה 044)`)
+    return new Error(`${what} — מודול התקציב עוד לא הותקן במסד (מיגרציה 045)`)
   }
   return new Error(`${what} — ${e.message}`)
 }

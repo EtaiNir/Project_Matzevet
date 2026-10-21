@@ -1,7 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════
--- 044 — מודול התקציב: תקציב ומעקב, מיתר ורכש (החלטה 023)
+-- 045 — מודול התקציב: תקציב ומעקב, מיתר ורכש (החלטה 023)
 -- ⚠️ הוחלה על המסד החי ב-20.10 בשם 040_budget.sql. המספרים 040–043 התבררו כתפוסים
--- בענף bagrut-engine (חשיפת ת"ז, מנוע הזכאות, ביטולו, שינוי סטטוס) — הקובץ שונה ל-044.
+-- בענף bagrut-engine (חשיפת ת"ז, מנוע הזכאות, ביטולו, שינוי סטטוס) — הקובץ שונה ל-044,
+-- ושוב ל-045 כשמתן דחף 044_status_override_role (21.10).
 -- הוא idempotent, אבל אין צורך להחיל אותו שוב.
 -- ═══════════════════════════════════════════════════════════════
 -- מוצר שלישי בפורטל, לצד המצבת והבגרות. כמו הבגרות (014 §2, 016):
@@ -41,7 +42,7 @@ alter table public.users add constraint users_budget_role_check
   check (budget_role is null or budget_role in ('manager', 'owner', 'viewer'));
 
 comment on column public.users.budget_role is
-  'תפקיד בניהול התקציב (044). null = אין גישה. manager / owner (לפי budget_categories) / viewer';
+  'תפקיד בניהול התקציב (045). null = אין גישה. manager / owner (לפי budget_categories) / viewer';
 comment on column public.users.budget_categories is
   'לאחראי תקציב (owner): ערכי "קטגוריה 1" של הכרטיסים שבאחריותו. מערך ריק = אף כרטיס';
 

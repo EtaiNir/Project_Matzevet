@@ -223,7 +223,7 @@ student, school, grade, class, track)` על `bagrut_students`. ציונים ומ
 > מקצוע לפני הציון הראשון. רכז המגמה (`track_coordinator`, `bagrut_tracks`)
 > הוסר ב-030. ראה [014 §4](decisions/014-bagrut-module.md).
 
-## מודול ניהול תקציב (מיגרציה 044)
+## מודול ניהול תקציב (מיגרציה 045)
 
 **טבלאות משותפות לכל הרשויות**, כמו הבגרות. ההחלטה: [023](decisions/023-budget-module.md).
 **הוחלה על המסד החי ב-20.10**, אחרי ריצה מלאה בטרנזקציה מגולגלת ובדיקת RLS לכל תפקיד.
@@ -400,8 +400,9 @@ security invoker, כך שה-RLS חל.
 | 041 | `bagrut_engine` | מנוע הזכאות ([021](decisions/021-bagrut-engine.md)) — הוחלה ובוטלה ב-20.10 |
 | 042 | `rollback_bagrut_editing` | ביטול המנוע (041) ועריכת הציונים (038); הנתונים חזרו למקור |
 | 043 | `bagrut_status_override` | שינוי ידני של סטטוס הזכאות, כיומן מעל ניתוח הזכאות ([022](decisions/022-bagrut-status-override.md)). הוחלה 21.10 |
-| 044 | `budget` | מודול ניהול תקציב: 13 טבלאות, תפקידי תקציב, שני באקטים, `budget_monthly` ([023](decisions/023-budget-module.md)). הוחלה 20.10 |
-| 045 | `budget_extras` | קובץ התוספתיים: דגלים ושם כרטיס ב-`budget_card_meta`, `plan_income/expense` ב-`budget_card_plans`, `budget_cards.as_of` ([023 §8](decisions/023-budget-module.md)). הוחלה 21.10 |
+| 044 | `status_override_role` | שינוי סטטוס ע"י מנהל־על: "שונה ע"י מנהל על", בלי מייל; `set_by_role` ([022](decisions/022-bagrut-status-override.md)). הוחלה 21.10 |
+| 045 | `budget` | מודול ניהול תקציב: 13 טבלאות, תפקידי תקציב, שני באקטים, `budget_monthly` ([023](decisions/023-budget-module.md)). הוחלה 20.10 |
+| 046 | `budget_extras` | קובץ התוספתיים: דגלים ושם כרטיס ב-`budget_card_meta`, `plan_income/expense` ב-`budget_card_plans`, `budget_cards.as_of` ([023 §8](decisions/023-budget-module.md)). הוחלה 21.10 |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.

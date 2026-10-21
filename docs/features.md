@@ -437,5 +437,5 @@ SVG בקווי מתאר. **כל הגרפיקה מוטבעת** — אין קרי�
 | כרטיס: סיווג ותכנון, ביצוע חודשי, תנועות, קבצים | `pages/budget/BudgetCard.tsx` | 🟡 |
 | מיתר — הפרש חודשי מוביל, רטרואקטיבי, תכנון לנושא | `pages/budget/BudgetMeitar.tsx` | 🟡 |
 | רכש — הזמנות, חשבונית, גפ"ן, תב"ר | `pages/budget/BudgetOrders.tsx` | 🟡 ממתין לדוח ההזמנות |
-| שלושה תפקידים: מנהל / אחראי לפי קטגוריות / צופה | `044_budget.sql`, `components/admin/ProductFields.tsx` | 🟡 |
+| שלושה תפקידים: מנהל / אחראי לפי קטגוריות / צופה | `045_budget.sql`, `components/admin/ProductFields.tsx` | 🟡 |
 
