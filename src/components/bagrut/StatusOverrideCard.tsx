@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { analysisKind, eligibilityKind, ELIGIBILITY_META, setStudentStatus, type BagrutStudent, type StatusOverride } from '@/lib/bagrut'
+import { analysisKind, eligibilityKind, ELIGIBILITY_META, overrideByText, setStudentStatus, type BagrutStudent, type StatusOverride } from '@/lib/bagrut'
 import { fmtDate } from '@/lib/bagrutCycle'
 import { useBagrut } from '@/pages/bagrut/context'
 import { StatusBadge } from './ui'
@@ -51,7 +51,7 @@ export default function StatusOverrideCard({ s }: { s: BagrutStudent }) {
         <StatusBadge kind={current} long manual={Boolean(o)} />
         {o ? (
           <span className="text-xs text-violet-900">
-            שונה ידנית{o.set_by_email ? ` ע"י ${o.set_by_email}` : ''} ב-{fmtDate(o.set_at)} · בניתוח הזכאות: <b>{ELIGIBILITY_META[fromAnalysis].label}</b>
+            {overrideByText(o)} ב-{fmtDate(o.set_at)} · בניתוח הזכאות: <b>{ELIGIBILITY_META[fromAnalysis].label}</b>
           </span>
         ) : (
           <span className="text-xs text-slate-400">לפי ניתוח הזכאות</span>

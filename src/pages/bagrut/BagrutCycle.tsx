@@ -16,6 +16,7 @@ import {
   analysisKind,
   eligibilityKind,
   ELIGIBILITY_META,
+  overrideByText,
   fetchLatestAi,
   fetchStudentCycle,
   requestAi,
@@ -233,7 +234,7 @@ function T2Card({ sid }: { sid: string }) {
                 <span className="font-bold text-violet-900">סטטוס הזכאות שונה ידנית:</span>
                 <StatusBadge kind={o.kind} long manual />
                 <span className="text-xs text-violet-800">
-                  {o.set_by_email ? `ע"י ${o.set_by_email} ` : ''}ב-{fmtDate(o.set_at)} · בניתוח הזכאות: {ELIGIBILITY_META[analysisKind(s)].label}
+                  {overrideByText(o)} ב-{fmtDate(o.set_at)} · בניתוח הזכאות: {ELIGIBILITY_META[analysisKind(s)].label}
                 </span>
               </div>
               <p className="mt-1 text-violet-950"><span className="text-xs font-bold text-violet-700">סיבה: </span>{o.reason}</p>
@@ -774,7 +775,7 @@ function LogView({ sid, log, onLog, actions, ai, onAi }: {
             graduating: Boolean(s?.in_t2),
             status: ELIGIBILITY_META[kind].label,
             manual: s && o
-              ? `הסטטוס שונה ידנית${o.set_by_email ? ` ע"י ${o.set_by_email}` : ''} ב-${fmtDate(o.set_at)} · סיבה: ${o.reason} · בניתוח הזכאות: ${ELIGIBILITY_META[analysisKind(s)].label}`
+              ? `הסטטוס ${overrideByText(o)} ב-${fmtDate(o.set_at)} · סיבה: ${o.reason} · בניתוח הזכאות: ${ELIGIBILITY_META[analysisKind(s)].label}`
               : null,
             // הסטטוס כבר בראש הפרק; שאר השדות — כפי שהגיעו, ריק נשאר ריק
             fields: T2_FIELDS.filter((f) => f.key !== 'status').map((f) => {
