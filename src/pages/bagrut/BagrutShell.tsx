@@ -9,12 +9,7 @@ import ModuleSwitch from '@/components/ModuleSwitch'
 import { bagrutGeneralScope, bagrutHasSubjects, bagrutTitle, canSeeBagrutProgram, fetchAuthorities, ROLE_LABELS, type Authority } from '@/lib/admin'
 import {
   buildIndex,
-  canEditBagrutGrades,
   clearRoundCache,
-  recomputeRound,
-  roundComputed,
-  type BagrutFlag,
-  type StudentRows,
   editKey,
   type EditRef,
   type ManualEdit,
@@ -306,45 +301,6 @@ export default function BagrutShell() {
     })
   }, [round])
 
-  const applyStudentRows = useCallback((rows: StudentRows) => {
-    if (round) clearRoundCache(round.id)
-    const sid = rows.student.student_id
-    setData((d) => {
-      if (!d) return d
-      return {
-        ...d,
-        students: d.students.map((s) => (s.student_id === sid ? rows.student : s)),
-        subjectRows: [...d.subjectRows.filter((r) => r.student_id !== sid), ...rows.subjectRows],
-        grades: [...d.grades.filter((g) => g.student_id !== sid), ...rows.grades],
-        flags: [...d.flags.filter((f) => f.student_id !== sid), ...rows.flags],
-      }
-    })
-  }, [round])
-
-  const applyFlag = useCallback((flag: BagrutFlag) => {
-    if (round) clearRoundCache(round.id)
-    setData((d) => (d ? { ...d, flags: d.flags.map((f) => (f.id === flag.id ? { ...f, ...flag } : f)) } : d))
-  }, [round])
-
-  // סבב שנקלט לפני מנוע הזכאות — מנהל־על מריץ את החישוב בלחיצה
-  const [recomputing, setRecomputing] = useState(false)
-  const [recomputeError, setRecomputeError] = useState<string | null>(null)
-  const runRecompute = async () => {
-    if (!round) return
-    setRecomputing(true)
-    setRecomputeError(null)
-    try {
-      await recomputeRound(round.id)
-      clearRoundCache(round.id)
-      setData(await loadRound(round))
-    } catch (e) {
-      setRecomputeError((e as Error).message)
-    } finally {
-      setRecomputing(false)
-    }
-  }
-  const notComputed = Boolean(data && !roundComputed(data))
-
   const ctx: BagrutContextValue | null =
     round && data && index && general && generalIndex
       ? {
@@ -356,9 +312,6 @@ export default function BagrutShell() {
           applyTracking,
           applyActionCounts,
           applyDataEdit,
-          applyStudentRows,
-          applyFlag,
-          canEditGrades: canEditBagrutGrades(profile),
           base: `/bagrut/${authorityCode}/${round.school_code}`,
         }
       : null
@@ -481,22 +434,6 @@ export default function BagrutShell() {
               </div>
             </div>
           )}
-          {ctx && !isUpload && notComputed && (
-            <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-              <span>
-                <b>פרטי הזכאות בסבב הזה עוד לא חושבו במנוע.</b> מוצג ניתוח הזכאות כפי שהגיע בקבצים — עדכון ציון לא ישנה אותו.
-              </span>
-              {isSuperAdmin ? (
-                <button onClick={runRecompute} disabled={recomputing}
-                  className="rounded-md bg-amber-600 px-3 py-1 font-bold text-white hover:bg-amber-700 disabled:opacity-50">
-                  {recomputing ? 'מחשב…' : 'חישוב עכשיו'}
-                </button>
-              ) : (
-                <span className="text-amber-700">מנהל־על יכול להריץ את החישוב.</span>
-              )}
-              {recomputeError && <span className="text-rose-700">{recomputeError}</span>}
-            </div>
-          )}
           {ctx && !isUpload && <FollowupAlert ctx={ctx} />}
           {zoomable && <ZoomBar zoom={zoom} onChange={setZoom} />}
           {/* גלילת הדף — ב-RTL הסרגל יושב בצד השמאלי של המסך */}
@@ -605,7 +542,6 @@ function Rail({ ctx, fullIndex, allStudents, lensId, onClassLens, isSuperAdmin }
   isSuperAdmin: boolean
 }) {
   const { data, base } = ctx
-  const openFlags = data.flags.filter((f) => f.status === 'open').length
   const location = useLocation()
   const counts = useMemo(() => {
     const t2 = data.students.filter((s) => s.in_t2)
@@ -713,7 +649,7 @@ function Rail({ ctx, fullIndex, allStudents, lensId, onClassLens, isSuperAdmin }
         <NavLink end to={base} className={link}>
           <span aria-hidden>◔</span> תמונת מצב
         </NavLink>
-        {/* מחושב אצלנו מעל הזכאות (decisions/019) — לשכבה המסיימת */}
+        {/* מחושב אצלנו מעל ניתוח הזכאות (decisions/019) — לשכבה המסיימת */}
         {counts.graduating > 0 && (
           <NavLink to={`${base}/honors`} className={link}>
             <span aria-hidden>★</span> מצטיינת וטק
@@ -723,13 +659,6 @@ function Rail({ ctx, fullIndex, allStudents, lensId, onClassLens, isSuperAdmin }
         {canSeeBagrutProgram(profile) && (
           <NavLink to={`${base}/program`} className={link}>
             <span aria-hidden>▤</span> תוכנית בית הספר
-          </NavLink>
-        )}
-        {/* איפה המנוע אינו מסכים עם הקבצים (041) — למי שמעדכן ציונים */}
-        {ctx.canEditGrades && (
-          <NavLink to={`${base}/flags`} className={link}>
-            <span aria-hidden className="text-rose-600">⚑</span> דגלים אדומים
-            {openFlags > 0 && <span className="mr-auto rounded-full bg-rose-100 px-1.5 text-xs font-bold tabular-nums text-rose-700">{openFlags}</span>}
           </NavLink>
         )}
         {isSuperAdmin && (

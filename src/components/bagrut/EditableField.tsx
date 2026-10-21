@@ -1,21 +1,18 @@
 import { createContext, useContext, useRef, useState, type ReactNode } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { canEditBagrutGrades, editBagrutField, editKey, fetchStudentRows, type EditRef } from '@/lib/bagrut'
+import { canEditBagrutData, editBagrutField, editKey, type EditRef } from '@/lib/bagrut'
 import { fmtDate } from '@/lib/bagrutCycle'
 import { useBagrut } from '@/pages/bagrut/context'
 
 /**
- * ערך בנתוני הבגרות שאפשר לעדכן — ציון שאלון, משקל, יח"ל (מיגרציות 038, 041).
+ * ערך בנתוני הבגרות שאפשר לתקן ידנית (משימה 7, מיגרציה 038).
  *
  * העריכה היא **לכל הריבוע בבת אחת** (אייל, 18.10): עיפרון אחד בפינת הכרטיס
  * (`EditGroup`) מעביר את כל השדות שבו למצב עריכה, ושמירה אחת שומרת את מה
- * שהשתנה. המסד מחשב מחדש באותה טרנזקציה את המקצוע, את הזכאות ואת המצטיינת/טק
- * (041), והמסך טוען את התלמיד מחדש — כך גם תמונת המצב והרשימות מתעדכנות.
- * רק מנהל־על ורכז/ת בגרויות (אייל, 20.10); ההרשאה עצמה נאכפת במסד.
+ * שהשתנה. שדה שנערך מסומן "נערך" — מי, מתי, ומה היה במקור. התיקון **נמחק
+ * בקליטת הסבב הבא**, ונאמר כך בזמן העריכה. ההרשאה עצמה נאכפת במסד.
  *
- * שדה שנערך מסומן "נערך" — מי, מתי, ומה היה במקור. העדכון **נמחק בקליטת הסבב
- * הבא**, ונאמר כך בזמן העריכה. מחוץ ל-`EditGroup`, או עם `readOnly` (ערך
- * מחושב), השדה מציג רק את הערך ואת הסימון "נערך".
+ * מחוץ ל-`EditGroup` השדה מציג רק את הערך ואת הסימון "נערך".
  */
 
 interface Entry {
@@ -48,7 +45,7 @@ export function EditGroup({ allowed, children }: {
   allowed: boolean
   children: (parts: { toggle: ReactNode; actions: ReactNode }) => ReactNode
 }) {
-  const { round, applyDataEdit, applyStudentRows } = useBagrut()
+  const { round, applyDataEdit } = useBagrut()
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -66,20 +63,11 @@ export function EditGroup({ allowed, children }: {
     setErr(null)
     try {
       // שומרים אחד אחד — רק מה שהשתנה. שגיאה עוצרת, ומה שכבר נשמר נשאר שמור
-      const touched = new Set<string>()
-      try {
-        for (const [key, e] of entries.current) {
-          if (e.draft === e.raw) continue
-          const r = await editBagrutField(round, e.ref, toStored(e))
-          if (r.changed) {
-            applyDataEdit(e.ref, r.value, r.edit)
-            touched.add(e.ref.studentId)
-          }
-          entries.current.delete(key)
-        }
-      } finally {
-        // מה שהמסד חישב מחדש — גם כשאחת השמירות נכשלה באמצע (מלכודת 26)
-        for (const sid of touched) applyStudentRows(await fetchStudentRows(round, sid))
+      for (const [key, e] of entries.current) {
+        if (e.draft === e.raw) continue
+        const r = await editBagrutField(round, e.ref, toStored(e))
+        if (r.changed) applyDataEdit(e.ref, r.value, r.edit)
+        entries.current.delete(key)
       }
       cancel()
     } catch (e) {
@@ -107,8 +95,8 @@ export function EditGroup({ allowed, children }: {
         e.stopPropagation()
         setEditing(true)
       }}
-      title="עדכון ציונים — הזכאות תחושב מחדש"
-      aria-label="עדכון הציונים בכרטיס"
+      title="תיקון ידני של הנתונים בכרטיס"
+      aria-label="עריכת הכרטיס"
       className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-500 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
     >
       ✎ עריכה
@@ -124,7 +112,7 @@ export function EditGroup({ allowed, children }: {
         </button>
         <button type="button" disabled={busy} onClick={cancel}
           className="rounded-md px-3 py-1 text-slate-500 hover:bg-slate-100">ביטול</button>
-        <span className="text-amber-700">הזכאות, המקצוע והמצטיינת/טק יחושבו מחדש מיד · העדכון יימחק בקליטת הסבב הבא</span>
+        <span className="text-amber-700">תיקון ידני — יימחק בקליטת הסבב הבא</span>
       </div>
       {err && <p className="text-xs text-rose-700">{err}</p>}
     </div>
@@ -152,7 +140,7 @@ export default function EditableField({
   numeric?: boolean
   /** נשמר כשבר (0.27) ונערך באחוזים (27) — משקלים */
   percent?: boolean
-  /** סימון "נערך" בלבד, בלי עריכה — לטבלה צפופה, ולערך מחושב */
+  /** סימון "נערך" בלבד, בלי עריכה — לטבלה צפופה */
   readOnly?: boolean
   className?: string
 }) {
@@ -161,7 +149,7 @@ export default function EditableField({
   const group = useContext(EditGroupContext)
 
   const key = editKey(ref)
-  const allowed = !readOnly && canEditBagrutGrades(profile)
+  const allowed = !readOnly && canEditBagrutData(profile, ref.target === 'student' ? null : ref.subjectKey ?? null)
   const edited = data.edits.get(key)
   const raw = value == null || value === '' ? '' : percent ? String(Math.round(Number(value) * 10000) / 100) : String(value)
   const pct = (v: string | null) => (v == null || v === '' ? 'ריק' : percent ? `${Math.round(Number(v) * 10000) / 100}%` : v)

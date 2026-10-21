@@ -20,7 +20,6 @@ import BagrutStudent from './pages/bagrut/BagrutStudent'
 import BagrutProgram from './pages/bagrut/BagrutProgram'
 import BagrutUpload from './pages/bagrut/BagrutUpload'
 import BagrutHonors from './pages/bagrut/BagrutHonors'
-import BagrutFlags from './pages/bagrut/BagrutFlags'
 import Home from './pages/Home'
 import RequireProduct from './components/RequireProduct'
 
@@ -93,7 +92,6 @@ export default function App() {
           <Route path="student/:id" element={<BagrutStudent />} />
           <Route path="program" element={<BagrutProgram />} />
           <Route path="honors" element={<BagrutHonors />} />
-          <Route path="flags" element={<BagrutFlags />} />
           <Route path="upload" element={<BagrutUpload />} />
         </Route>
       </Route>
