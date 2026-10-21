@@ -18,10 +18,12 @@ function keys(e: KeyboardEvent<HTMLInputElement>, reset: () => void) {
   }
 }
 
-export function AmountCell({ value, placeholder, disabled, onSave }: {
+export function AmountCell({ value, placeholder, placeholderTitle, disabled, onSave }: {
   value: number | null
   /** מה שמוצג כשריק — למשל הצעת הצפי לפי הקצב */
   placeholder?: number | null
+  /** ההסבר בריחוף כשמוצגת ההצעה (024: לפי השנה שעברה / לפי הקצב) */
+  placeholderTitle?: string
   disabled?: boolean
   onSave: (v: number | null) => Promise<void>
 }) {
@@ -35,7 +37,7 @@ export function AmountCell({ value, placeholder, disabled, onSave }: {
       inputMode="decimal"
       defaultValue={value == null ? '' : String(Math.round(value))}
       placeholder={placeholder == null ? '' : money(placeholder)}
-      title={placeholder != null && value == null ? 'ריק — מוצג הצפי לפי הקצב (לא נשמר)' : undefined}
+      title={placeholder != null && value == null ? placeholderTitle ?? 'ריק — מוצג הצפי לפי הקצב (לא נשמר)' : undefined}
       disabled={busy}
       onClick={stop}
       onKeyDown={(e) => keys(e, () => setKey((k) => k + 1))}

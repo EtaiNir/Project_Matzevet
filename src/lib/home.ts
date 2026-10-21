@@ -23,6 +23,10 @@ import {
 } from '@/lib/bagrut'
 import { daysUntil, isFollowupDue } from '@/lib/bagrutCycle'
 import { fetchSavedViews, fetchSharedWithMe } from '@/lib/savedViews'
+import { fetchCards, fetchMeta, fetchMonthly, fetchOrders, fetchPlans } from '@/lib/budget'
+import { buildRows, elapsedMonths, periodRange } from '@/lib/budgetCalc'
+import { cardExceptions, openOrdersByCard, reviewStillValid, seasonalSuggestions } from '@/lib/budgetInsights'
+import { fetchExceptionReviews, reviewKey } from '@/lib/budgetTracking'
 
 /** רשות שלא עודכנה יותר מזה — "לא עודכנה החודש" */
 export const STALE_DAYS = 35
@@ -397,7 +401,44 @@ export interface BudgetOverviewRow {
  * התקציב: קליטות שנכשלו, נתקעו או ממתינות לאישור ההתאמה (023). ה-RLS
  * מחזיר את budget_uploads רק למי שמנהל את התקציב, כך שאצל אחרים אין משימות.
  */
-export async function loadBudgetOverview(codes: string[], nameOf: (code: string) => string): Promise<{ rows: BudgetOverviewRow[]; todos: Todo[] }> {
+/**
+ * חריגות תקציב שעוד לא נבדקו (024) — לכל רשות, בשנה האחרונה, ינואר–דצמבר. אותם
+ * כללים כמו במסך "חריגות לטיפול"; אחראי מקבל רק את הכרטיסים שלו (ה-RLS).
+ * נכשל בשקט — האזור האישי לא נשבר בגלל זה.
+ */
+async function budgetExceptionTodos(code: string, year: number, nameOf: (code: string) => string): Promise<Todo[]> {
+  try {
+    const range = periodRange(year, 'calendar')
+    const prev = periodRange(year - 1, 'calendar')
+    const [cards, meta, plans, monthly, prevMonthly, orders, reviews] = await Promise.all([
+      fetchCards(code, year), fetchMeta(code), fetchPlans(code, year), fetchMonthly(code, range.from, range.to),
+      fetchMonthly(code, prev.from, prev.to).catch(() => []), fetchOrders(code).catch(() => []),
+      fetchExceptionReviews(code, year, 'calendar'),
+    ])
+    const asOf = cards.reduce<string | null>((m, c) => {
+      const d = c.as_of ?? c.loaded_at
+      return !m || d > m ? d : m
+    }, null)
+    const elapsed = elapsedMonths(asOf, year, 'calendar')
+    const open = openOrdersByCard(orders)
+    const rows = buildRows(cards, new Map(meta.map((m) => [m.card_code, m])), new Map(plans.map((p) => [p.card_code, p])),
+      monthly, elapsed, seasonalSuggestions(monthly, prevMonthly, asOf, year, 'calendar'), open)
+    const pending = cardExceptions(rows, elapsed, open).filter((x) => {
+      const r = reviews.get(reviewKey(x.key, x.kind))
+      return !(r && reviewStillValid(r.value_at_review, x.value))
+    })
+    if (!pending.length) return []
+    const red = pending.filter((x) => x.kind === 'over_budget' || x.kind === 'committed_over_budget').length
+    return [{
+      key: `budget-exceptions-${code}`, tone: red ? 'red' : 'amber', source: nameOf(code), to: `/budget/${code}/exceptions`,
+      text: `${pending.length} חריגות תקציב לטיפול`, detail: red ? `${red} מהן — מעל התקציב` : undefined,
+    }]
+  } catch {
+    return []
+  }
+}
+
+export async function loadBudgetOverview(codes: string[], nameOf: (code: string) => string): Promise<{ rows: BudgetOverviewRow[]; todos: Todo[]; exceptionTodos: Todo[] }> {
   const rows: BudgetOverviewRow[] = []
   for (const code of codes) {
     const { data } = await supabase.from('budget_cards').select('fiscal_year, loaded_at')
@@ -429,5 +470,6 @@ export async function loadBudgetOverview(codes: string[], nameOf: (code: string)
       }
     }
   }
-  return { rows, todos }
+  const exceptionTodos = (await Promise.all(rows.filter((r) => r.year != null).map((r) => budgetExceptionTodos(r.code, r.year!, nameOf)))).flat()
+  return { rows, todos, exceptionTodos }
 }

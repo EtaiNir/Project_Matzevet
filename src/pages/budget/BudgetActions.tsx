@@ -117,6 +117,8 @@ export default function BudgetActions() {
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <h1 className="text-lg font-bold text-slate-800">מעקב ובקרה ברמת הפעולה הבודדת</h1>
+        {/* 024 — פרטיות: ה-RLS מסתיר מאחראי את התנועות בכרטיסי שכר (047) */}
+        {b.isOwner && <span className="text-xs text-slate-500" title="שמות עובדים ותשלומי שכר — למנהל התקציב בלבד">🔒 בלי תנועות בכרטיסי שכר</span>}
         <div className="flex gap-0.5 rounded-lg bg-slate-100 p-0.5">
           {([[null, periodLabel], ['all', 'כל השנים']] as [string | null, string][]).map(([k, label]) => (
             <button key={label} onClick={() => setParam('span', k)}

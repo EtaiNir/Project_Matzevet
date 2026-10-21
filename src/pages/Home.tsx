@@ -80,7 +80,7 @@ export default function Home() {
   const [matzevet, setMatzevet] = useState<MatzevetStat[] | null>(null)
   const [countsFailed, setCountsFailed] = useState(false)
   const [bagrut, setBagrut] = useState<BagrutStat[] | null>(null)
-  const [budget, setBudget] = useState<{ rows: BudgetOverviewRow[]; todos: Todo[] } | null>(null)
+  const [budget, setBudget] = useState<{ rows: BudgetOverviewRow[]; todos: Todo[]; exceptionTodos: Todo[] } | null>(null)
 
   useEffect(() => {
     fetchAuthorities().then(setAuthorities).catch(() => setAuthorities([]))
@@ -149,9 +149,9 @@ export default function Home() {
   // ── ניהול תקציב (023): הכרטסת האחרונה לכל רשות, וקליטות שמחכות לטיפול
   useEffect(() => {
     if (codes == null) return
-    if (!access.budget || !codes.length) return setBudget({ rows: [], todos: [] })
+    if (!access.budget || !codes.length) return setBudget({ rows: [], todos: [], exceptionTodos: [] })
     loadBudgetOverview(codes, (c) => authorities?.find((a) => a.code === c)?.name ?? `רשות ${c}`)
-      .then(setBudget).catch(() => setBudget({ rows: [], todos: [] }))
+      .then(setBudget).catch(() => setBudget({ rows: [], todos: [], exceptionTodos: [] }))
     // השם מתעדכן ברינדור; אין צורך לטעון מחדש כשהרשויות נטענות
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [access.budget, codes])
@@ -184,12 +184,15 @@ export default function Home() {
   }, [bagrutWorker, codes, profile])
 
   const budgetManager = access.superAdmin || profile?.budget_role === 'manager'
-  const roleBased = access.superAdmin || isManager || bagrutWorker || budgetManager
+  // 024 — אחראי תקציב: "לטיפול" עם החריגות בכרטיסים שלו
+  const budgetOwner = !access.superAdmin && profile?.budget_role === 'owner'
+  const roleBased = access.superAdmin || isManager || bagrutWorker || budgetManager || budgetOwner
   const todos: Todo[] = [
     ...(admin?.todos ?? []),
     ...(managers ?? []).flatMap((m) => m.todos),
     ...(bagrutOv ?? []).flatMap((o) => o.todos),
     ...(budgetManager ? budget?.todos ?? [] : []),
+    ...(budgetManager || budgetOwner ? budget?.exceptionTodos ?? [] : []),
   ]
   const todosLoading = (access.superAdmin && !admin) || (isManager && !managers) || (bagrutWorker && !bagrutOv)
 

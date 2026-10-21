@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import BagrutTable, { type Column } from '@/components/bagrut/BagrutTable'
 import { AmountCell, TextCell } from '@/components/budget/InlineCells'
+import PlanStatusCell from '@/components/budget/PlanStatusCell'
+import { PLAN_STATUS_META } from '@/lib/budgetTracking'
 import { saveMeta, savePlan } from '@/lib/budget'
 import { HEB_MONTH_NAMES, hebrewSchoolYear, money, monthsLabel, pct, totals, usageTone, type CardRow } from '@/lib/budgetCalc'
 import { downloadWorkbook } from '@/lib/xlsx'
@@ -74,6 +76,11 @@ export default function BudgetCards() {
   }
 
   const amount = (v: number | null) => <span className="tabular-nums">{money(v)}</span>
+  // 024 — מאיפה ההצעה לצפי, והאם יש בכלל הזמנות פתוחות (אם לא — העמודות לא מוצגות)
+  const suggestTitle = (r: CardRow) => r.suggestedBy === 'season'
+    ? 'ריק — מוצג צפי לפי השנה שעברה: מה שנרשם עד היום + אותם חודשים בשנה שעברה (לא נשמר)'
+    : 'ריק — מוצג הצפי לפי הקצב (לא נשמר)'
+  const hasOrders = b.rows.some((r) => r.openOrders > 0)
   const columns: Column<CardRow>[] = [
     { key: 'code', header: 'מספר הסעיף', width: 108, sticky: true, render: (r) => <span className="font-mono text-xs text-slate-500" dir="ltr">{r.code}</span>, sortValue: (r) => r.code, exportValue: (r) => r.code },
     { key: 'name', header: 'תאור סעיף', width: 210, render: (r) => <span className="truncate text-slate-800">{r.name}</span>, sortValue: (r) => r.name },
@@ -95,14 +102,31 @@ export default function BudgetCards() {
     { key: 'pExp', group: 'pct', header: 'הוצאה', exportHeader: 'אחוז ביצוע הוצאה', width: 62, render: (r) => <span className={`tabular-nums ${usageTone(r.pctExpense, pace)}`}>{pct(r.pctExpense)}</span>, sortValue: (r) => r.pctExpense, exportValue: (r) => (r.pctExpense == null ? null : Math.round(r.pctExpense * 100)), filter: false },
     {
       key: 'fInc', group: 'fc', groupTitle: 'צפי לסוף השנה', header: 'הכנסות', exportHeader: 'צפי הכנסות לסוף שנה', width: 112, filter: false,
-      render: (r) => <AmountCell value={r.forecastIncome} placeholder={r.suggestedIncome} disabled={!b.canPlan} onSave={plan(r, 'forecast_income', 'צפי הכנסות')} />,
+      render: (r) => <AmountCell value={r.forecastIncome} placeholder={r.suggestedIncome} placeholderTitle={suggestTitle(r)} disabled={!b.canPlan} onSave={plan(r, 'forecast_income', 'צפי הכנסות')} />,
       sortValue: (r) => r.forecastIncome ?? r.suggestedIncome, exportValue: (r) => r.forecastIncome,
     },
     {
       key: 'fExp', group: 'fc', header: 'הוצאות', exportHeader: 'צפי הוצאות לסוף שנה', width: 112, filter: false,
-      render: (r) => <AmountCell value={r.forecastExpense} placeholder={r.suggestedExpense} disabled={!b.canPlan} onSave={plan(r, 'forecast_expense', 'צפי הוצאות')} />,
+      render: (r) => <AmountCell value={r.forecastExpense} placeholder={r.suggestedExpense} placeholderTitle={suggestTitle(r)} disabled={!b.canPlan} onSave={plan(r, 'forecast_expense', 'צפי הוצאות')} />,
       sortValue: (r) => r.forecastExpense ?? r.suggestedExpense, exportValue: (r) => r.forecastExpense,
     },
+    // 024 — הזמנות פתוחות: כסף שמחויב ועוד לא נרשם. רק כשיש בכלל הזמנות
+    ...(hasOrders ? [
+      {
+        key: 'open', group: 'ord', groupTitle: 'הזמנות', header: 'פתוחות', exportHeader: 'הזמנות פתוחות', width: 100, filter: false,
+        render: (r: CardRow) => <span className="tabular-nums text-violet-800">{money(r.openOrders || null)}</span>,
+        sortValue: (r: CardRow) => r.openOrders, exportValue: (r: CardRow) => r.openOrders || null,
+      },
+      {
+        key: 'committed', group: 'ord', header: 'מחויב', exportHeader: 'מחויב (מצטבר + הזמנות)', width: 104, filter: false,
+        render: (r: CardRow) => {
+          const c = r.cumExpense + r.openOrders
+          const over = r.budgetExpense ? c > r.budgetExpense : false
+          return <span className={`tabular-nums ${over ? 'font-bold text-red-700' : 'text-slate-700'}`} title="הוצאות מצטבר + הזמנות פתוחות">{money(r.openOrders ? c : null)}</span>
+        },
+        sortValue: (r: CardRow) => r.cumExpense + r.openOrders, exportValue: (r: CardRow) => (r.openOrders ? r.cumExpense + r.openOrders : null),
+      },
+    ] as Column<CardRow>[] : []),
     {
       key: 'nInc', group: 'next', groupTitle: `תכנית ${b.year + 1}`, header: 'הכנסות', exportHeader: 'תכנית הכנסות לשנה הבאה', width: 112, filter: false,
       render: (r) => <AmountCell value={r.nextIncome} disabled={!b.canPlan} onSave={plan(r, 'next_income', 'תכנית הכנסות')} />,
@@ -112,6 +136,16 @@ export default function BudgetCards() {
       key: 'nExp', group: 'next', header: 'הוצאות', exportHeader: 'תכנית הוצאות לשנה הבאה', width: 112, filter: false,
       render: (r) => <AmountCell value={r.nextExpense} disabled={!b.canPlan} onSave={plan(r, 'next_expense', 'תכנית הוצאות')} />,
       sortValue: (r) => r.nextExpense, exportValue: (r) => r.nextExpense,
+    },
+    // 024 — אישור התכנית לשנה הבאה: אחראי מגיש, מנהל מאשר / מחזיר
+    {
+      key: 'planStatus', group: 'next', header: 'מצב', exportHeader: 'מצב התכנית', width: 86, align: 'center',
+      render: (r) => (
+        <PlanStatusCell code={b.code} card={r.code} year={b.year} review={b.planReviews.get(r.code)}
+          canSubmit={b.canPlan} canDecide={b.canManage} onSaved={b.applyPlanReview} />
+      ),
+      sortValue: (r) => ['returned', 'submitted', 'draft', 'approved'].indexOf(b.planReviews.get(r.code)?.status ?? 'draft'),
+      exportValue: (r) => PLAN_STATUS_META[b.planReviews.get(r.code)?.status ?? 'draft'].label,
     },
     { key: 'notes', header: 'הערות לתכנון', width: 170, render: (r) => <span className="truncate text-xs text-slate-500" title={r.plan?.notes ?? ''}>{r.plan?.notes ?? ''}</span>, sortValue: (r) => r.plan?.notes ?? null, filter: false },
     { key: 'owner', header: 'באחריות', width: 100, render: (r) => <span className="truncate text-slate-600">{r.meta?.owner_name ?? ''}</span>, sortValue: (r) => r.meta?.owner_name ?? null },
@@ -176,7 +210,10 @@ export default function BudgetCards() {
       />
       <p className="text-xs text-slate-500">
         {b.canPlan ? 'צפי ותכנית — לחיצה על התא ועריכה; נשמר ביציאה מהתא. ' : ''}
-        צפי ריק מוצג באפור לפי הקצב ({monthsLabel(b.elapsed)} מתוך 12 חודשים) ואינו נשמר.
+        צפי ריק מוצג באפור ואינו נשמר — {b.seasonal
+          ? 'לפי השנה שעברה: מה שנרשם עד היום, ועוד מה שנרשם באותם חודשים בשנה שעברה (כרטיס בלי נתונים בשנה שעברה — לפי הקצב).'
+          : `לפי הקצב (${monthsLabel(b.elapsed)} מתוך 12 חודשים).`}
+        {' '}מצב התכנית: אחראי מגיש, מנהל התקציב מאשר או מחזיר; עריכה אחרי אישור מחזירה לעבודה.
         הכנסות מצטבר = Σ זכות, הוצאות מצטבר = Σ חובה, בתקופה שנבחרה.
       </p>
     </div>

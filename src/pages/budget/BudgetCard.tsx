@@ -17,6 +17,7 @@ import {
   type CardMeta,
   type CardPlan,
 } from '@/lib/budget'
+import { isSalaryCard } from '@/lib/budgetTracking'
 import { HEB_MONTH_NAMES, money, monthlySeries, pct, usageTone, type CardRow } from '@/lib/budgetCalc'
 import { useBudget, type CardNavState } from './context'
 
@@ -124,7 +125,12 @@ export default function BudgetCard() {
       </div>
 
       <Card title="תנועות בכרטיס" action={tx && <span className="text-xs text-slate-400">{tx.length.toLocaleString('he-IL')} תנועות · כל השנים</span>}>
-        {txError ? <ErrorBox message={txError} /> : tx == null ? <Loading label="טוען תנועות…" /> : <Transactions rows={tx} name={`${row.code}_${row.name}`} />}
+        {/* 024 — פרטיות: אחראי תקציב אינו רואה תנועות בכרטיסי שכר (ה-RLS, מיגרציה 047), רק את הסיכומים */}
+        {b.isOwner && isSalaryCard(row.code) ? (
+          <p className="text-sm text-slate-500">
+            🔒 כרטיס שכר — התנועות עצמן (שמות עובדים ותשלומי שכר) מוצגות רק למנהל התקציב. הסיכומים החודשיים והביצוע — למעלה.
+          </p>
+        ) : txError ? <ErrorBox message={txError} /> : tx == null ? <Loading label="טוען תנועות…" /> : <Transactions rows={tx} name={`${row.code}_${row.name}`} />}
       </Card>
 
       <Files code={b.code} card={row.code} canEdit={b.canPlan} />

@@ -11,6 +11,7 @@ import {
   fetchCards,
   fetchMeta,
   fetchMonthly,
+  fetchOrders,
   fetchPlans,
   type BudgetCard,
   type CardMeta,
@@ -18,6 +19,8 @@ import {
   type MonthlyRow,
 } from '@/lib/budget'
 import { buildRows, elapsedMonths, hebrewSchoolYear, periodRange, type Period } from '@/lib/budgetCalc'
+import { openOrdersByCard, seasonalSuggestions } from '@/lib/budgetInsights'
+import { fetchPlanReviews, type PlanReview } from '@/lib/budgetTracking'
 import { BudgetContext, type BudgetContextValue } from './context'
 
 interface Loaded {
@@ -25,6 +28,10 @@ interface Loaded {
   meta: Map<string, CardMeta>
   plans: Map<string, CardPlan>
   monthly: MonthlyRow[]
+  // 024 — אותם חודשים בשנה שעברה (לצפי העונתי), ההזמנות, ומצב אישור התכנית
+  prevMonthly: MonthlyRow[]
+  openOrders: Map<string, number>
+  planReviews: Map<string, PlanReview>
 }
 
 /**
@@ -75,14 +82,24 @@ export default function BudgetShell() {
     setLoaded(null)
     setError(null)
     const range = periodRange(year, period)
-    Promise.all([fetchCards(code, year), fetchMeta(code), fetchPlans(code, year), fetchMonthly(code, range.from, range.to)])
-      .then(([cards, meta, plans, monthly]) => {
+    const prev = periodRange(year - 1, period)
+    Promise.all([
+      fetchCards(code, year), fetchMeta(code), fetchPlans(code, year), fetchMonthly(code, range.from, range.to),
+      // 024 — לא חוסמים את המסכים אם אחד מאלה נכשל: בלעדיהם הכול כמו שהיה
+      fetchMonthly(code, prev.from, prev.to).catch(() => [] as MonthlyRow[]),
+      fetchOrders(code).catch(() => []),
+      fetchPlanReviews(code, year).catch(() => new Map<string, PlanReview>()),
+    ])
+      .then(([cards, meta, plans, monthly, prevMonthly, orders, planReviews]) => {
         if (mine !== seq.current) return
         setLoaded({
           cards,
           meta: new Map(meta.map((m) => [m.card_code, m])),
           plans: new Map(plans.map((p) => [p.card_code, p])),
           monthly,
+          prevMonthly,
+          openOrders: openOrdersByCard(orders),
+          planReviews,
         })
       })
       .catch((e: Error) => mine === seq.current && setError(e.message))
@@ -92,7 +109,18 @@ export default function BudgetShell() {
     setLoaded((l) => (l ? { ...l, meta: new Map(l.meta).set(m.card_code, m) } : l))
   }, [])
   const applyPlan = useCallback((p: CardPlan) => {
-    setLoaded((l) => (l ? { ...l, plans: new Map(l.plans).set(p.card_code, p) } : l))
+    setLoaded((l) => {
+      if (!l) return l
+      // עריכת התכנית אחרי אישור — המסד מחזיר אותה לעבודה (047); כך גם כאן
+      const prevPlan = l.plans.get(p.card_code)
+      const reviews = new Map(l.planReviews)
+      if (reviews.get(p.card_code)?.status === 'approved'
+          && (prevPlan?.next_income !== p.next_income || prevPlan?.next_expense !== p.next_expense)) reviews.delete(p.card_code)
+      return { ...l, plans: new Map(l.plans).set(p.card_code, p), planReviews: reviews }
+    })
+  }, [])
+  const applyPlanReview = useCallback((r: PlanReview) => {
+    setLoaded((l) => (l ? { ...l, planReviews: new Map(l.planReviews).set(r.card_code, r) } : l))
   }, [])
 
   const role = profile?.budget_role ?? null
@@ -109,7 +137,8 @@ export default function BudgetShell() {
       return !m || d > m ? d : m
     }, null)
     const elapsed = elapsedMonths(asOf, year, period)
-    const rows = buildRows(loaded.cards, loaded.meta, loaded.plans, loaded.monthly, elapsed)
+    const seasonal = seasonalSuggestions(loaded.monthly, loaded.prevMonthly, asOf, year, period)
+    const rows = buildRows(loaded.cards, loaded.meta, loaded.plans, loaded.monthly, elapsed, seasonal, loaded.openOrders)
     return {
       code,
       authorityName: allAuthorities.find((a) => a.code === code)?.name ?? '',
@@ -125,9 +154,12 @@ export default function BudgetShell() {
       isOwner,
       applyMeta,
       applyPlan,
+      seasonal: Boolean(seasonal),
+      planReviews: loaded.planReviews,
+      applyPlanReview,
       base: `/budget/${code}`,
     }
-  }, [loaded, year, period, code, allAuthorities, canManage, isOwner, applyMeta, applyPlan])
+  }, [loaded, year, period, code, allAuthorities, canManage, isOwner, applyMeta, applyPlan, applyPlanReview])
 
   if (!codeFromUrl) {
     if (authorities.length) return <Navigate to={`/budget/${authorities[0]}`} replace />
@@ -248,6 +280,10 @@ function Rail({ base, search, cards, canManage, isOwner }: {
         <NavLink to={to('/cards')} className={link}>
           📒 מעקב ותכנון {cards != null && <span className="mr-auto text-xs tabular-nums text-slate-400">{cards}</span>}
         </NavLink>
+        {/* 024 — מעקב ותכנון: חריגות, מה השתנה, תרחישים */}
+        <NavLink to={to('/exceptions')} className={link}>🚩 חריגות לטיפול</NavLink>
+        <NavLink to={to('/changes')} className={link}>🔄 מה השתנה</NavLink>
+        <NavLink to={to('/scenarios')} className={link}>🧪 תרחישים לשנה הבאה</NavLink>
         <NavLink to={to('/actions')} className={link}>🧮 פירוט הפעולות</NavLink>
         {/* המיתר הוא הכנסות ברמת הרשות — לא לאחראי על כרטיסים (ה-RLS חוסם ממילא) */}
         {!isOwner && <NavLink to={to('/meitar')} className={link}>🏛 מיתר — הכנסות</NavLink>}

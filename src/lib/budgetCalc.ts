@@ -44,9 +44,13 @@ export interface CardRow {
   /** צפי לסוף השנה — מה שהוקלד; ריק = אין */
   forecastIncome: number | null
   forecastExpense: number | null
-  /** הצעה לצפי לפי הקצב (מצטבר × 12 / חודשים שחלפו) — לא נשמרת */
+  /** הצעה לצפי — עונתית כשיש לשנה שעברה נתונים, אחרת לפי הקצב (מצטבר × 12 / חודשים שחלפו). לא נשמרת */
   suggestedIncome: number | null
   suggestedExpense: number | null
+  /** מאיפה ההצעה: 'season' — לפי אותם חודשים בשנה שעברה (024); 'pace' — לפי הקצב */
+  suggestedBy: 'season' | 'pace'
+  /** הזמנות פתוחות ("לא סופק" בדוח ההזמנות) — כסף שמחויב ועוד לא נרשם (024) */
+  openOrders: number
   nextIncome: number | null
   nextExpense: number | null
   meta: CardMeta | null
@@ -103,6 +107,9 @@ export function buildRows(
   plans: Map<string, CardPlan>,
   monthly: MonthlyRow[],
   elapsed: number,
+  // 024 — אופציונלי: בלעדיהם ההצעה לפי הקצב, כמו שהיה
+  seasonal?: Map<string, { income: number | null; expense: number | null }> | null,
+  openOrders?: Map<string, number>,
 ): CardRow[] {
   const byCode = new Map(cards.map((c) => [c.card_code, c]))
   const codes = [...new Set([...byCode.keys(), ...meta.keys()])].sort()
@@ -135,8 +142,10 @@ export function buildRows(
       pctExpense: budgetExpense ? s.debit / budgetExpense : null,
       forecastIncome: plan?.forecast_income ?? null,
       forecastExpense: plan?.forecast_expense ?? null,
-      suggestedIncome: s.credit ? pace(s.credit) : null,
-      suggestedExpense: s.debit ? pace(s.debit) : null,
+      suggestedIncome: seasonal ? (seasonal.get(code)?.income ?? (s.credit ? pace(s.credit) : null)) : s.credit ? pace(s.credit) : null,
+      suggestedExpense: seasonal ? (seasonal.get(code)?.expense ?? (s.debit ? pace(s.debit) : null)) : s.debit ? pace(s.debit) : null,
+      suggestedBy: seasonal?.has(code) ? 'season' : 'pace',
+      openOrders: openOrders?.get(code) ?? 0,
       nextIncome: plan?.next_income ?? null,
       nextExpense: plan?.next_expense ?? null,
       meta: m,
