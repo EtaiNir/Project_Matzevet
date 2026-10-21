@@ -71,7 +71,7 @@ async function collect(db: SupabaseClient, roundId: string, sid: string): Promis
   if (!student) throw new Error('התלמיד אינו גלוי לך')
 
   const key = { authority_code: round.authority_code, school_code: round.school_code, student_id: sid }
-  const [subjects, metrics, grades, program, tracking, log, actions] = await Promise.all([
+  const [subjects, metrics, grades, program, tracking, log, actions, overrides] = await Promise.all([
     one<{ subject_key: string; subject_name: string; subject_group: string; units: number | null }[]>('מקצועות',
       db.from('bagrut_round_subjects').select('subject_key, subject_name, subject_group, units').eq('round_id', roundId).order('sort')),
     one<{ subject_key: string; final_grade: number | null; cumulative_grade: number | null; cumulative_weight: number | null; completion_status: string | null; units: number | null }[]>('מדדים',
@@ -86,7 +86,13 @@ async function collect(db: SupabaseClient, roundId: string, sid: string): Promis
       .select('kind, happened_on, summary, agreements, next_step').match(key).order('happened_on', { ascending: false }).limit(6)),
     one<Record<string, unknown>[]>('תוכנית', db.from('bagrut_actions')
       .select('title, status, outcome').match(key).neq('status', 'dismissed')),
+    // שינוי ידני של הסטטוס (מיגרציה 043) — האחרון בתוקף; kind ריק = חזרה לניתוח.
+    // לפני 043 אין טבלה — אין שינוי, לא שגיאה
+    db.from('bagrut_status_overrides').select('kind, reason').eq('round_id', roundId).eq('student_id', sid)
+      .order('set_at', { ascending: false }).limit(1)
+      .then((r) => (r.error ? [] : (r.data ?? []) as { kind: string | null; reason: string | null }[])),
   ])
+  const override = overrides[0]?.kind ? overrides[0] : null
 
   const subjectNames = new Map(subjects.map((s) => [s.subject_key, s.subject_name]))
   const subjectCodes = new Map<string, Set<number>>()
@@ -97,7 +103,11 @@ async function collect(db: SupabaseClient, roundId: string, sid: string): Promis
   const subjectRows = subjects.filter((s) => s.subject_group !== 'פנימי').flatMap((s) => {
     const m = metrics.find((x) => x.subject_key === s.subject_key)
     const gs = grades.filter((g) => g.subject_key === s.subject_key && g.grade != null)
-    if (!m && !gs.length) return []
+    // לכל תלמיד יש שורה לכל מקצוע בקובץ — גם כשאינו לומד אותו (21.10: ה-AI הסיק
+    // מהשורות הריקות "כמה מסלולים חלופיים"). מקצוע בלי אף ציון — רק אם הוא חובה,
+    // ומסומן "טרם החל"; אחרת לא נשלח
+    const started = gs.length > 0 || m?.final_grade != null || m?.cumulative_grade != null
+    if (!started && s.subject_group !== 'חובה') return []
     const graded = new Set(gs.map((g) => g.questionnaire_code))
     const prog = program.filter((p) => p.subject_key === s.subject_key)
     const doneGroups = new Set(prog.filter((p) => p.alt_group != null && graded.has(p.questionnaire_code)).map((p) => p.alt_group))
@@ -117,7 +127,11 @@ async function collect(db: SupabaseClient, roundId: string, sid: string): Promis
     const cum = m?.cumulative_grade ?? null
     const cw = m?.cumulative_weight ?? null
     const rw = cw != null ? Math.max(0, 1 - cw) : remaining.reduce((a, r) => a + r.weight_pct / 100, 0)
-    const needed = final == null && cum != null && rw > 0.001 && remaining.length ? Math.ceil((PASS - cum) / rw) : null
+    const rawNeeded = final == null && cum != null && rw > 0.001 && remaining.length ? Math.ceil((PASS - cum) / rw) : null
+    // ציון נדרש 0 ומטה = כבר מעל 55, נשאר רק לגשת (21.10: ה-AI כתב "נדרש -29").
+    // מעל 100 = אי אפשר להשלים ל-55 בשאלונים שנותרו
+    const alreadyAbove = rawNeeded != null && rawNeeded <= 0
+    const needed = alreadyAbove ? null : rawNeeded
     let retake: { code: number; current: number; needed: number } | null = null
     if (final != null && final < PASS) {
       for (const g of gs) {
@@ -140,9 +154,16 @@ async function collect(db: SupabaseClient, roundId: string, sid: string): Promis
       questionnaires: gs.map((g) => ({ code: g.questionnaire_code, grade: g.grade, weight_pct: g.weight != null ? Math.round(g.weight * 100) : null, blocked_grade: (g.grade as number) >= 1 && (g.grade as number) <= 4 })),
       remaining,
       needed_average_in_remaining_to_finish_at_55: needed,
+      already_above_55_only_needs_to_sit_remaining: alreadyAbove,
+      cannot_reach_55_in_remaining: needed != null && needed > 100,
       cheapest_retake_to_reach_55: retake,
+      required_not_started: !started,
     }]
   })
+
+  // אנגלית ומתמטיקה — חובה ברמה כלשהי. אין אף ציון באף רמה — "טרם החל"
+  const hasAny = (prefix: string) => subjectRows.some((r) => r.subject.startsWith(prefix) && !r.required_not_started)
+  const familiesNotStarted = ['אנגלית', 'מתמטיקה'].filter((f) => subjects.some((s) => s.subject_name.startsWith(f)) && !hasAny(f))
 
   const t = tracking ?? {}
   const input = {
@@ -159,8 +180,16 @@ async function collect(db: SupabaseClient, roundId: string, sid: string): Promis
         mother_tongue_status: student.mother_tongue_status, core_units: student.core_units,
         reinforced_subject: student.reinforced_subject, total_units: student.total_units, reason: student.reason,
       } : null,
+      // שינוי ידני של בית הספר (043) — גובר על הסטטוס ב-t2
+      status_override: override
+        ? { status: override.kind === 'eligible' ? 'זכאי' : 'אין זכאות', reason: override.reason }
+        : null,
     },
     subjects: subjectRows,
+    required_not_started: [
+      ...subjectRows.filter((r) => r.required_not_started).map((r) => r.subject),
+      ...familiesNotStarted.map((f) => `${f} (באף רמה)`),
+    ],
     staff: {
       flags: Object.keys(FLAG_LABELS).filter((k) => t[k]).map((k) => FLAG_LABELS[k]),
       non_grade_factors: (t.factors as string[] | undefined) ?? [],
@@ -178,11 +207,12 @@ async function collect(db: SupabaseClient, roundId: string, sid: string): Promis
 const SYSTEM = `אתה עוזר לצוות פדגוגי בבית ספר תיכון בישראל, במערכת מעקב אחר זכאות לתעודת בגרות. אתה כותב למורה — לא לתלמיד — בעברית, בשפה פשוטה וענינית.
 
 כללים מחייבים:
-1. הזכאות נקבעת רק לפי ניתוח הזכאות (השדה t2). אל תקבע, תנבא או תתקן זכאות, ואל תכתוב שתלמיד "יהיה זכאי" אם יעשה משהו. מותר לתאר מה t2 אומר ואיזה חסם פעולה מטפלת בו.
-2. השתמש רק במספרים שמופיעים בקלט. אל תחשב ציון נדרש בעצמך — הוא כבר מחושב (needed_average_in_remaining_to_finish_at_55, cheapest_retake_to_reach_55).
+1. הזכאות נקבעת רק לפי ניתוח הזכאות (השדה t2) — או לפי status_override, אם בית הספר שינה אותה ידנית (אז הוא גובר, ומותר לציין את הסיבה). אל תקבע, תנבא או תתקן זכאות, ואל תכתוב שתלמיד "יהיה זכאי" אם יעשה משהו. מותר לתאר מה t2 אומר ואיזה חסם פעולה מטפלת בו.
+2. השתמש רק במספרים שמופיעים בקלט. אל תחשב ציון נדרש בעצמך — הוא כבר מחושב (needed_average_in_remaining_to_finish_at_55, cheapest_retake_to_reach_55). already_above_55_only_needs_to_sit_remaining=true — המקצוע כבר מעל 55: כתוב שנשאר רק לגשת לשאלונים שנותרו, בלי ציון נדרש. cannot_reach_55_in_remaining=true — אי אפשר להגיע ל-55 בשאלונים שנותרו; הדרך היא בחינה חוזרת או מעבר רמה.
 3. ציון 1–4 בשאלון (blocked_grade) הוא ציון חסם: אינו נספר ומחייב בחינה חוזרת.
 4. אל תמציא שמות, אנשים או פרטים שאינם בקלט. שמות מקצועות — בדיוק כפי שהם בקלט.
-5. בלי הקדמות ובלי סיכומים כלליים. כל משפט צריך לעזור למורה לפעול או לנהל שיחה.`
+5. בלי הקדמות ובלי סיכומים כלליים. כל משפט צריך לעזור למורה לפעול או לנהל שיחה.
+6. המקצועות בקלט הם רק מה שהתלמיד התחיל, ומקצועות חובה שעוד לא התחיל (required_not_started). מקצוע שאינו בקלט — התלמיד אינו לומד אותו; אל תסיק ממנו כלום. מקצוע חובה שטרם החל — ציין אותו (ייתכן שמתוכנן לשנה הבאה; אל תניח שזה חסם אם התלמיד אינו בשכבה המסיימת).`
 
 const PICTURE_TASK = `כתוב "מצב התלמיד" למורה שעומד לנהל שיחה או מעקב:
 - headline: משפט אחד — איפה התלמיד עומד (לפי t2, או לפי התקדמות המקצועות אם אין t2).

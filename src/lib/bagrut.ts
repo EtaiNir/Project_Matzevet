@@ -107,7 +107,9 @@ export interface BagrutStudent {
 export interface StatusOverride {
   kind: 'eligible' | 'not_eligible'
   reason: string
+  /** ריק כשמנהל־על שינה — המייל שלו אינו נשמר (044) */
   set_by_email: string | null
+  set_by_role: 'super_admin' | 'coordinator' | null
   set_at: string
 }
 
@@ -134,24 +136,33 @@ export async function setStudentStatus(
     if (error.code === 'PGRST202') throw new Error('שינוי הסטטוס עדיין לא הופעל במסד (מיגרציה 043)')
     throw new Error(`השמירה נכשלה: ${error.message}`)
   }
-  const d = data as { changed: boolean; kind?: StatusOverride['kind'] | null; reason?: string; set_by_email?: string | null; set_at?: string }
+  const d = data as { changed: boolean; kind?: StatusOverride['kind'] | null; reason?: string; set_by_email?: string | null; set_by_role?: StatusOverride['set_by_role']; set_at?: string }
   // לא השתנה — מה שבתוקף נשאר; המסך לא נוגע בו
   if (!d.changed) return { changed: false, override: null }
   return {
     changed: true,
-    override: d.kind ? { kind: d.kind, reason: d.reason ?? '', set_by_email: d.set_by_email ?? null, set_at: d.set_at ?? new Date().toISOString() } : null,
+    override: d.kind ? { kind: d.kind, reason: d.reason ?? '', set_by_email: d.set_by_email ?? null, set_by_role: d.set_by_role ?? null, set_at: d.set_at ?? new Date().toISOString() } : null,
   }
+}
+
+/**
+ * "שונה ע"י מנהל על" / "שונה ע"י <מייל הרכז/ת>" — המייל של מנהל־על לעולם אינו
+ * מוצג (אייל, 21.10), גם לא בשורות מלפני 044 שבהן הוא עוד שמור.
+ */
+export function overrideByText(o: StatusOverride): string {
+  if (o.set_by_role === 'super_admin') return 'שונה ע"י מנהל על'
+  return o.set_by_email ? `שונה ע"י ${o.set_by_email}` : 'שונה ידנית'
 }
 
 /** השינויים שבתוקף — האחרון לכל תלמיד; "חזרה" (kind ריק) מבטלת. לפני 043 — אין, לא שגיאה. */
 async function loadOverrides(roundId: string): Promise<Map<string, StatusOverride>> {
   const { data, error } = await supabase.from('bagrut_status_overrides')
-    .select('student_id, kind, reason, set_by_email, set_at')
+    .select('student_id, kind, reason, set_by_email, set_by_role, set_at')
     .eq('round_id', roundId).order('set_at')
   const m = new Map<string, StatusOverride>()
   if (error) return m
   for (const r of (data ?? []) as (Omit<StatusOverride, 'kind'> & { student_id: string; kind: StatusOverride['kind'] | null })[]) {
-    if (r.kind) m.set(r.student_id, { kind: r.kind, reason: r.reason, set_by_email: r.set_by_email, set_at: r.set_at })
+    if (r.kind) m.set(r.student_id, { kind: r.kind, reason: r.reason, set_by_email: r.set_by_email, set_by_role: r.set_by_role, set_at: r.set_at })
     else m.delete(r.student_id)
   }
   return m
