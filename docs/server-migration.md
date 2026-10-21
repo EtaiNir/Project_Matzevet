@@ -106,6 +106,18 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
   "https://api.supabase.com/v1/projects/$REF/functions/deploy?slug=$SLUG"
 ```
 
+**לפני פריסה — להשוות לגרסה הפרוסה** (מלכודת 39: יש מי שפורס מקוד שאינו בריפו):
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" "https://api.supabase.com/v1/projects/$REF/functions"   # גרסה ותאריך
+curl -s -o body.bin -H "Authorization: Bearer $TOKEN" "https://api.supabase.com/v1/projects/$REF/functions/$SLUG/body"
+```
+
+`body.bin` הוא חבילת ESZIP — קוד המקור נמצא בה כטקסט. לחפש בה שורות מגרסת הריפו
+האחרונה שנפרסה; שורות חסרות = מישהו פרס משהו אחר — לעצור ולברר.
+**אחרי פריסה** — `OPTIONS` ל-`/functions/v1/$SLUG` מחזיר 200, ובקשה בלי משתמש
+מחזירה שגיאה **מהקוד שלנו** (למשל "הסבב אינו גלוי לך"), לא `BOOT_ERROR`.
+
 **סוד לפונקציה** (פעם אחת; לא נכנס לקוד ולא לגיט):
 
 ```bash
