@@ -34,7 +34,7 @@ export interface CardRow {
   name: string
   dir: Direction
   parts: [string, string, string]
-  /** התקציב המאושר (022 §4 — אומת מול האקסס), בערך טבעי */
+  /** התקציב המאושר (023 §4 — אומת מול האקסס), בערך טבעי */
   budget: number | null
   /** הביצוע לתקופה שנבחרה, בערך טבעי */
   executed: number | null

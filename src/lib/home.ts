@@ -394,7 +394,7 @@ export interface BudgetOverviewRow {
 
 /**
  * לכל רשות: הכרטסת האחרונה שנקלטה — לכרטיס המוצר באזור האישי. ולמנהל
- * התקציב: קליטות שנכשלו, נתקעו או ממתינות לאישור ההתאמה (022). ה-RLS
+ * התקציב: קליטות שנכשלו, נתקעו או ממתינות לאישור ההתאמה (023). ה-RLS
  * מחזיר את budget_uploads רק למי שמנהל את התקציב, כך שאצל אחרים אין משימות.
  */
 export async function loadBudgetOverview(codes: string[], nameOf: (code: string) => string): Promise<{ rows: BudgetOverviewRow[]; todos: Todo[] }> {

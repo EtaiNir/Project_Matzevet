@@ -5,7 +5,7 @@
         --file "EprRep… ברמת הכרטיס הבודד.xls" --file "EprRep… ברמת הפעולה הבודדת.xls" \\
         --file "Horada (19).zip" --dry-run --report-json report.json
 
-החלטה 022. שני שלבים, כמו קליטת דרג ב' (load_tier_b.py):
+החלטה 023. שני שלבים, כמו קליטת דרג ב' (load_tier_b.py):
 
   --emit-mapping   מזהה את סוג כל קובץ ומציע התאמת כותרות→שדות (מתבנית
                    שמורה, או ממילון הכותרות ב-budget_fields.py). מדפיס JSON.

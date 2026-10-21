@@ -106,7 +106,7 @@ export default function App() {
         </Route>
       </Route>
 
-      {/* ניהול תקציב (החלטה 022) — ברמת הרשות; המעטפת טוענת את הכרטסת פעם אחת */}
+      {/* ניהול תקציב (החלטה 023) — ברמת הרשות; המעטפת טוענת את הכרטסת פעם אחת */}
       <Route path="/budget" element={budget(<BudgetShell />)} />
       <Route path="/budget/:code" element={budget(<BudgetShell />)}>
         <Route index element={<BudgetHome />} />

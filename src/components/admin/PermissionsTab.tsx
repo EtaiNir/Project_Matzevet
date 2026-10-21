@@ -42,7 +42,7 @@ export default function PermissionsTab({ code }: Props) {
   const [hasProfileFields, setHasProfileFields] = useState(false)
   const [hasMatzevet, setHasMatzevet] = useState(true)
   const [bagrutOptions, setBagrutOptions] = useState<BagrutScopeOptions | null>(null)
-  // עמודות התקציב קיימות במסד (מיגרציה 042) — אחרת אין מה להעניק
+  // עמודות התקציב קיימות במסד (מיגרציה 044) — אחרת אין מה להעניק
   const [hasBudgetFields, setHasBudgetFields] = useState(true)
   const [budgetCategories, setBudgetCategories] = useState<ScopeOption[] | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
@@ -181,7 +181,7 @@ export default function PermissionsTab({ code }: Props) {
     : product === 'bagrut' && bagrutOptions && !bagrutOptions.schools.length
       ? 'לרשות הזו אין עדיין סבב בגרות — אפשר להעניק גישה אחרי הקליטה הראשונה.'
       : product === 'budget' && !hasBudgetFields
-        ? 'מודול התקציב עוד לא הותקן במסד (מיגרציה 042) — אין עדיין מה להעניק.'
+        ? 'מודול התקציב עוד לא הותקן במסד (מיגרציה 044) — אין עדיין מה להעניק.'
         : null
 
   return (

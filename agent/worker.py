@@ -478,7 +478,7 @@ def process_bagrut(conn, job) -> None:
 
 # ═══════════════════════════ קליטת תקציב ═══════════════════════════
 #
-# החלטה 022. בדפוס של דרג ב' — שני שלבים:
+# החלטה 023. בדפוס של דרג ב' — שני שלבים:
 #
 #   אין approved_mapping  →  load_budget --emit-mapping מזהה כל קובץ ומציע
 #                            התאמת כותרות. אם לכל הדוחות יש תבנית שמורה
@@ -1420,7 +1420,7 @@ def main() -> None:
                 idle_logged = False
                 process_bagrut(conn, bagrut)
 
-            # קליטת תקציב — תור נפרד, רץ גם ב---tier-b-only (022)
+            # קליטת תקציב — תור נפרד, רץ גם ב---tier-b-only (023)
             budget = claim_next_budget(conn)
             if budget:
                 idle_logged = False

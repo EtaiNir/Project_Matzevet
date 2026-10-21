@@ -1,4 +1,4 @@
-// שכבת הנתונים של מודול התקציב (החלטה 022, מיגרציה 042).
+// שכבת הנתונים של מודול התקציב (החלטה 023, מיגרציה 044).
 //
 // שתי שכבות:
 //   קבצים  — budget_cards, budget_transactions, budget_orders, meitar_*: קריאה בלבד;
@@ -23,7 +23,7 @@ export interface BudgetCard {
   fiscal_year: number
   card_code: string
   card_name: string | null
-  /** התקציב המאושר — "תכנית שנה נוכחית" באקסס היא אותו מספר (022 §4, אומת 405/405) */
+  /** התקציב המאושר — "תכנית שנה נוכחית" באקסס היא אותו מספר (023 §4, אומת 405/405) */
   budget_expense: number | null
   budget_income: number | null
   budget_period: number | null
@@ -291,11 +291,11 @@ export interface BudgetUpload {
 
 // ─────────────────────────── עזר ───────────────────────────
 
-/** שגיאת מסד שאומרת "הטבלה/הפונקציה לא קיימת" — מיגרציה 042 טרם הוחלה */
+/** שגיאת מסד שאומרת "הטבלה/הפונקציה לא קיימת" — מיגרציה 044 טרם הוחלה */
 function explain(e: { message: string; code?: string } | null, what: string): Error {
   if (!e) return new Error(what)
   if (e.code === '42P01' || e.code === 'PGRST205' || e.code === 'PGRST202' || /does not exist|schema cache/i.test(e.message)) {
-    return new Error(`${what} — מודול התקציב עוד לא הותקן במסד (מיגרציה 042)`)
+    return new Error(`${what} — מודול התקציב עוד לא הותקן במסד (מיגרציה 044)`)
   }
   return new Error(`${what} — ${e.message}`)
 }

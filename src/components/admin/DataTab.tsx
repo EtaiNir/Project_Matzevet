@@ -74,7 +74,7 @@ export default function DataTab({ code }: Props) {
         </>
       )}
       {product === 'bagrut' && <BagrutData code={code} />}
-      {/* התקציב ברמת הרשות, כמו המצבת (022) */}
+      {/* התקציב ברמת הרשות, כמו המצבת (023) */}
       {product === 'budget' && <BudgetUploadPanel code={code} />}
     </div>
   )
