@@ -106,13 +106,40 @@ def to_num(v) -> float | None:
         return None
     if isinstance(v, (int, float)):
         return float(v)
-    s = str(v).strip().replace(",", "").replace("+", "")
+    s = str(v).strip().replace(",", "").replace("+", "").replace("₪", "").strip()
     if not s:
         return None
     if s.startswith("."):
         s = "0" + s
     try:
         return float(s)
+    except ValueError:
+        return None
+
+
+def to_bool(v) -> bool | None:
+    """תיבת סימון מהאקסס: True/False, 1/0, "כן"/"לא". ריק — None."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    t = str(v).strip().lower()
+    if t in ("true", "1", "כן", "-1", "yes", "v", "✓"):
+        return True
+    if t in ("false", "0", "לא", "no"):
+        return False
+    return None
+
+
+def as_of_from_name(name: str) -> date | None:
+    """EPR קורא לדוח EprRepDDMMYYYYHHMMSS — זה תאריך הנתונים (19102026 = 19.10.2026)."""
+    m = re.search(r"EprRep(\d{2})(\d{2})(\d{4})", name)
+    if not m:
+        return None
+    try:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
     except ValueError:
         return None
 
@@ -227,6 +254,18 @@ def parse_xls_rows(kind: str, headers: list[str], rows: list[list], mapping: dic
                 "cost_center": to_text(get("cost_center")), "document": to_text(get("document")),
                 "meitar_topic": None,   # נקבע אחרי שכל הקבצים נקראו — ראה topic_of
                 "line_no": line_no,
+            })
+        elif kind == "extras":
+            code = to_code(get("card_code"))
+            if not code:
+                continue   # שורת הסיכום שבתחתית הייצוא, ושורות ריקות
+            out.append({
+                "card_code": code, "card_name": to_text(get("card_name")),
+                **{f: to_num(get(f)) for f in ("plan_income", "plan_expense", "forecast_income",
+                                               "forecast_expense", "next_income", "next_expense")},
+                **{f: to_bool(get(f)) for f in ("in_meitar", "is_income", "is_expense", "gefen", "active_prev_year")},
+                **{f: to_text(get(f)) for f in ("category1", "category2", "category3", "category_note",
+                                                "notes", "owner_name", "money_source")},
             })
         elif kind == "orders":
             no = to_text(get("order_no"))
@@ -485,8 +524,9 @@ def main() -> None:
     # ── שלב 1: זיהוי והצעה ──
     described = {p.name: describe_file(p, conn, args.code) for p in files}
     if args.emit_mapping:
-        auto = all(d["kind"] == "meitar" or (d["source"] == "saved" and not d["missing"])
-                   for d in described.values())
+        # תמיד לאישור באתר, כמו קליטת הגנים (אייל, 21.10) — גם כשיש תבנית שמורה:
+        # היא רק ממלאת מראש את ההתאמה. ZIP מיתר לבדו (בלי דוחות) — נטען מיד.
+        auto = all(d["kind"] == "meitar" for d in described.values())
         print(json.dumps({"files": described, "auto": auto}, ensure_ascii=False, default=str))
         return
 
@@ -498,7 +538,7 @@ def main() -> None:
     def warn(kind: str, text: str, **detail):
         report["warnings"].append({"kind": kind, "text": text, **detail})
 
-    parsed: dict[str, list] = {"cards": [], "actions": [], "orders": []}
+    parsed: dict[str, list] = {"cards": [], "actions": [], "extras": [], "orders": []}
     meitar: list[dict] = []
     kinds_seen: dict[str, str] = {}
     for p in files:
@@ -509,7 +549,7 @@ def main() -> None:
             kind = approved[p.name].get("kind") or kind
             mapping = approved[p.name].get("mapping") or mapping
         if kind == "unknown":
-            report["errors"].append(f"{p.name}: לא זוהה סוג הדוח (כרטיסים / פעולות / הזמנות)")
+            report["errors"].append(f"{p.name}: לא זוהה סוג הקובץ (כרטיסים / פעולות / תוספתיים / הזמנות)")
             continue
         if kind == "meitar":
             m = parse_meitar_zip(p)
@@ -540,7 +580,11 @@ def main() -> None:
         report["files"][p.name] = {"kind": kind, "rows": len(items)}
 
     # ── שלב 2: בדיקות ──
-    cards, actions, orders = parsed["cards"], parsed["actions"], parsed["orders"]
+    cards, actions, extras, orders = parsed["cards"], parsed["actions"], parsed["extras"], parsed["orders"]
+    # תאריך הנתונים: משם דוח ה-EPR; אם אין — יום הקליטה (ראה as_of_from_name)
+    stamps = [as_of_from_name(p.name) for p in files if as_of_from_name(p.name)]
+    as_of = max(stamps) if stamps else date.today()
+    report["as_of"] = as_of.isoformat()
     if cards:
         dup = len(cards) - len({c["card_code"] for c in cards})
         if dup:
@@ -574,7 +618,15 @@ def main() -> None:
         if rc["mismatches"]:
             warn("meitar_reconcile", f"מיתר {m['calc_month']:%m/%Y}: {len(rc['mismatches'])} מתוך {rc['total']} נושאים "
                  f"לא מתיישבים בין החשבונית לפירוט")
-    if not (cards or actions or orders or meitar) and not report["errors"]:
+    if extras:
+        dup = len(extras) - len({e["card_code"] for e in extras})
+        if dup:
+            report["errors"].append(f"קובץ התוספתיים: {dup} כרטיסים מופיעים יותר מפעם אחת")
+        if cards:
+            missing = {c["card_code"] for c in cards} - {e["card_code"] for e in extras}
+            if missing:
+                warn("extras_missing", f"{len(missing)} כרטיסים בדוח הכרטיסים אינם בקובץ התוספתיים — יופיעו בלי קטגוריות")
+    if not (cards or actions or extras or orders or meitar) and not report["errors"]:
         report["errors"].append("לא נמצא אף קובץ לקליטה")
 
     # נושא מיתר לתקבולים — אחרי שכל הקבצים נקראו (הנושאים המוכרים באים גם מה-ZIP)
@@ -592,7 +644,7 @@ def main() -> None:
             warn("no_meitar", "עוד לא נקלטו קובצי מיתר — התנועות נטענו בלי נושא מיתר. "
                  "קליטת ה-ZIP תשייך אותן.")
 
-    report["counts"] = {"cards": len(cards), "transactions": len(actions), "orders": len(orders),
+    report["counts"] = {"cards": len(cards), "transactions": len(actions), "extras": len(extras), "orders": len(orders),
                         "meitar_rows": sum(len(m["rows"]) for m in meitar),
                         "meitar_invoice": sum(len(m["invoice"]) for m in meitar)}
 
@@ -620,9 +672,10 @@ def main() -> None:
                 cur.execute("delete from public.budget_cards where authority_code=%s and fiscal_year=%s", (code, args.year))
                 execute_values(cur, """insert into public.budget_cards
                     (authority_code, fiscal_year, card_code, card_name, budget_expense, budget_income, budget_period,
-                     executed, reserved, balance, demand, upload_id) values %s""",
+                     executed, reserved, balance, demand, as_of, upload_id) values %s""",
                     [(code, args.year, c["card_code"], c["card_name"], c["budget_expense"], c["budget_income"],
-                      c["budget_period"], c["executed"], c["reserved"], c["balance"], c["demand"], up) for c in cards],
+                      c["budget_period"], c["executed"], c["reserved"], c["balance"], c["demand"], as_of, up)
+                     for c in cards],
                     page_size=1000)
             if actions:
                 lo, hi = (report.get("date_range") or [None, None])
@@ -641,6 +694,39 @@ def main() -> None:
                       a["is_opening"], a["voucher"], a["counter_account"], a["counter_name"], a["details"],
                       a["debit"], a["credit"], a["balance"], a["ref1"], a["ref2"], a["cost_center"],
                       a["document"], a["meitar_topic"], a["line_no"], up) for a in actions],
+                    page_size=1000)
+            if extras:
+                # התוספתיים הם הנתונים של סבא — הקובץ גובר בכרטיסים שבו (גם ערך ריק).
+                # כרטיס שאינו בקובץ — שכבת המשתמש שלו לא נגעת.
+                for label, sql in (("card_meta", "select * from public.budget_card_meta where authority_code=%s"),
+                                   ("card_plans", "select * from public.budget_card_plans where authority_code=%s")):
+                    b = backup_rows(conn, code, label, sql, (code,))
+                    if b:
+                        report["backups"].append(b)
+                execute_values(cur, """insert into public.budget_card_meta
+                    (authority_code, card_code, card_name, category1, category2, category3, category_note, owner_name,
+                     money_source, gefen, in_meitar, is_income, is_expense, active_prev_year) values %s
+                    on conflict (authority_code, card_code) do update set
+                      card_name = excluded.card_name,
+                      category1 = excluded.category1, category2 = excluded.category2, category3 = excluded.category3,
+                      category_note = excluded.category_note, owner_name = excluded.owner_name,
+                      money_source = excluded.money_source, gefen = excluded.gefen, in_meitar = excluded.in_meitar,
+                      is_income = excluded.is_income, is_expense = excluded.is_expense,
+                      active_prev_year = excluded.active_prev_year""",
+                    [(code, e["card_code"], e["card_name"], e["category1"], e["category2"], e["category3"], e["category_note"],
+                      e["owner_name"], e["money_source"], bool(e["gefen"]), bool(e["in_meitar"]),
+                      e["is_income"], e["is_expense"], bool(e["active_prev_year"])) for e in extras],
+                    page_size=1000)
+                execute_values(cur, """insert into public.budget_card_plans
+                    (authority_code, card_code, fiscal_year, plan_income, plan_expense, forecast_income,
+                     forecast_expense, next_income, next_expense, notes) values %s
+                    on conflict (authority_code, card_code, fiscal_year) do update set
+                      plan_income = excluded.plan_income, plan_expense = excluded.plan_expense,
+                      forecast_income = excluded.forecast_income, forecast_expense = excluded.forecast_expense,
+                      next_income = excluded.next_income, next_expense = excluded.next_expense,
+                      notes = excluded.notes""",
+                    [(code, e["card_code"], args.year, e["plan_income"], e["plan_expense"], e["forecast_income"],
+                      e["forecast_expense"], e["next_income"], e["next_expense"], e["notes"]) for e in extras],
                     page_size=1000)
             if orders:
                 b = backup_rows(conn, code, "orders", "select * from public.budget_orders where authority_code=%s", (code,))

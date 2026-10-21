@@ -1,8 +1,14 @@
 // חישובי התקציב בצד הלקוח — פונקציות טהורות, בלי גישה למסד.
 //
-// ⚠️ סימנים: בקובצי EPR ההוצאות **שליליות** (תקציב הוצאות −1,135,000, ביצוע
-// −745,393). האחסון נשאר כמו בקובץ; כאן הכול מוחזר בערך "טבעי" לתצוגה —
-// תקציב והוצאה חיוביים, ניצול באחוזים. ראה מלכודת 41 ב-CLAUDE.md.
+// המודל הוא של האקסס של סבא (טפסי "מעקב ותכנון תקציב", החלטה 023 §8):
+// לכל כרטיס **שני צדדים זה לצד זה**, כל אחד מול התכנית שלו —
+//   הכנסות מצטבר = Σ זכות בתקופה   מול  תקציב הכנסות
+//   הוצאות מצטבר = Σ חובה בתקופה   מול  תקציב הוצאות
+// לא ביצוע נטו בכיוון אחד. נבדק מול המסכים (21.10): כרטיס 1311000921, שנה"ל
+// תשפ"ו — 807,925 / 76,026, בדיוק כמו באקסס; סה"כ הכנסות 83,273,562 — זהה.
+//
+// ⚠️ סימנים: בדוח הכרטיסים של EPR תקציב ההוצאות **שלילי**. כאן הוא מוצג
+// בערך טבעי — **בהיפוך סימן** ב-buildRows, לא Math.abs. ראה מלכודת 41 ב-CLAUDE.md.
 import type { BudgetCard, CardMeta, CardPlan, MonthlyRow } from './budget'
 
 export type Direction = 'income' | 'expense'
@@ -12,44 +18,41 @@ export function splitCard(code: string): [string, string, string] {
   return [code.slice(0, 3), code.slice(3, 7), code.slice(7)]
 }
 
-/**
- * הכנסה או הוצאה. קודם לפי התקציב שבקובץ; לכרטיס בלי תקציב — לפי
- * הספרה השנייה (13… הכנסות, 18… הוצאות במנשה; במבנה האחיד של משרד הפנים
- * ספרה 1–5 היא צד ההכנסות). השערה מתועדת — לא נבדקה ברשות אחרת.
- */
-export function directionOf(card: Pick<BudgetCard, 'card_code' | 'budget_income' | 'budget_expense'>): Direction {
-  if (card.budget_income) return 'income'
-  if (card.budget_expense) return 'expense'
-  return Number(card.card_code[1] ?? '9') <= 5 ? 'income' : 'expense'
-}
-
-/** הערך לתצוגה: הכנסה כמו שהיא, הוצאה בהיפוך סימן */
-export function natural(value: number | null | undefined, dir: Direction): number | null {
-  if (value == null) return null
-  return dir === 'income' ? value : -value
+/** הספרה השנייה: 13… הכנסות, 18… הוצאות (במבנה האחיד של משרד הפנים 1–5 = הכנסות) */
+function incomeByCode(code: string): boolean {
+  return Number(code[1] ?? '9') <= 5
 }
 
 export interface CardRow {
   code: string
   name: string
-  dir: Direction
   parts: [string, string, string]
-  /** התקציב המאושר (023 §4 — אומת מול האקסס), בערך טבעי */
-  budget: number | null
-  /** הביצוע לתקופה שנבחרה, בערך טבעי */
-  executed: number | null
-  reserved: number | null
-  /** ניצול = ביצוע / תקציב; null כשאין תקציב */
-  usage: number | null
-  /** מה שנשאר: תקציב − ביצוע − שריון */
-  remaining: number | null
-  forecast: number | null
-  /** הצעה לצפי לפי הקצב — לא נשמרת */
-  suggested: number | null
-  nextYear: number | null
+  /** הדגלים "הכנסה" / "הוצאה" — מהתוספתיים, אחרת לפי התקציב ומבנה הכרטיס */
+  isIncome: boolean
+  isExpense: boolean
+  /** הצד העיקרי — לגרפים ולמיון */
+  dir: Direction
+  /** תקציב הכנסות / הוצאות (חיובי) — מ-EPR, ולכרטיס שאין לו שורה שם — מהתוספתיים */
+  budgetIncome: number | null
+  budgetExpense: number | null
+  /** Σ זכות / Σ חובה בתקופה שנבחרה */
+  cumIncome: number
+  cumExpense: number
+  /** אחוז ביצוע לכל צד — מצטבר / תקציב; null כשאין תקציב */
+  pctIncome: number | null
+  pctExpense: number | null
+  /** צפי לסוף השנה — מה שהוקלד; ריק = אין */
+  forecastIncome: number | null
+  forecastExpense: number | null
+  /** הצעה לצפי לפי הקצב (מצטבר × 12 / חודשים שחלפו) — לא נשמרת */
+  suggestedIncome: number | null
+  suggestedExpense: number | null
+  nextIncome: number | null
+  nextExpense: number | null
   meta: CardMeta | null
   plan: CardPlan | null
-  card: BudgetCard
+  /** השורה מדוח הכרטיסים; null לכרטיס שקיים רק בתוספתיים */
+  card: BudgetCard | null
 }
 
 export type Period = 'calendar' | 'school'
@@ -59,8 +62,8 @@ export type Period = 'calendar' | 'school'
  * ימים (19.10 = 9.6 חודשים בשנה קלנדרית); תקופה שהסתיימה — 12.
  *
  * ⚠️ לא לפי התנועה האחרונה: הנהלת החשבונות רושמת מראש תנועות עם תאריך
- * עתידי ("שרת 12.2026"), ולפיהן כל שנה נראית גמורה — קצב 100%, והצפי יצא
- * שווה לביצוע עד היום (מנשה, 20.10). תאריך הנתונים = מתי נקלט דוח הכרטיסים.
+ * עתידי ("שרת 12.2026"), ולפיהן כל שנה נראית גמורה (מנשה, 20.10). תאריך
+ * הנתונים נלקח משם דוח ה-EPR (budget_cards.as_of).
  */
 export function elapsedMonths(asOf: string | null, year: number, period: Period): number {
   if (!asOf) return 0
@@ -78,43 +81,65 @@ export function periodRange(year: number, period: Period): { from: string; to: s
     : { from: `${year - 1}-09-01`, to: `${year}-09-01` }
 }
 
-/** ביצוע מהתנועות: Σ(זכות − חובה) לכל כרטיס (חתום כמו בקובץ) */
-export function executedFromMonthly(rows: MonthlyRow[]): Map<string, number> {
-  const out = new Map<string, number>()
-  for (const r of rows) out.set(r.card_code, (out.get(r.card_code) ?? 0) + r.credit - r.debit)
+/** Σ זכות ו-Σ חובה לכל כרטיס בתקופה */
+export function sidesFromMonthly(rows: MonthlyRow[]): Map<string, { credit: number; debit: number }> {
+  const out = new Map<string, { credit: number; debit: number }>()
+  for (const r of rows) {
+    const t = out.get(r.card_code) ?? { credit: 0, debit: 0 }
+    t.credit += r.credit
+    t.debit += r.debit
+    out.set(r.card_code, t)
+  }
   return out
 }
 
+/**
+ * שורות הטבלה הראשית: כל כרטיס שבדוח הכרטיסים **או** בתוספתיים (כמו הטבלה
+ * הראשית באקסס, שנבנית מהתוספתיים).
+ */
 export function buildRows(
   cards: BudgetCard[],
   meta: Map<string, CardMeta>,
   plans: Map<string, CardPlan>,
-  opts: { period: Period; schoolExecuted?: Map<string, number>; elapsed: number },
+  monthly: MonthlyRow[],
+  elapsed: number,
 ): CardRow[] {
-  return cards.map((card) => {
-    const dir = directionOf(card)
-    const budget = natural(dir === 'income' ? card.budget_income : card.budget_expense, dir)
-    const rawExec = opts.period === 'school' ? (opts.schoolExecuted?.get(card.card_code) ?? null) : card.executed
-    const executed = natural(rawExec, dir)
-    const reserved = natural(card.reserved, dir)
-    const plan = plans.get(card.card_code) ?? null
-    const usage = budget && executed != null ? executed / budget : null
-    const remaining = budget != null ? budget - (executed ?? 0) - (reserved ?? 0) : null
-    const suggested = executed != null && opts.elapsed > 0 && opts.elapsed < 12 ? (executed * 12) / opts.elapsed : executed
+  const byCode = new Map(cards.map((c) => [c.card_code, c]))
+  const codes = [...new Set([...byCode.keys(), ...meta.keys()])].sort()
+  const sides = sidesFromMonthly(monthly)
+  const pace = (v: number) => (elapsed > 0 && elapsed < 12 ? Math.round((v * 12) / elapsed) : Math.round(v))
+
+  return codes.map((code) => {
+    const card = byCode.get(code) ?? null
+    const m = meta.get(code) ?? null
+    const plan = plans.get(code) ?? null
+    // היפוך סימן, לא ערך מוחלט: תקציב הוצאות חיובי ב-EPR הוא הוצאה שלילית
+    // (1817320001 במנשה — ‎−10,000 גם בתוספתיים ובאקסס). Math.abs הפך אותו לחיובי.
+    const budgetIncome = card ? (card.budget_income ?? null) : (plan?.plan_income ?? null)
+    const budgetExpense = card ? (card.budget_expense == null ? null : -card.budget_expense) : (plan?.plan_expense ?? null)
+    const s = sides.get(code) ?? { credit: 0, debit: 0 }
+    const isIncome = m?.is_income ?? (Boolean(budgetIncome) || (!budgetExpense && incomeByCode(code)))
+    const isExpense = m?.is_expense ?? (Boolean(budgetExpense) || (!budgetIncome && !incomeByCode(code)))
     return {
-      code: card.card_code,
-      name: card.card_name ?? '',
-      dir,
-      parts: splitCard(card.card_code),
-      budget,
-      executed,
-      reserved,
-      usage,
-      remaining,
-      forecast: dir === 'income' ? (plan?.forecast_income ?? null) : (plan?.forecast_expense ?? null),
-      suggested: suggested == null ? null : Math.round(suggested),
-      nextYear: dir === 'income' ? (plan?.next_income ?? null) : (plan?.next_expense ?? null),
-      meta: meta.get(card.card_code) ?? null,
+      code,
+      name: card?.card_name ?? m?.card_name ?? '',
+      parts: splitCard(code),
+      isIncome,
+      isExpense,
+      dir: isIncome && !isExpense ? 'income' : 'expense',
+      budgetIncome,
+      budgetExpense,
+      cumIncome: s.credit,
+      cumExpense: s.debit,
+      pctIncome: budgetIncome ? s.credit / budgetIncome : null,
+      pctExpense: budgetExpense ? s.debit / budgetExpense : null,
+      forecastIncome: plan?.forecast_income ?? null,
+      forecastExpense: plan?.forecast_expense ?? null,
+      suggestedIncome: s.credit ? pace(s.credit) : null,
+      suggestedExpense: s.debit ? pace(s.debit) : null,
+      nextIncome: plan?.next_income ?? null,
+      nextExpense: plan?.next_expense ?? null,
+      meta: m,
       plan,
       card,
     }
@@ -122,48 +147,54 @@ export function buildRows(
 }
 
 export interface Totals {
-  budget: number
-  executed: number
-  reserved: number
-  forecast: number
-  nextYear: number
-  /** כמה כרטיסים בלי צפי מוקלד — הצפי הכולל מניח עבורם את ההצעה */
+  budgetIncome: number
+  budgetExpense: number
+  cumIncome: number
+  cumExpense: number
+  /** צפי: מה שהוקלד, ולכרטיס בלי צפי — לפי הקצב */
+  forecastIncome: number
+  forecastExpense: number
+  nextIncome: number
+  nextExpense: number
+  /** כמה כרטיסים חסר בהם צפי מוקלד (בצד שיש בו תנועה) */
   noForecast: number
+  count: number
 }
 
-export function totals(rows: CardRow[], dir: Direction): Totals {
-  const t: Totals = { budget: 0, executed: 0, reserved: 0, forecast: 0, nextYear: 0, noForecast: 0 }
+export function totals(rows: CardRow[]): Totals {
+  const t: Totals = { budgetIncome: 0, budgetExpense: 0, cumIncome: 0, cumExpense: 0, forecastIncome: 0,
+    forecastExpense: 0, nextIncome: 0, nextExpense: 0, noForecast: 0, count: rows.length }
   for (const r of rows) {
-    if (r.dir !== dir) continue
-    t.budget += r.budget ?? 0
-    t.executed += r.executed ?? 0
-    t.reserved += r.reserved ?? 0
-    if (r.forecast != null) t.forecast += r.forecast
-    else {
-      t.noForecast += 1
-      t.forecast += r.suggested ?? 0
-    }
-    t.nextYear += r.nextYear ?? 0
+    t.budgetIncome += r.budgetIncome ?? 0
+    t.budgetExpense += r.budgetExpense ?? 0
+    t.cumIncome += r.cumIncome
+    t.cumExpense += r.cumExpense
+    t.forecastIncome += r.forecastIncome ?? r.suggestedIncome ?? 0
+    t.forecastExpense += r.forecastExpense ?? r.suggestedExpense ?? 0
+    if ((r.cumIncome && r.forecastIncome == null) || (r.cumExpense && r.forecastExpense == null)) t.noForecast += 1
+    t.nextIncome += r.nextIncome ?? 0
+    t.nextExpense += r.nextExpense ?? 0
   }
   return t
 }
 
-/** ביצוע לפי חודש (ערך טבעי) — לגרף העמודות */
-export function monthlySeries(rows: MonthlyRow[], dirOf: (card: string) => Direction | undefined, dir: Direction, from: string): { key: string; n: number }[] {
+/** הכנסות (Σזכות) והוצאות (Σחובה) לפי חודש — לגרף העמודות */
+export function monthlySeries(rows: MonthlyRow[], side: 'credit' | 'debit', from: string, only?: (card: string) => boolean): { key: string; n: number }[] {
   const start = new Date(from)
   const buckets = Array.from({ length: 12 }, (_, i) => {
     const d = new Date(start.getFullYear(), start.getMonth() + i, 1)
     return { iso: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, n: 0 }
   })
   for (const r of rows) {
-    if (dirOf(r.card_code) !== dir) continue
+    if (only && !only(r.card_code)) continue
     const b = buckets.find((x) => r.month.startsWith(x.iso))
-    if (b) b.n += dir === 'income' ? r.credit - r.debit : r.debit - r.credit
+    if (b) b.n += r[side]
   }
   return buckets.map((b) => ({ key: HEB_MONTHS[Number(b.iso.slice(5)) - 1], n: Math.round(b.n) }))
 }
 
 export const HEB_MONTHS = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳']
+export const HEB_MONTH_NAMES = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר']
 
 // ── תצוגה ──
 
@@ -179,7 +210,7 @@ export function money(n: number | null | undefined): string {
 export function pct(n: number | null | undefined): string {
   return n == null || !Number.isFinite(n) ? '' : `${Math.round(n * 100)}%`
 }
-/** צבע הניצול: מעל 100% אדום, מעל הקצב צהוב */
+/** צבע אחוז הביצוע: מעל 100% אדום, מעל הקצב צהוב */
 export function usageTone(usage: number | null, pace: number): string {
   if (usage == null) return 'text-slate-400'
   if (usage > 1) return 'text-red-700 font-bold'

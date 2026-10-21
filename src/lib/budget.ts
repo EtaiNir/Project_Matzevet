@@ -31,12 +31,16 @@ export interface BudgetCard {
   reserved: number | null
   balance: number | null
   demand: number | null
+  /** עד מתי הנתונים — מהשם של דוח ה-EPR (מיגרציה 045) */
+  as_of: string | null
   loaded_at: string
 }
 
 export interface CardMeta {
   authority_code: string
   card_code: string
+  /** "תאור סעיף" מהתוספתיים — לכרטיס שאין לו שורה בדוח הכרטיסים */
+  card_name: string | null
   category1: string | null
   category2: string | null
   category3: string | null
@@ -45,6 +49,11 @@ export interface CardMeta {
   money_source: string | null
   meitar_topic: string | null
   gefen: boolean
+  /** הדגלים מהתוספתיים (045). is_income / is_expense ריקים = נגזר מהתקציב */
+  in_meitar: boolean
+  is_income: boolean | null
+  is_expense: boolean | null
+  active_prev_year: boolean
   updated_at: string
 }
 
@@ -52,6 +61,9 @@ export interface CardPlan {
   authority_code: string
   card_code: string
   fiscal_year: number
+  /** "תכנית שנה נוכחית" מהתוספתיים — זהה לתקציב ב-EPR; לכרטיס שאין לו שורה שם */
+  plan_income: number | null
+  plan_expense: number | null
   forecast_income: number | null
   forecast_expense: number | null
   next_income: number | null
@@ -189,11 +201,12 @@ export interface CardFile {
 
 // ── קליטה ──
 
-export type BudgetKind = 'cards' | 'actions' | 'orders' | 'meitar' | 'unknown'
+export type BudgetKind = 'cards' | 'actions' | 'extras' | 'orders' | 'meitar' | 'unknown'
 
 export const BUDGET_KIND_LABELS: Record<BudgetKind, string> = {
   cards: 'דוח ברמת הכרטיס',
   actions: 'דוח ברמת הפעולה',
+  extras: 'קובץ התוספתיים',
   orders: 'דוח הזמנות רכש',
   meitar: 'קובצי מיתר (ZIP)',
   unknown: 'לא זוהה',
@@ -203,17 +216,14 @@ export const BUDGET_KIND_LABELS: Record<BudgetKind, string> = {
  * השדות לכל סוג דוח — המקבילה של FIELDS ב-scripts/budget_fields.py.
  * ⚠️ המפתחות חייבים להיות זהים לשם.
  */
-export const BUDGET_FIELDS: Record<'cards' | 'actions' | 'orders', { key: string; label: string; required?: boolean }[]> = {
+export const BUDGET_FIELDS: Record<'cards' | 'actions' | 'extras' | 'orders', { key: string; label: string; required?: boolean }[]> = {
+  // הפורמט הקבוע: העמודות שאינן אפורות בדוחות EPR (אייל, 21.10)
   cards: [
     { key: 'card_code', label: 'מספר כרטיס', required: true },
     { key: 'card_name', label: 'שם הכרטיס' },
     { key: 'budget_expense', label: 'תקציב הוצאות', required: true },
     { key: 'budget_income', label: 'תקציב הכנסות', required: true },
-    { key: 'budget_period', label: 'תקציב תקופתי' },
     { key: 'executed', label: 'ביצוע', required: true },
-    { key: 'reserved', label: 'שריון' },
-    { key: 'balance', label: 'יתרה' },
-    { key: 'demand', label: 'דרישה' },
   ],
   actions: [
     { key: 'card_code', label: 'מספר כרטיס', required: true },
@@ -227,11 +237,31 @@ export const BUDGET_FIELDS: Record<'cards' | 'actions' | 'orders', { key: string
     { key: 'details', label: 'פרטים' },
     { key: 'debit', label: 'חובה', required: true },
     { key: 'credit', label: 'זכות', required: true },
-    { key: 'balance', label: 'יתרה' },
     { key: 'ref1', label: 'אסמכתא 1' },
     { key: 'ref2', label: 'אסמכתא 2' },
-    { key: 'cost_center', label: 'תמחיר' },
-    { key: 'document', label: 'מסמך' },
+  ],
+  // ייצוא טבלת התוספתיים מהאקסס
+  extras: [
+    { key: 'card_code', label: 'קוד כרטיס', required: true },
+    { key: 'card_name', label: 'תאור סעיף' },
+    { key: 'plan_income', label: 'תכנית שנה נוכחית הכנסות' },
+    { key: 'plan_expense', label: 'תכנית שנה נוכחית הוצאות' },
+    { key: 'forecast_income', label: 'צפי הכנסות לסוף שנה' },
+    { key: 'forecast_expense', label: 'צפי הוצאות לסוף שנה' },
+    { key: 'next_income', label: 'תכנית הכנסות לשנה הבאה' },
+    { key: 'next_expense', label: 'תכנית הוצאות לשנה הבאה' },
+    { key: 'in_meitar', label: 'במיתר' },
+    { key: 'is_income', label: 'הכנסה' },
+    { key: 'is_expense', label: 'הוצאה' },
+    { key: 'category1', label: 'קטגוריה 1' },
+    { key: 'category2', label: 'קטגוריה 2' },
+    { key: 'category3', label: 'קטגוריה 3' },
+    { key: 'category_note', label: 'הערות קטגוריה' },
+    { key: 'notes', label: 'הערות לתכנון תקציב' },
+    { key: 'gefen', label: 'קשור לגפ"ן' },
+    { key: 'active_prev_year', label: 'פעיל בשנה הקודמת' },
+    { key: 'owner_name', label: 'באחריות' },
+    { key: 'money_source', label: 'מקור כספי' },
   ],
   orders: [
     { key: 'order_no', label: 'מספר הזמנה', required: true },
@@ -266,6 +296,8 @@ export interface BudgetReport {
   errors?: string[]
   warnings?: { kind: string; text: string }[]
   fiscal_year?: number
+  /** עד מתי הנתונים — מהשם של דוח ה-EPR */
+  as_of?: string
   counts?: Record<string, number>
   date_range?: [string, string] | null
   crosscheck?: { checked: number; matched: number; mismatches: { card: string; executed: number; actions: number }[] }
@@ -343,6 +375,32 @@ export async function fetchMonthly(code: string, from: string, to: string): Prom
   return ((data ?? []) as MonthlyRow[]).map((r) => ({ ...r, debit: Number(r.debit), credit: Number(r.credit) }))
 }
 
+/**
+ * כל התנועות של הרשות בטווח — למסך "מעקב ובקרת תקציב ברמת הפעולה הבודדת".
+ * ~10,000 שורות בדפים של 1000; נשמר בזיכרון לרשות ולטווח, כדי שמעבר בין המסכים
+ * לא יטען שוב. `clearTransactionsCache` — אחרי קליטה.
+ */
+const txCache = new Map<string, Promise<BudgetTransaction[]>>()
+export function fetchAllTransactions(code: string, from: string | null, to: string | null): Promise<BudgetTransaction[]> {
+  const key = `${code}|${from}|${to}`
+  if (!txCache.has(key)) {
+    const p = fetchAll<BudgetTransaction>((f, t) => {
+      let q = supabase.from('budget_transactions').select('*').eq('authority_code', code)
+      if (from) q = q.gte('event_date', from)
+      if (to) q = q.lt('event_date', to)
+      return q.order('event_date', { ascending: true, nullsFirst: true }).order('id').range(f, t)
+    }).catch((e) => {
+      txCache.delete(key)
+      throw explain(e, 'טעינת התנועות')
+    })
+    txCache.set(key, p)
+  }
+  return txCache.get(key)!
+}
+export function clearTransactionsCache() {
+  txCache.clear()
+}
+
 /** כמה נרשם בכרטסת לכל נושא מיתר בתקופה — הגשר בין המיתר להנהלת החשבונות */
 export async function fetchTopicTotals(code: string, from: string, to: string): Promise<Map<string, { booked: number; count: number }>> {
   const { data, error } = await supabase.rpc('budget_topic_totals', { p_code: code, p_from: from, p_to: to })
@@ -418,10 +476,13 @@ type MetaFields = Omit<CardMeta, 'authority_code' | 'card_code' | 'updated_at'>
 type PlanFields = Omit<CardPlan, 'authority_code' | 'card_code' | 'fiscal_year' | 'updated_at'>
 
 const EMPTY_META: MetaFields = {
+  card_name: null,
   category1: null, category2: null, category3: null, category_note: null,
   owner_name: null, money_source: null, meitar_topic: null, gefen: false,
+  in_meitar: false, is_income: null, is_expense: null, active_prev_year: false,
 }
 const EMPTY_PLAN: PlanFields = {
+  plan_income: null, plan_expense: null,
   forecast_income: null, forecast_expense: null, next_income: null, next_expense: null, notes: null,
 }
 

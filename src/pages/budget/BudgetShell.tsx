@@ -17,7 +17,7 @@ import {
   type CardPlan,
   type MonthlyRow,
 } from '@/lib/budget'
-import { buildRows, elapsedMonths, executedFromMonthly, hebrewSchoolYear, periodRange, type Period } from '@/lib/budgetCalc'
+import { buildRows, elapsedMonths, hebrewSchoolYear, periodRange, type Period } from '@/lib/budgetCalc'
 import { BudgetContext, type BudgetContextValue } from './context'
 
 interface Loaded {
@@ -102,14 +102,14 @@ export default function BudgetShell() {
   const ctx = useMemo<BudgetContextValue | null>(() => {
     if (!loaded) return null
     const range = periodRange(year, period)
-    // תאריך הנתונים = מתי נקלט דוח הכרטיסים — לא התנועה האחרונה, שעשויה להיות עתידית
-    const asOf = loaded.cards.reduce<string | null>((m, c) => (!m || c.loaded_at > m ? c.loaded_at : m), null)
+    // תאריך הנתונים: מהשם של דוח ה-EPR (as_of), אחרת מתי נקלט — לא התנועה
+    // האחרונה, שעשויה להיות עתידית
+    const asOf = loaded.cards.reduce<string | null>((m, c) => {
+      const d = c.as_of ?? c.loaded_at
+      return !m || d > m ? d : m
+    }, null)
     const elapsed = elapsedMonths(asOf, year, period)
-    const rows = buildRows(loaded.cards, loaded.meta, loaded.plans, {
-      period,
-      schoolExecuted: period === 'school' ? executedFromMonthly(loaded.monthly) : undefined,
-      elapsed,
-    })
+    const rows = buildRows(loaded.cards, loaded.meta, loaded.plans, loaded.monthly, elapsed)
     return {
       code,
       authorityName: allAuthorities.find((a) => a.code === code)?.name ?? '',
@@ -118,6 +118,7 @@ export default function BudgetShell() {
       periodFrom: range.from,
       rows,
       monthly: loaded.monthly,
+      asOf,
       elapsed,
       canManage,
       canPlan: canManage || isOwner,
@@ -245,8 +246,9 @@ function Rail({ base, search, cards, canManage, isOwner }: {
       <nav className="flex flex-col gap-0.5">
         <NavLink end to={to('')} className={link}>📊 תמונת תקציב</NavLink>
         <NavLink to={to('/cards')} className={link}>
-          📒 כרטסת {cards != null && <span className="mr-auto text-xs tabular-nums text-slate-400">{cards}</span>}
+          📒 מעקב ותכנון {cards != null && <span className="mr-auto text-xs tabular-nums text-slate-400">{cards}</span>}
         </NavLink>
+        <NavLink to={to('/actions')} className={link}>🧮 פירוט הפעולות</NavLink>
         {/* המיתר הוא הכנסות ברמת הרשות — לא לאחראי על כרטיסים (ה-RLS חוסם ממילא) */}
         {!isOwner && <NavLink to={to('/meitar')} className={link}>🏛 מיתר — הכנסות</NavLink>}
         <NavLink to={to('/orders')} className={link}>🧾 רכש</NavLink>

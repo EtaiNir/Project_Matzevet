@@ -102,6 +102,7 @@ export default function BagrutTable<T>({
   rowTitle,
   storageKey,
   sheetName = 'בגרות',
+  summary,
 }: {
   rows: T[]
   columns: Column<T>[]
@@ -118,6 +119,11 @@ export default function BagrutTable<T>({
   storageKey?: string
   /** שם הגיליון בקובץ האקסל (מודול התקציב משתמש באותה טבלה) */
   sheetName?: string
+  /**
+   * שורת סיכום מתחת לטבלה — מחושבת מהשורות **אחרי** הסינון והמיון, כמו שורת
+   * הסה"כ בטפסי האקסס (מודול התקציב).
+   */
+  summary?: (rows: T[]) => ReactNode
 }) {
   const [sort, setSort] = useState(initialSort ?? null)
 
@@ -434,6 +440,8 @@ export default function BagrutTable<T>({
           )}
         </div>
       </div>
+
+      {summary && <div className="shrink-0 border-t-2 border-slate-200 bg-slate-50 px-3 py-2">{summary(sorted)}</div>}
 
       {cellMenu && sorted[cellMenu.index] && colByKey.get(cellMenu.key) && (() => {
         const row = sorted[cellMenu.index]

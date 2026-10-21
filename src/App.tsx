@@ -24,6 +24,7 @@ import BudgetShell from './pages/budget/BudgetShell'
 import BudgetHome from './pages/budget/BudgetHome'
 import BudgetCards from './pages/budget/BudgetCards'
 import BudgetCard from './pages/budget/BudgetCard'
+import BudgetActions from './pages/budget/BudgetActions'
 import BudgetMeitar from './pages/budget/BudgetMeitar'
 import BudgetOrders from './pages/budget/BudgetOrders'
 import BudgetUpload from './pages/budget/BudgetUpload'
@@ -110,6 +111,7 @@ export default function App() {
         <Route index element={<BudgetHome />} />
         <Route path="cards" element={<BudgetCards />} />
         <Route path="card/:card" element={<BudgetCard />} />
+        <Route path="actions" element={<BudgetActions />} />
         <Route path="meitar" element={<BudgetMeitar />} />
         <Route path="orders" element={<BudgetOrders />} />
         <Route path="upload" element={<BudgetUpload />} />

@@ -19,14 +19,14 @@ const STATUS: Record<BudgetUpload['status'], { text: string; tone: string }> = {
   failed: { text: 'נכשל', tone: 'bg-red-100 text-red-800' },
 }
 
-const KIND_OPTIONS: BudgetKind[] = ['cards', 'actions', 'orders', 'unknown']
+const KIND_OPTIONS: BudgetKind[] = ['cards', 'actions', 'extras', 'orders', 'unknown']
 
 /**
- * קליטת קובצי התקציב — דוחות EPR ו-ZIP מיתר (החלטה 023 §5).
+ * קליטת קובצי התקציב — שני דוחות EPR, קובץ התוספתיים ו-ZIP מיתר (החלטה 023 §5, §8).
  *
- * בדפוס קליטת הגנים: העלאה → הסוכן מזהה כל דוח ומציע התאמת כותרות → אישור
- * כאן → טעינה. התבנית שאושרה נשמרת, וקובץ באותן כותרות נקלט בפעם הבאה
- * בלי לעצור. משמש גם בלשונית "נתונים" של כרטיס הלקוח וגם במסך הקליטה של המודול.
+ * בדפוס קליטת הגנים: העלאה → הסוכן מזהה כל קובץ ומציע התאמה לפורמט הקבוע
+ * (העמודות שאינן אפורות בדוחות EPR) → אישור כאן, **תמיד** → טעינה. התבנית
+ * שאושרה נשמרת וממלאת מראש את ההתאמה בפעם הבאה. ZIP מיתר לבדו נקלט מיד. משמש גם בלשונית "נתונים" של כרטיס הלקוח וגם במסך הקליטה של המודול.
  */
 export default function BudgetUploadPanel({ code }: { code: string }) {
   const [uploads, setUploads] = useState<BudgetUpload[]>([])
@@ -83,8 +83,10 @@ export default function BudgetUploadPanel({ code }: { code: string }) {
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h3 className="mb-1 font-bold text-emerald-800">קליטת קובצי תקציב</h3>
         <p className="mb-4 text-sm text-slate-500">
-          שני דוחות EPR — <strong>ברמת הכרטיס</strong> ו<strong>ברמת הפעולה</strong> — ואם יש, דוח הזמנות הרכש
-          ו-ZIP של המיתר. אפשר להעלות כל צירוף; מה שלא הועלה נשאר כמו שהוא.
+          שני דוחות EPR — <strong>ברמת הכרטיס</strong> ו<strong>ברמת הפעולה</strong> — ו<strong>קובץ התוספתיים</strong>
+          (הקטגוריות, הדגלים והתכנון של כל כרטיס); ואם יש, דוח הזמנות הרכש ו-ZIP של המיתר.
+          אפשר להעלות כל צירוף; מה שלא הועלה נשאר כמו שהוא. קובץ התוספתיים דורס את הסיווג והתכנון
+          של הכרטיסים שבו (אחרי גיבוי).
         </p>
 
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
@@ -156,8 +158,10 @@ function HistoryRow({ u }: { u: BudgetUpload }) {
           {[
             r.counts.cards ? `${r.counts.cards.toLocaleString('he-IL')} כרטיסים` : null,
             r.counts.transactions ? `${r.counts.transactions.toLocaleString('he-IL')} תנועות` : null,
+            r.counts.extras ? `${r.counts.extras.toLocaleString('he-IL')} כרטיסים בתוספתיים` : null,
             r.counts.orders ? `${r.counts.orders.toLocaleString('he-IL')} הזמנות` : null,
             r.counts.meitar_rows ? `${r.counts.meitar_rows.toLocaleString('he-IL')} שורות מיתר` : null,
+            r.as_of ? `נתונים נכונים ל-${new Date(r.as_of).toLocaleDateString('he-IL')}` : null,
           ].filter(Boolean).join(' · ')}
         </p>
       )}
@@ -198,7 +202,7 @@ function ApproveMapping({ upload, onApproved }: { upload: BudgetUpload; onApprov
   const problems: string[] = []
   for (const [name, d] of Object.entries(draft)) {
     if (d.kind === 'unknown') problems.push(`«${name}»: לא נבחר סוג הדוח`)
-    if (d.kind === 'cards' || d.kind === 'actions' || d.kind === 'orders') {
+    if (d.kind === 'cards' || d.kind === 'actions' || d.kind === 'extras' || d.kind === 'orders') {
       const used = Object.values(d.mapping ?? {}).filter(Boolean) as string[]
       const dup = used.filter((f, i) => used.indexOf(f) !== i)
       if (dup.length) problems.push(`«${name}»: אותו שדה נבחר לשתי עמודות`)
@@ -223,8 +227,8 @@ function ApproveMapping({ upload, onApproved }: { upload: BudgetUpload; onApprov
     <section className="rounded-2xl border-2 border-violet-300 bg-white p-5 shadow-sm">
       <h3 className="mb-1 font-bold text-violet-800">אישור התאמת הדוחות</h3>
       <p className="mb-4 text-sm text-slate-600">
-        בפעם הראשונה שמגיע דוח במבנה הזה צריך לאשר איזו עמודה היא מה. מה שיאושר יישמר, ודוח באותן
-        כותרות ייקלט בפעם הבאה בלי לעצור כאן. עמודה שמסומנת «לא לייבא» לא נטענת.
+        לכל קובץ — איזו עמודה נכנסת לאיזה שדה בפורמט הקבוע. מה שיאושר יישמר וימלא מראש את
+        ההתאמה בפעם הבאה. עמודה שמסומנת «לא לייבא» לא נטענת — כך גם העמודות האפורות בדוחות EPR.
       </p>
       {Object.entries(draft).map(([name, d]) => (
         <FileMapping key={name} name={name} p={proposed[name]} value={d}

@@ -13,6 +13,8 @@ export interface BudgetContextValue {
   periodFrom: string
   rows: CardRow[]
   monthly: MonthlyRow[]
+  /** תאריך הנתונים — עד מתי הדוח (מהשם של דוח ה-EPR) */
+  asOf: string | null
   /** חודשים שחלפו בתקופה — לקצב ולהצעת הצפי */
   elapsed: number
   /** מנהל תקציב או מנהל־על — עורך קטגוריות, מיתר, רכש ומעלה קבצים */

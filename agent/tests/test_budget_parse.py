@@ -134,4 +134,23 @@ check("מספר לפני שנה אינו נושא", L.topic_of("פ.נ. 9 2025 פ
 check("מספר שאינו נושא מוכר — בלי נושא", L.topic_of("קרן קרב 333 שבילי רעות", KNOWN), None)
 check("הכנסה לפי הספרה השנייה כשאין דוח כרטיסים", (L.is_income_card("1311000920", {}), L.is_income_card("1811000110", {})), (True, False))
 
+# ── 7. קובץ התוספתיים ותאריך הנתונים (אייל, 21.10) ─────────────────
+EXTRAS_HEADERS = ["קוד כרטיס", "תאור סעיף", "קטגוריה 1", "קטגוריה 2", "קטגוריה 3", "במיתר", "הכנסה", "הוצאה",
+                  "תכנית שנה נוכחית הכנסות", "תכנית שנה נוכחית הוצאות", "צפי הוצאות לסוף שנה",
+                  "הערות לתכנון תקציב"]
+check("קובץ התוספתיים מזוהה", F.detect_kind(EXTRAS_HEADERS), "extras")
+emap, _ = F.propose("extras", EXTRAS_HEADERS)
+check("הדגלים והתכנית מותאמים", (emap["במיתר"], emap["הוצאה"], emap["תכנית שנה נוכחית הוצאות"]),
+      ("in_meitar", "is_expense", "plan_expense"))
+ex = L.parse_xls_rows("extras", EXTRAS_HEADERS, [
+    [1811000110, "שכר", "חינוך", "", "", True, False, True, 0, "₪1,135,000", "", "לבדוק"],
+    [None, "סה\"כ", "", "", "", "", "", "", "", "", "", ""],
+], emap)
+check("שורת הסיכום שבתחתית אינה כרטיס", len(ex), 1)
+check("₪ ופסיקים — מספר; ריק נשאר ריק",
+      (ex[0]["plan_expense"], ex[0]["forecast_expense"]), (1135000.0, None))
+check("תיבות סימון", (ex[0]["in_meitar"], ex[0]["is_income"], ex[0]["is_expense"]), (True, False, True))
+check("תאריך הנתונים משם דוח EPR", L.as_of_from_name("EprRep19102026153012.xls"), date(2026, 10, 19))
+check("שם אחר — אין תאריך", L.as_of_from_name("cards.xlsx"), None)
+
 check.done()

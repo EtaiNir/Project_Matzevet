@@ -17,13 +17,13 @@ import {
   type CardMeta,
   type CardPlan,
 } from '@/lib/budget'
-import { HEB_MONTHS, money, pct, usageTone, type CardRow } from '@/lib/budgetCalc'
+import { HEB_MONTH_NAMES, money, monthlySeries, pct, usageTone, type CardRow } from '@/lib/budgetCalc'
 import { useBudget, type CardNavState } from './context'
 
 /**
- * כרטיס בודד — המקבילה של "טופס כרטסת – מעקב ותכנית תקציב מפורט" באקסס,
- * יחד עם "פירוט הפעולות בכרטיס": מה תוכנן, מה בוצע ומתי, עד רמת האסמכתא;
- * ושכבת המשתמש — קטגוריות, צפי, תכנית לשנה הבאה, הערות וקבצים.
+ * כרטיס בודד — "טופס כרטסת – מעקב ותכנית תקציב מפורט" באקסס: לכל צד
+ * (הכנסות / הוצאות) התכנית, המצטבר, אחוז הביצוע, הצפי לסוף השנה והתכנית
+ * לשנה הבאה; הדגלים והקטגוריות; התנועות עד האסמכתא, והקבצים המסייעים.
  */
 export default function BudgetCard() {
   const b = useBudget()
@@ -45,64 +45,85 @@ export default function BudgetCard() {
     return () => { alive = false }
   }, [b.code, cardCode])
 
-  const monthly = useMemo(() => {
-    const start = new Date(b.periodFrom)
-    return Array.from({ length: 12 }, (_, i) => {
-      const d = new Date(start.getFullYear(), start.getMonth() + i, 1)
-      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      const sum = b.monthly.filter((m) => m.card_code === cardCode && m.month.startsWith(iso))
-        .reduce((s, m) => s + (row?.dir === 'income' ? m.credit - m.debit : m.debit - m.credit), 0)
-      return { key: HEB_MONTHS[d.getMonth()], n: Math.round(sum) }
-    })
-  }, [b.monthly, b.periodFrom, cardCode, row?.dir])
+  const months = useMemo(() => ({
+    inc: monthlySeries(b.monthly, 'credit', b.periodFrom, (c) => c === cardCode),
+    exp: monthlySeries(b.monthly, 'debit', b.periodFrom, (c) => c === cardCode),
+  }), [b.monthly, b.periodFrom, cardCode])
 
   if (!row) {
-    return <Empty title={`כרטיס ${cardCode} אינו בכרטסת ${b.year}`}>ייתכן שהוא לא קיים בשנה הזו, או שאינו באחריותך.</Empty>
+    return <Empty title={`כרטיס ${cardCode} אינו בתקציב ${b.year}`}>ייתכן שהוא לא קיים בשנה הזו, או שאינו באחריותך.</Empty>
   }
 
   const idx = nav?.codes.indexOf(cardCode) ?? -1
   const go = (i: number) => nav && navigate(`${b.base}/card/${nav.codes[i]}${search}`, { state: nav, replace: true })
   const [p1, p2, p3] = row.parts
   const pace = b.elapsed / 12
+  const asOf = b.asOf ? new Date(b.asOf) : null
+  const actions = new URLSearchParams(search)
+  actions.set('card', row.code)
+
+  const badge = (on: boolean, label: string, tone: string) =>
+    on && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${tone}`}>{label}</span>
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 p-4">
       {/* כותרת דביקה — שם הכרטיס נשאר גלוי בגלילה */}
       <div className="sticky top-0 z-10 -mx-4 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50/95 px-4 py-2 backdrop-blur">
         <Link to={nav?.backTo ?? `${b.base}/cards${search}`} className="text-sm text-slate-500 hover:text-emerald-700">
-          → {nav?.fromLabel ?? 'הכרטסת'}
+          → {nav?.fromLabel ?? 'מעקב ותכנון'}
         </Link>
-        <h1 className="text-lg font-bold text-slate-800">{row.name}</h1>
+        <h1 className="text-lg font-bold text-slate-800">{row.name || '(ללא שם)'}</h1>
         <span className="font-mono text-sm text-slate-400" dir="ltr" title="3 + 4 + 3 ספרות, כמו באקסס">{p1} · {p2} · {p3}</span>
-        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${row.dir === 'income' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}`}>
-          {row.dir === 'income' ? 'הכנסה' : 'הוצאה'}
+        {badge(row.isIncome, 'הכנסה', 'bg-teal-50 text-teal-700')}
+        {badge(row.isExpense, 'הוצאה', 'bg-rose-50 text-rose-700')}
+        {badge(Boolean(row.meta?.in_meitar), 'במיתר', 'bg-violet-50 text-violet-700')}
+        {badge(Boolean(row.meta?.gefen), 'קשור לגפ"ן', 'bg-amber-50 text-amber-700')}
+        {!row.card && <span className="text-xs text-slate-400" title="הכרטיס מופיע בקובץ התוספתיים בלבד">אין בדוח הכרטיסים של EPR</span>}
+        <span className="mr-auto flex items-center gap-1 text-sm">
+          <Link to={`${b.base}/actions?${actions}`} className="rounded-lg border border-emerald-300 px-3 py-0.5 font-semibold text-emerald-700 hover:bg-emerald-50">
+            לפירוט הפעולות ←
+          </Link>
+          {nav && idx >= 0 && (
+            <>
+              <button disabled={idx <= 0} onClick={() => go(idx - 1)} className="rounded px-2 py-0.5 hover:bg-slate-200 disabled:opacity-30">→ הקודם</button>
+              <span className="tabular-nums text-slate-400">{idx + 1}/{nav.codes.length}</span>
+              <button disabled={idx >= nav.codes.length - 1} onClick={() => go(idx + 1)} className="rounded px-2 py-0.5 hover:bg-slate-200 disabled:opacity-30">הבא ←</button>
+            </>
+          )}
         </span>
-        {nav && idx >= 0 && (
-          <span className="mr-auto flex items-center gap-1 text-sm">
-            <button disabled={idx <= 0} onClick={() => go(idx - 1)} className="rounded px-2 py-0.5 hover:bg-slate-200 disabled:opacity-30">→ הקודם</button>
-            <span className="tabular-nums text-slate-400">{idx + 1}/{nav.codes.length}</span>
-            <button disabled={idx >= nav.codes.length - 1} onClick={() => go(idx + 1)} className="rounded px-2 py-0.5 hover:bg-slate-200 disabled:opacity-30">הבא ←</button>
-          </span>
-        )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <Fact label="תקציב מאושר" value={money(row.budget)} />
-        <Fact label="ביצוע" value={money(row.executed)} />
-        <Fact label="ניצול" value={<span className={usageTone(row.usage, pace)}>{pct(row.usage)}</span>} sub={`הקצב: ${pct(pace)}`} />
-        <Fact label="שריון" value={money(row.reserved)} sub="הזמנות מאושרות" />
-        <Fact label="יתרה" value={<span className={(row.remaining ?? 0) < 0 ? 'text-red-700' : ''}>{money(row.remaining)}</span>} />
-        <Fact label="צפי לסוף השנה" value={money(row.forecast ?? row.suggested)} sub={row.forecast == null ? 'לפי הקצב — לא הוקלד' : 'הוקלד'} />
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600">
+        <span>קטגוריה 1: <b className="text-slate-800">{row.meta?.category1 || '—'}</b></span>
+        <span>קטגוריה 2: <b className="text-slate-800">{row.meta?.category2 || '—'}</b></span>
+        <span>קטגוריה 3: <b className="text-slate-800">{row.meta?.category3 || '—'}</b></span>
+        <span className="mr-auto" title="עד מתי הנתונים — מהשם של דוח ה-EPR">
+          חודש ביצוע העדכון: <b className="text-slate-800">{asOf ? `${asOf.getMonth() + 1} · ${HEB_MONTH_NAMES[asOf.getMonth()]}` : '—'}</b>
+        </span>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Side title="הכנסות" tone="text-teal-800" plan={row.budgetIncome} cum={row.cumIncome} usage={row.pctIncome} pace={0}
+          forecast={row.forecastIncome} suggested={row.suggestedIncome} next={row.nextIncome} year={b.year} />
+        <Side title="הוצאות" tone="text-rose-800" plan={row.budgetExpense} cum={row.cumExpense} usage={row.pctExpense} pace={pace}
+          forecast={row.forecastExpense} suggested={row.suggestedExpense} next={row.nextExpense} year={b.year} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <PlanEditor row={row} />
-        <ChartCard title="ביצוע לפי חודש" sub={b.period === 'calendar' ? `ינואר–דצמבר ${b.year}` : 'ספטמבר–אוגוסט'}>
-          <Columns items={monthly} height={140} />
-        </ChartCard>
+        <div className="flex flex-col gap-4">
+          {row.cumIncome !== 0 && (
+            <ChartCard title="הכנסות לפי חודש" sub="Σ זכות (₪)">
+              <Columns items={months.inc} height={110} />
+            </ChartCard>
+          )}
+          <ChartCard title="הוצאות לפי חודש" sub={`Σ חובה (₪) · ${b.period === 'calendar' ? `ינואר–דצמבר ${b.year}` : 'ספטמבר–אוגוסט'}`}>
+            <Columns items={months.exp} height={110} />
+          </ChartCard>
+        </div>
       </div>
 
-      <Card title="תנועות בכרטיס" action={tx && <span className="text-xs text-slate-400">{tx.length.toLocaleString('he-IL')} תנועות</span>}>
+      <Card title="תנועות בכרטיס" action={tx && <span className="text-xs text-slate-400">{tx.length.toLocaleString('he-IL')} תנועות · כל השנים</span>}>
         {txError ? <ErrorBox message={txError} /> : tx == null ? <Loading label="טוען תנועות…" /> : <Transactions rows={tx} name={`${row.code}_${row.name}`} />}
       </Card>
 
@@ -111,28 +132,48 @@ export default function BudgetCard() {
   )
 }
 
-function Fact({ label, value, sub }: { label: string; value: ReactNode; sub?: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm">
-      <div className="text-xl font-extrabold tabular-nums text-slate-800">{value || '—'}</div>
+/** צד אחד של הכרטיס — הכנסות או הוצאות, כמו שתי העמודות בטופס באקסס */
+function Side({ title, tone, plan, cum, usage, pace, forecast, suggested, next, year }: {
+  title: string; tone: string; plan: number | null; cum: number; usage: number | null; pace: number
+  forecast: number | null; suggested: number | null; next: number | null; year: number
+}) {
+  const cell = (label: string, value: ReactNode, sub?: string) => (
+    <div className="min-w-0">
+      <div className="text-lg font-extrabold tabular-nums text-slate-800">{value || '—'}</div>
       <div className="text-xs font-semibold text-slate-600">{label}</div>
       {sub && <div className="text-[11px] text-slate-400">{sub}</div>}
     </div>
   )
+  return (
+    <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm">
+      <div className={`mb-2 text-sm font-bold ${tone}`}>{title}</div>
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+        {cell(`תכנית ${year}`, money(plan), 'התקציב המאושר')}
+        {cell('מצטבר', money(cum || null), 'בתקופה שנבחרה')}
+        {cell('ביצוע', <span className={usageTone(usage, pace)}>{pct(usage)}</span>, 'מצטבר ביחס לתקציב')}
+        {cell('צפי לסוף השנה', money(forecast ?? suggested), forecast == null ? (suggested == null ? undefined : 'לפי הקצב — לא הוקלד') : 'הוקלד')}
+        {cell(`תכנית ${year + 1}`, money(next))}
+      </div>
+    </div>
+  )
 }
 
-/** שכבת המשתמש של הכרטיס: קטגוריות ואחראי (מנהל), צפי ותכנית והערות (מנהל או אחראי) */
+/**
+ * שכבת המשתמש של הכרטיס: סיווג ודגלים (מנהל), צפי ותכנית לשני הצדדים והערות
+ * (מנהל או אחראי). קובץ התוספתיים הבא דורס את מה שנערך כאן לכרטיסים שבו.
+ */
 function PlanEditor({ row }: { row: CardRow }) {
   const b = useBudget()
-  const inc = row.dir === 'income'
   const metaInit = (m: CardMeta | null) => ({
     category1: m?.category1 ?? '', category2: m?.category2 ?? '', category3: m?.category3 ?? '',
     owner_name: m?.owner_name ?? '', money_source: m?.money_source ?? '', meitar_topic: m?.meitar_topic ?? '',
-    gefen: m?.gefen ?? false,
+    gefen: m?.gefen ?? false, in_meitar: m?.in_meitar ?? false, active_prev_year: m?.active_prev_year ?? false,
+    is_income: m?.is_income ?? row.isIncome, is_expense: m?.is_expense ?? row.isExpense,
   })
+  const num = (v: number | null | undefined) => (v == null ? '' : String(v))
   const planInit = (p: CardPlan | null) => ({
-    forecast: String((inc ? p?.forecast_income : p?.forecast_expense) ?? ''),
-    next: String((inc ? p?.next_income : p?.next_expense) ?? ''),
+    forecast_income: num(p?.forecast_income), forecast_expense: num(p?.forecast_expense),
+    next_income: num(p?.next_income), next_expense: num(p?.next_expense),
     notes: p?.notes ?? '',
   })
   const [meta, setMeta] = useState(() => metaInit(row.meta))
@@ -159,13 +200,15 @@ function PlanEditor({ row }: { row: CardRow }) {
         const t = (v: string) => v.trim() || null
         b.applyMeta(await saveMeta(b.code, row.code, {
           category1: t(meta.category1), category2: t(meta.category2), category3: t(meta.category3),
-          owner_name: t(meta.owner_name), money_source: t(meta.money_source), meitar_topic: t(meta.meitar_topic), gefen: meta.gefen,
+          owner_name: t(meta.owner_name), money_source: t(meta.money_source), meitar_topic: t(meta.meitar_topic),
+          gefen: meta.gefen, in_meitar: meta.in_meitar, active_prev_year: meta.active_prev_year,
+          is_income: meta.is_income, is_expense: meta.is_expense,
         }, row.meta))
       }
       if (planDirty) {
         b.applyPlan(await savePlan(b.code, row.code, b.year, {
-          [inc ? 'forecast_income' : 'forecast_expense']: parseAmount(plan.forecast),
-          [inc ? 'next_income' : 'next_expense']: parseAmount(plan.next),
+          forecast_income: parseAmount(plan.forecast_income), forecast_expense: parseAmount(plan.forecast_expense),
+          next_income: parseAmount(plan.next_income), next_expense: parseAmount(plan.next_expense),
           notes: plan.notes.trim() || null,
         }, row.plan))
       }
@@ -181,8 +224,22 @@ function PlanEditor({ row }: { row: CardRow }) {
   const field = (label: string, el: ReactNode) => (
     <label className="block text-xs font-semibold text-slate-500">{label}<div className="mt-0.5 font-normal">{el}</div></label>
   )
-  const m = (k: keyof ReturnType<typeof metaInit>) => (
-    <input className={input} disabled={!b.canManage} value={String(meta[k])} onChange={(e) => setMeta({ ...meta, [k]: e.target.value })} />
+  type TextKey = 'category1' | 'category2' | 'category3' | 'owner_name' | 'money_source' | 'meitar_topic'
+  const m = (k: TextKey) => (
+    <input className={input} disabled={!b.canManage} value={meta[k]} onChange={(e) => setMeta({ ...meta, [k]: e.target.value })} />
+  )
+  type FlagKey = 'is_income' | 'is_expense' | 'in_meitar' | 'gefen' | 'active_prev_year'
+  const flag = (k: FlagKey, label: string) => (
+    <label className="flex items-center gap-1.5 text-sm text-slate-600">
+      <input type="checkbox" disabled={!b.canManage} checked={meta[k]} onChange={(e) => setMeta({ ...meta, [k]: e.target.checked })} className="accent-emerald-600" />
+      {label}
+    </label>
+  )
+  type PlanKey = 'forecast_income' | 'forecast_expense' | 'next_income' | 'next_expense'
+  const p = (k: PlanKey, placeholder?: number | null) => (
+    <input className={input} dir="ltr" inputMode="decimal" disabled={!b.canPlan} value={plan[k]}
+      placeholder={placeholder != null ? `${money(placeholder)} (לפי הקצב)` : ''}
+      onChange={(e) => setPlan({ ...plan, [k]: e.target.value })} />
   )
 
   return (
@@ -195,20 +252,18 @@ function PlanEditor({ row }: { row: CardRow }) {
         {field('מקור כספי', m('money_source'))}
         {field('נושא במיתר (קוד)', m('meitar_topic'))}
       </div>
-      <label className="mt-2 flex items-center gap-2 text-sm text-slate-600">
-        <input type="checkbox" disabled={!b.canManage} checked={meta.gefen} onChange={(e) => setMeta({ ...meta, gefen: e.target.checked })} className="accent-emerald-600" />
-        קשור לגפ"ן
-      </label>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        {flag('is_income', 'הכנסה')}
+        {flag('is_expense', 'הוצאה')}
+        {flag('in_meitar', 'במיתר')}
+        {flag('gefen', 'קשור לגפ"ן')}
+        {flag('active_prev_year', 'פעיל בשנה הקודמת')}
+      </div>
       <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
-        {field(`צפי לסוף ${b.year}`, (
-          <input className={input} dir="ltr" inputMode="decimal" disabled={!b.canPlan} value={plan.forecast}
-            placeholder={row.suggested != null ? `${money(row.suggested)} (לפי הקצב)` : ''}
-            onChange={(e) => setPlan({ ...plan, forecast: e.target.value })} />
-        ))}
-        {field(`תכנית ${b.year + 1}`, (
-          <input className={input} dir="ltr" inputMode="decimal" disabled={!b.canPlan} value={plan.next}
-            onChange={(e) => setPlan({ ...plan, next: e.target.value })} />
-        ))}
+        {field(`צפי הכנסות לסוף ${b.year}`, p('forecast_income', row.suggestedIncome))}
+        {field(`צפי הוצאות לסוף ${b.year}`, p('forecast_expense', row.suggestedExpense))}
+        {field(`תכנית הכנסות ${b.year + 1}`, p('next_income'))}
+        {field(`תכנית הוצאות ${b.year + 1}`, p('next_expense'))}
       </div>
       <div className="mt-3">
         {field('הערות לתכנון', (
@@ -222,7 +277,7 @@ function PlanEditor({ row }: { row: CardRow }) {
             {busy ? 'שומר…' : 'שמירה'}
           </button>
           {msg && <span className={`text-sm ${msg.ok ? 'text-emerald-700' : 'text-red-700'}`}>{msg.text}</span>}
-          {!b.canManage && <span className="text-xs text-slate-400">קטגוריות ואחראי — רק מנהל התקציב</span>}
+          {!b.canManage && <span className="text-xs text-slate-400">סיווג ודגלים — רק מנהל התקציב</span>}
         </div>
       )}
     </Card>

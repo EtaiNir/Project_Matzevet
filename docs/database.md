@@ -401,6 +401,7 @@ security invoker, כך שה-RLS חל.
 | 042 | `rollback_bagrut_editing` | ביטול המנוע (041) ועריכת הציונים (038); הנתונים חזרו למקור |
 | 043 | `bagrut_status_override` | שינוי ידני של סטטוס הזכאות, כיומן מעל ניתוח הזכאות ([022](decisions/022-bagrut-status-override.md)). הוחלה 21.10 |
 | 044 | `budget` | מודול ניהול תקציב: 13 טבלאות, תפקידי תקציב, שני באקטים, `budget_monthly` ([023](decisions/023-budget-module.md)). הוחלה 20.10 |
+| 045 | `budget_extras` | קובץ התוספתיים: דגלים ושם כרטיס ב-`budget_card_meta`, `plan_income/expense` ב-`budget_card_plans`, `budget_cards.as_of` ([023 §8](decisions/023-budget-module.md)). הוחלה 21.10 |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.
