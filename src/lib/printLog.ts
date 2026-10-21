@@ -16,6 +16,8 @@
 //
 // שתי הספריות נטענות רק בלחיצה (import דינמי) — האתר עצמו אינו נעשה כבד.
 //
+// אחרי השמירה הקובץ נפתח מיד בצופה ה-PDF של הדפדפן — ראה openPdf.
+//
 // 🔒 הכול נבנה בזיכרון, ושום דבר לא נשמר בדפדפן. ת"ז אינה מודפסת: שם, כיתה
 // ובית ספר מספיקים לזיהוי בתיק, ודף מודפס מסתובב.
 
@@ -299,6 +301,72 @@ function download(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
+/**
+ * פותח את הקובץ מיד אחרי השמירה (אייל, 21.10) — בצופה ה-PDF של הדפדפן. אתר אינו
+ * יכול להפעיל תוכנה במחשב (אדובי וכו'): זו מגבלת אבטחה של הדפדפן.
+ *
+ * כרטיסייה חדשה — רק אם הלחיצה עדיין "טרייה": הדפדפן חוסם חלון שנפתח אחרי
+ * חלון השמירה, הבנייה והבקשה ל-AI, ומציג אזהרת חלון קופץ. אחרת — צופה בתוך הדף,
+ * מעל המסך, עם "פתיחה בכרטיסייה חדשה" (לחיצה חדשה — לא נחסמת) ו"סגירה". הכתובת
+ * בזיכרון בלבד (blob:), ומשוחררת דקה אחרי הסגירה.
+ */
+function openPdf(blob: Blob, name: string, saved: boolean) {
+  const url = URL.createObjectURL(blob)
+  const release = () => setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  const fresh = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive
+  if (fresh && window.open(url, '_blank')) {
+    release()
+    return
+  }
+
+  const overlay = document.createElement('div')
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-label', name)
+  overlay.dir = 'rtl'
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0', zIndex: '9999', background: 'rgba(15,23,42,0.55)',
+    display: 'flex', flexDirection: 'column', padding: '16px', gap: '8px', fontFamily: 'inherit',
+  })
+  const bar = document.createElement('div')
+  Object.assign(bar.style, {
+    display: 'flex', alignItems: 'center', gap: '8px', background: '#fff', borderRadius: '12px',
+    padding: '8px 12px', boxShadow: '0 4px 12px rgba(0,0,0,.15)', fontSize: '14px', color: '#1e293b',
+  })
+  const title = document.createElement('span')
+  title.textContent = `${saved ? 'נשמר' : 'הורד'}: ${name}`
+  Object.assign(title.style, { fontWeight: '700', flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })
+  const button = (label: string, primary: boolean, onClick: () => void) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.textContent = label
+    Object.assign(b.style, {
+      border: primary ? '0' : '1px solid #cbd5e1', background: primary ? '#0284c7' : '#fff', color: primary ? '#fff' : '#334155',
+      borderRadius: '8px', padding: '4px 12px', fontWeight: '700', fontSize: '13px', cursor: 'pointer',
+    })
+    b.onclick = onClick
+    return b
+  }
+  const close = () => {
+    overlay.remove()
+    document.removeEventListener('keydown', onKey)
+    release()
+  }
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') close()
+  }
+  bar.append(title, button('פתיחה בכרטיסייה חדשה', true, () => window.open(url, '_blank')), button('סגירה', false, close))
+  const frame = document.createElement('iframe')
+  frame.src = url
+  frame.title = name
+  Object.assign(frame.style, { flex: '1', width: '100%', border: '0', borderRadius: '12px', background: '#fff' })
+  overlay.append(bar, frame)
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close()
+  })
+  document.addEventListener('keydown', onKey)
+  document.body.appendChild(overlay)
+}
+
 /** מרנדר את הדף ב-iframe נסתר ברוחב A4, ומחזיר את המסמך שלו */
 function renderFrame(html: string): Promise<{ doc: Document; dispose: () => void }> {
   return new Promise((resolve, reject) => {
@@ -358,6 +426,7 @@ async function savePdf(name: string, build: () => Promise<string>): Promise<bool
     const blob = pdf.output('blob')
     if (target === 'download') download(blob, name)
     else await target.write(blob)
+    openPdf(blob, name, target !== 'download')
     return true
   } catch (e) {
     throw new Error(`יצירת קובץ ה-PDF נכשלה: ${(e as Error).message}`)
