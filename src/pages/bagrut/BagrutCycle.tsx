@@ -194,11 +194,9 @@ function PlanView({ sid, actions, onActions, ai, onAi }: {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ניתוח הזכאות כפי שהגיע, ולצידו ניתוח ה-AI — שני החלקים זה לצד זה (סבא, 14.10) */}
-      <div className="grid items-start gap-4 lg:grid-cols-2">
-        <T2Card sid={sid} />
-        <PictureCard sid={sid} analysis={ai.picture} onNew={(a) => onAi({ ...ai, picture: a })} />
-      </div>
+      {/* ניתוח הזכאות כפי שהגיע. "מצב התלמיד" של ה-AI הוסר מהמסך (21.10) — התוכנית
+          נשארת; הפונקציה עדיין יודעת לייצר אותו, ומה שנוצר בעבר נשמר במסד */}
+      <T2Card sid={sid} />
       <StaffCard sid={sid} />
       <PlanCard sid={sid} actions={actions} onActions={onActions} intervention={s.intervention}
         plan={ai.plan} onNewPlan={(a) => onAi({ ...ai, plan: a })} />
@@ -209,7 +207,9 @@ function PlanView({ sid, actions, onActions, ai, onAi }: {
 /**
  * ניתוח הזכאות (T2) — כל השדות, בכותרות ובתוכן המקוריים, בלי AI ובלי עיבוד.
  * סבא: "השקענו הרבה מאוד מחשבה ביצירה של 10 השדות האלה". שדה ריק נשאר ריק
- * (מסומן "—"), לא ממלאים ולא מסכמים. הזכאות — רק לפי מה שכתוב כאן (014 §8).
+ * (מסומן "—"), לא ממלאים ולא מסכמים. הזכאות — לפי מה שכתוב כאן (014 §8),
+ * אלא אם רכז/ת הבגרויות שינו את הסטטוס ידנית (043): אז הכרטיס אומר זאת בראשו,
+ * ושדה הסטטוס מסומן — השדות עצמם נשארים כפי שהגיעו (אייל, 21.10).
  */
 function T2Card({ sid }: { sid: string }) {
   const { index } = useBagrut()
@@ -220,19 +220,38 @@ function T2Card({ sid }: { sid: string }) {
   }
   const short = T2_FIELDS.filter((f) => f.short)
   const long = T2_FIELDS.filter((f) => !f.short)
+  const o = s.override
   return (
     <Card title="ניתוח הזכאות" action={<span className="text-xs text-slate-400">כפי שהגיע, בלי עיבוד</span>}>
       {!s.in_t2 ? (
         <p className="text-sm text-slate-500">לתלמיד הזה אין ניתוח זכאות — הוא נעשה לשכבה המסיימת בלבד.</p>
       ) : (
         <>
+          {o && (
+            <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-2.5 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-bold text-violet-900">סטטוס הזכאות שונה ידנית:</span>
+                <StatusBadge kind={o.kind} long manual />
+                <span className="text-xs text-violet-800">
+                  {o.set_by_email ? `ע"י ${o.set_by_email} ` : ''}ב-{fmtDate(o.set_at)} · בניתוח הזכאות: {ELIGIBILITY_META[analysisKind(s)].label}
+                </span>
+              </div>
+              <p className="mt-1 text-violet-950"><span className="text-xs font-bold text-violet-700">סיבה: </span>{o.reason}</p>
+              <p className="mt-1 text-[11px] text-violet-700">
+                הסטטוס הזה קובע בכל המסכים — אחוזי הזכאות, מצטיינת וטק, הרשימות והייצוא. השדות שלמטה — ניתוח הזכאות כפי שהגיע.
+              </p>
+            </div>
+          )}
           <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-slate-50 px-4 py-3 sm:grid-cols-3">
             {short.map((f) => (
               <div key={f.key} className="min-w-0">
                 <dt className="text-[11px] font-semibold leading-tight text-slate-500">{f.label}</dt>
-                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'}`}>
+                <dd className={`mt-0.5 text-sm font-bold ${value(f) ? 'text-slate-800' : 'text-slate-300'} ${f.key === 'status' && o ? 'line-through decoration-violet-400' : ''}`}>
                   {value(f) ?? '—'}
                 </dd>
+                {f.key === 'status' && o && (
+                  <p className="mt-0.5 text-[11px] font-semibold text-violet-700">✎ שונה ידנית ל: {ELIGIBILITY_META[o.kind].label}</p>
+                )}
               </div>
             ))}
           </dl>
@@ -297,56 +316,6 @@ function AiMeta({ analysis }: { analysis: AiAnalysis }) {
       ניתוח AI · {new Date(analysis.created_at).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })} — לבדיקת המורה. הזכאות עצמה — רק לפי ניתוח הזכאות.
       {stale && <span className="mr-1 rounded bg-amber-50 px-1.5 py-0.5 font-semibold text-amber-800">נוצר על סבב קודם — כדאי לנתח מחדש</span>}
     </p>
-  )
-}
-
-function PictureCard({ sid, analysis, onNew, className = '' }: {
-  sid: string
-  analysis: AiAnalysis<AiPicture> | null
-  onNew: (a: AiAnalysis<AiPicture>) => void
-  className?: string
-}) {
-  const { busy, err, run } = useAiRequest<AiPicture>(sid, 'picture', onNew)
-  const p = analysis?.content
-  return (
-    <Card title="מצב התלמיד" className={className} action={<AiButton has={Boolean(analysis)} busy={busy} onClick={run} />}>
-      {err && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800">{err}</div>}
-      {!p ? (
-        <p className="text-sm leading-relaxed text-slate-500">
-          עוד לא נוצר ניתוח לתלמיד הזה. "יצירת ניתוח" שולח ל-AI את הציונים, ניתוח הזכאות ומה שהצוות כתב — בלי שם ובלי ת"ז —
-          ומחזיר תמונת מצב למורה: מה מפריד מזכאות, מה הכי קרוב לתיקון, ועל מה לבנות בשיחה.
-        </p>
-      ) : (
-        <>
-          {p.headline && <p className="text-base font-bold leading-snug text-slate-800">{p.headline}</p>}
-          {p.story && <p className="mt-2 text-sm leading-relaxed text-slate-700">{p.story}</p>}
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Points title="מה מפריד אותו מזכאות" items={p.gaps} />
-            <Points title="מה הכי קרוב לתיקון" items={p.closest} />
-            <Points title="מה בסכנה" items={p.risks} />
-            <Points title="על מה אפשר לבנות" items={p.strengths} />
-          </div>
-          {p.conversation_tips.length > 0 && (
-            <div className="mt-4 rounded-xl bg-violet-50/60 px-4 py-3">
-              <Points title="לשיחה עם התלמיד" items={p.conversation_tips} />
-            </div>
-          )}
-          <AiMeta analysis={analysis!} />
-        </>
-      )}
-    </Card>
-  )
-}
-
-function Points({ title, items }: { title: string; items: string[] }) {
-  if (!items.length) return null
-  return (
-    <div>
-      <div className="mb-1.5 text-xs font-bold text-slate-500">{title}</div>
-      <ul className="flex flex-col gap-1.5 text-sm text-slate-700">
-        {items.map((x, i) => <li key={i} className="flex gap-2"><span className="text-slate-300">•</span><span>{x}</span></li>)}
-      </ul>
-    </div>
   )
 }
 
