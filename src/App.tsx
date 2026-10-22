@@ -34,6 +34,9 @@ import MeitarInvoice from './pages/budget/meitar/MeitarInvoice'
 import MeitarDownloads from './pages/budget/meitar/MeitarDownloads'
 import BudgetOrders from './pages/budget/BudgetOrders'
 import BudgetUpload from './pages/budget/BudgetUpload'
+import BudgetExceptions from './pages/budget/BudgetExceptions'
+import BudgetChanges from './pages/budget/BudgetChanges'
+import BudgetScenarios from './pages/budget/BudgetScenarios'
 import Home from './pages/Home'
 import RequireProduct from './components/RequireProduct'
 
@@ -128,6 +131,10 @@ export default function App() {
         </Route>
         <Route path="orders" element={<BudgetOrders />} />
         <Route path="upload" element={<BudgetUpload />} />
+        {/* 025 — מעקב ותכנון */}
+        <Route path="exceptions" element={<BudgetExceptions />} />
+        <Route path="changes" element={<BudgetChanges />} />
+        <Route path="scenarios" element={<BudgetScenarios />} />
       </Route>
 
       <Route

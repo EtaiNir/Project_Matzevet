@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import ModuleSwitch from '@/components/ModuleSwitch'
 import HomeLink from '@/components/HomeLink'
+import { BackButton, LastCardLink } from '@/components/budget/BudgetNavButtons'
 import { Empty, ErrorBox, Loading } from '@/components/bagrut/ui'
 import { BUDGET_ROLE_LABELS, fetchAuthorities, type Authority } from '@/lib/admin'
 import {
@@ -11,6 +12,7 @@ import {
   fetchCards,
   fetchMeta,
   fetchMonthly,
+  fetchOrders,
   fetchPlans,
   type BudgetCard,
   type CardMeta,
@@ -18,14 +20,24 @@ import {
   type MonthlyRow,
 } from '@/lib/budget'
 import { buildRows, elapsedMonths, hebrewSchoolYear, periodRange, type Period } from '@/lib/budgetCalc'
+import { openOrdersByCard, seasonalSuggestions } from '@/lib/budgetInsights'
+import { fetchPlanReviews, type PlanReview } from '@/lib/budgetTracking'
 import { BudgetContext, type BudgetContextValue } from './context'
 import { MEITAR_PAGES, type BudgetBase } from './meitar/context'
+import { IconChartBars, IconFlag, IconHistory, IconLandmark, IconList, IconReceipt, IconSliders, IconTable, IconUpload } from '@/components/brand/Icons'
+
+/** אייקון בסרגל — 18px, אפור; בקישור הפעיל מקבל את צבע הקישור */
+const ICON = 'h-[18px] w-[18px] shrink-0 opacity-70'
 
 interface Loaded {
   cards: BudgetCard[]
   meta: Map<string, CardMeta>
   plans: Map<string, CardPlan>
   monthly: MonthlyRow[]
+  // 025 — אותם חודשים בשנה שעברה (לצפי העונתי), ההזמנות, ומצב אישור התכנית
+  prevMonthly: MonthlyRow[]
+  openOrders: Map<string, number>
+  planReviews: Map<string, PlanReview>
 }
 
 /**
@@ -76,14 +88,24 @@ export default function BudgetShell() {
     setLoaded(null)
     setError(null)
     const range = periodRange(year, period)
-    Promise.all([fetchCards(code, year), fetchMeta(code), fetchPlans(code, year), fetchMonthly(code, range.from, range.to)])
-      .then(([cards, meta, plans, monthly]) => {
+    const prev = periodRange(year - 1, period)
+    Promise.all([
+      fetchCards(code, year), fetchMeta(code), fetchPlans(code, year), fetchMonthly(code, range.from, range.to),
+      // 025 — לא חוסמים את המסכים אם אחד מאלה נכשל: בלעדיהם הכול כמו שהיה
+      fetchMonthly(code, prev.from, prev.to).catch(() => [] as MonthlyRow[]),
+      fetchOrders(code).catch(() => []),
+      fetchPlanReviews(code, year).catch(() => new Map<string, PlanReview>()),
+    ])
+      .then(([cards, meta, plans, monthly, prevMonthly, orders, planReviews]) => {
         if (mine !== seq.current) return
         setLoaded({
           cards,
           meta: new Map(meta.map((m) => [m.card_code, m])),
           plans: new Map(plans.map((p) => [p.card_code, p])),
           monthly,
+          prevMonthly,
+          openOrders: openOrdersByCard(orders),
+          planReviews,
         })
       })
       .catch((e: Error) => mine === seq.current && setError(e.message))
@@ -93,7 +115,18 @@ export default function BudgetShell() {
     setLoaded((l) => (l ? { ...l, meta: new Map(l.meta).set(m.card_code, m) } : l))
   }, [])
   const applyPlan = useCallback((p: CardPlan) => {
-    setLoaded((l) => (l ? { ...l, plans: new Map(l.plans).set(p.card_code, p) } : l))
+    setLoaded((l) => {
+      if (!l) return l
+      // עריכת התכנית אחרי אישור — המסד מחזיר אותה לעבודה (049); כך גם כאן
+      const prevPlan = l.plans.get(p.card_code)
+      const reviews = new Map(l.planReviews)
+      if (reviews.get(p.card_code)?.status === 'approved'
+          && (prevPlan?.next_income !== p.next_income || prevPlan?.next_expense !== p.next_expense)) reviews.delete(p.card_code)
+      return { ...l, plans: new Map(l.plans).set(p.card_code, p), planReviews: reviews }
+    })
+  }, [])
+  const applyPlanReview = useCallback((r: PlanReview) => {
+    setLoaded((l) => (l ? { ...l, planReviews: new Map(l.planReviews).set(r.card_code, r) } : l))
   }, [])
 
   const role = profile?.budget_role ?? null
@@ -110,7 +143,8 @@ export default function BudgetShell() {
       return !m || d > m ? d : m
     }, null)
     const elapsed = elapsedMonths(asOf, year, period)
-    const rows = buildRows(loaded.cards, loaded.meta, loaded.plans, loaded.monthly, elapsed)
+    const seasonal = seasonalSuggestions(loaded.monthly, loaded.prevMonthly, asOf, year, period)
+    const rows = buildRows(loaded.cards, loaded.meta, loaded.plans, loaded.monthly, elapsed, seasonal, loaded.openOrders)
     return {
       code,
       authorityName: allAuthorities.find((a) => a.code === code)?.name ?? '',
@@ -126,9 +160,12 @@ export default function BudgetShell() {
       isOwner,
       applyMeta,
       applyPlan,
+      seasonal: Boolean(seasonal),
+      planReviews: loaded.planReviews,
+      applyPlanReview,
       base: `/budget/${code}`,
     }
-  }, [loaded, year, period, code, allAuthorities, canManage, isOwner, applyMeta, applyPlan])
+  }, [loaded, year, period, code, allAuthorities, canManage, isOwner, applyMeta, applyPlan, applyPlanReview])
 
   if (!codeFromUrl) {
     if (authorities.length) return <Navigate to={`/budget/${authorities[0]}`} replace />
@@ -171,6 +208,9 @@ export default function BudgetShell() {
         )}
         <ModuleSwitch authorityCode={code} />
         <HomeLink />
+        {/* חזרה לדף הקודם, ולכרטיס הסעיף האחרון — כמו "התלמיד האחרון" בבגרות */}
+        <BackButton home={`/budget/${code}`} />
+        <LastCardLink code={code} />
 
         {years && years.length > 0 && (
           <>
@@ -249,18 +289,23 @@ function Rail({ base, search, pathname, cards, canManage, isOwner }: {
   return (
     <aside className="thin-scrollbar w-52 shrink-0 overflow-y-auto border-l border-slate-200 bg-white p-3">
       <nav className="flex flex-col gap-0.5">
-        <NavLink end to={to('')} className={link}>📊 תמונת תקציב</NavLink>
+        {/* אייקונים בקו (brand/Icons) ולא אמוג'י — אחידים בכל מערכת, ובצבע ההקשר */}
+        <NavLink end to={to('')} className={link}><IconChartBars className={ICON} /> תמונת תקציב</NavLink>
         <NavLink to={to('/cards')} className={link}>
-          📒 מעקב ותכנון {cards != null && <span className="mr-auto text-xs tabular-nums text-slate-400">{cards}</span>}
+          <IconTable className={ICON} /> מעקב ותכנון {cards != null && <span className="mr-auto text-xs tabular-nums text-slate-400">{cards}</span>}
         </NavLink>
-        <NavLink to={to('/actions')} className={link}>🧮 פירוט הפעולות</NavLink>
+        {/* 025 — מעקב ותכנון: חריגות, מה השתנה, סימולציית תקציב */}
+        <NavLink to={to('/exceptions')} className={link}><IconFlag className={ICON} /> חריגות לטיפול</NavLink>
+        <NavLink to={to('/changes')} className={link}><IconHistory className={ICON} /> מה השתנה</NavLink>
+        <NavLink to={to('/scenarios')} className={link}><IconSliders className={ICON} /> סימולציית תקציב</NavLink>
+        <NavLink to={to('/actions')} className={link}><IconList className={ICON} /> פירוט הפעולות</NavLink>
         {/* המיתר הוא הכנסות ברמת הרשות — לא לאחראי על כרטיסים (ה-RLS חוסם ממילא) */}
         {!isOwner && <MeitarMenu base={base} search={search} pathname={pathname} to={to} link={link} />}
-        <NavLink to={to('/orders')} className={link}>🧾 רכש</NavLink>
+        <NavLink to={to('/orders')} className={link}><IconReceipt className={ICON} /> רכש</NavLink>
         {canManage && (
           <>
             <div className="my-2 border-t border-slate-100" />
-            <NavLink to={to('/upload')} className={link}>⬆ קליטת קבצים</NavLink>
+            <NavLink to={to('/upload')} className={link}><IconUpload className={ICON} /> קליטת קבצים</NavLink>
           </>
         )}
       </nav>
@@ -292,7 +337,7 @@ function MeitarMenu({ base, search, pathname, to, link }: {
   return (
     <div>
       <div className="flex items-center">
-        <NavLink to={inMeitar ? sub('') : to('/meitar')} end={false} className={(a) => `${link(a)} flex-1`}>🏛 מיתר — הכנסות</NavLink>
+        <NavLink to={inMeitar ? sub('') : to('/meitar')} end={false} className={(a) => `${link(a)} flex-1`}><IconLandmark className={ICON} /> מיתר — הכנסות</NavLink>
         <button onClick={() => setOpen((o) => !o)} className="rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-slate-100"
           title={open ? 'סגירה' : 'פתיחה'} aria-expanded={open}>{open ? '▴' : '▾'}</button>
       </div>

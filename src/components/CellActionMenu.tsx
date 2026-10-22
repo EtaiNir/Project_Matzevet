@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { IconCard } from '@/components/brand/Icons'
 
 interface Props {
   /** שם התלמיד שבשורה — כדי שיהיה ברור על מי לוחצים */
@@ -11,6 +12,8 @@ interface Props {
   anchor: DOMRect
   /** בלי — אין שורת "כרטיס תלמיד" (טבלה ששורותיה אינן תלמידים) */
   onOpenCard?: () => void
+  /** מה נפתח — ברירת המחדל "כרטיס תלמיד"; בתקציב: "כרטיס הסעיף", "פירוט הנושא" */
+  openLabel?: string
   onOpenFilter: () => void
   /** הסרת העמודה מהתצוגה. אינה מוחקת דבר — רק מורידה אותה מהטבלה. */
   onHideColumn?: () => void
@@ -36,7 +39,7 @@ export default function CellActionMenu({
   columnLabel,
   cellValue,
   anchor,
-  onOpenCard,
+  onOpenCard, openLabel,
   onOpenFilter,
   onHideColumn,
   onRemoveFromView,
@@ -99,8 +102,8 @@ export default function CellActionMenu({
           onClick={onOpenCard}
           className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm text-slate-700 transition hover:bg-sky-50 hover:text-sky-800"
         >
-          <span>🗂</span>
-          <span>כרטיס תלמיד</span>
+          <IconCard className="h-4 w-4 shrink-0 text-slate-400" />
+          <span>{openLabel ?? 'כרטיס תלמיד'}</span>
         </button>
       )}
 

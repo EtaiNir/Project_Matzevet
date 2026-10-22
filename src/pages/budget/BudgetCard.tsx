@@ -17,6 +17,8 @@ import {
   type CardMeta,
   type CardPlan,
 } from '@/lib/budget'
+import { setLastBudgetCard } from '@/lib/lastBudgetCard'
+import { isSalaryCard } from '@/lib/budgetTracking'
 import { HEB_MONTH_NAMES, money, monthlySeries, pct, usageTone, type CardRow } from '@/lib/budgetCalc'
 import { useBudget, type CardNavState } from './context'
 
@@ -32,6 +34,10 @@ export default function BudgetCard() {
   const navigate = useNavigate()
   const nav = state as CardNavState | null
   const row = b.rows.find((r) => r.code === cardCode)
+  // "הסעיף האחרון" — כל כרטיס שנפתח הופך לאחרון (בזיכרון הדף בלבד, lib/lastBudgetCard)
+  useEffect(() => {
+    if (row) setLastBudgetCard({ code: b.code, card: row.code, name: row.name, href: `${b.base}/card/${row.code}${search}`, nav })
+  }, [row, b.code, b.base, search, nav])
 
   const [tx, setTx] = useState<BudgetTransaction[] | null>(null)
   const [txError, setTxError] = useState<string | null>(null)
@@ -124,7 +130,12 @@ export default function BudgetCard() {
       </div>
 
       <Card title="תנועות בכרטיס" action={tx && <span className="text-xs text-slate-400">{tx.length.toLocaleString('he-IL')} תנועות · כל השנים</span>}>
-        {txError ? <ErrorBox message={txError} /> : tx == null ? <Loading label="טוען תנועות…" /> : <Transactions rows={tx} name={`${row.code}_${row.name}`} />}
+        {/* 025 — פרטיות: אחראי תקציב אינו רואה תנועות בכרטיסי שכר (ה-RLS, מיגרציה 049), רק את הסיכומים */}
+        {b.isOwner && isSalaryCard(row.code) ? (
+          <p className="text-sm text-slate-500">
+            כרטיס שכר — התנועות עצמן (שמות עובדים ותשלומי שכר) מוצגות רק למנהל התקציב. הסיכומים החודשיים והביצוע — למעלה.
+          </p>
+        ) : txError ? <ErrorBox message={txError} /> : tx == null ? <Loading label="טוען תנועות…" /> : <Transactions rows={tx} name={`${row.code}_${row.name}`} />}
       </Card>
 
       <Files code={b.code} card={row.code} canEdit={b.canPlan} />

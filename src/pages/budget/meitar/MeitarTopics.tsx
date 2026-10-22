@@ -113,6 +113,7 @@ export default function MeitarTopics() {
         columns={columns}
         rowKey={(r) => r.code}
         onRowClick={(r) => navigate(m.to(`topic/${r.code}`))}
+        openLabel="פירוט הנושא"
         exportName={`מיתר_${entity.name}_${m.month.slice(0, 7)}`}
         sheetName={`מיתר ${m.month.slice(0, 7)}`}
         countLabel="נושאים"

@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { CardMeta, CardPlan, MonthlyRow } from '@/lib/budget'
+import type { PlanReview } from '@/lib/budgetTracking'
 import type { CardRow, Period } from '@/lib/budgetCalc'
 
 /** מה שהמעטפת טוענת פעם אחת ומעבירה לכל מסכי התקציב */
@@ -25,6 +26,11 @@ export interface BudgetContextValue {
   isOwner: boolean
   applyMeta: (m: CardMeta) => void
   applyPlan: (p: CardPlan) => void
+  /** 025 — ההצעה לצפי עונתית (לפי השנה שעברה) או לפי הקצב */
+  seasonal: boolean
+  /** 025 — מצב אישור התכנית לשנה הבאה, לכל כרטיס; אין = בעבודה */
+  planReviews: Map<string, PlanReview>
+  applyPlanReview: (r: PlanReview) => void
   /** `/budget/{code}` */
   base: string
 }

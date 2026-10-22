@@ -99,6 +99,7 @@ export default function BagrutTable<T>({
   empty = 'אין תלמידים שעונים על הסינון',
   initialSort,
   countLabel = 'שורות',
+  openLabel,
   rowTitle,
   storageKey,
   sheetName = 'בגרות',
@@ -113,6 +114,8 @@ export default function BagrutTable<T>({
   initialSort?: { key: string; dir: 'asc' | 'desc' }
   /** מה נספר בשורת המונה ("תלמידים", "שאלונים") */
   countLabel?: string
+  /** מה נפתח בלחיצה על שורה — לתפריט התא. ברירת המחדל "כרטיס תלמיד" */
+  openLabel?: string
   /** כותרת חלון התא (לחיצה ימנית) — שם התלמיד שבשורה */
   rowTitle?: (row: T) => string
   /** שם הטבלה לשמירת רוחב העמודות בדפדפן. בלעדיו הרוחב נשמר עד שעוזבים את המסך */
@@ -452,6 +455,7 @@ export default function BagrutTable<T>({
             columnLabel={c.exportHeader ?? (typeof c.header === 'string' ? c.header : c.key)}
             cellValue={valuesOf(c, row).filter(Boolean).join(', ')}
             anchor={cellMenu.anchor}
+            openLabel={openLabel}
             onOpenCard={onRowClick ? () => {
               setCellMenu(null)
               onRowClick(row, cellMenu.index, sorted)

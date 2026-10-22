@@ -222,3 +222,88 @@ export function IconHome(p: IconProps) {
     </Svg>
   )
 }
+
+// ── מודול התקציב: הסרגל (24.10 — במקום אמוג'י)
+
+/** עמודות — תמונת תקציב */
+export function IconChartBars(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 20h16" />
+      <path d="M7 16.5V11M12 16.5V6.5M17 16.5v-3.5" />
+    </Svg>
+  )
+}
+
+/** טבלה — מעקב ותכנון */
+export function IconTable(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10" />
+    </Svg>
+  )
+}
+
+/** דגל — חריגות לטיפול */
+export function IconFlag(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M5.5 21V4" />
+      <path d="M5.5 4.5h11l-2 4 2 4h-11" />
+    </Svg>
+  )
+}
+
+/** שעון עם חץ אחורה — מה השתנה מאז העדכון הקודם */
+export function IconHistory(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 12a8 8 0 1 0 2.3-5.7" />
+      <path d="M4 4.5V8.5h4" />
+      <path d="M12 8v4.2l2.8 1.8" />
+    </Svg>
+  )
+}
+
+/** מחוונים — סימולציית תקציב */
+export function IconSliders(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+      <circle cx="15" cy="7" r="2" />
+      <circle cx="9" cy="17" r="2" />
+    </Svg>
+  )
+}
+
+/** רשימה — פירוט הפעולות */
+export function IconList(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M9 6.5h11M9 12h11M9 17.5h11" />
+      <path d="M4.5 6.5h.5M4.5 12h.5M4.5 17.5h.5" />
+    </Svg>
+  )
+}
+
+/** קבלה — רכש */
+export function IconReceipt(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M6 3.5h12v17l-2-1.3-2 1.3-2-1.3-2 1.3-2-1.3-2 1.3z" />
+      <path d="M9 8.5h6M9 12h6M9 15.5h3.5" />
+    </Svg>
+  )
+}
+
+/** חץ למעלה אל מגש — קליטת קבצים */
+export function IconUpload(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M12 15.5V4.5" />
+      <path d="M7.5 9 12 4.5 16.5 9" />
+      <path d="M4.5 15v3.5a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V15" />
+    </Svg>
+  )
+}

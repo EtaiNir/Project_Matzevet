@@ -410,6 +410,7 @@ security invoker, כך שה-RLS חל. המיתר לפי חודש: `meitar_months
 | 046 | `budget_extras` | קובץ התוספתיים: דגלים ושם כרטיס ב-`budget_card_meta`, `plan_income/expense` ב-`budget_card_plans`, `budget_cards.as_of` ([023 §8](decisions/023-budget-module.md)). הוחלה 21.10 |
 | 047 | `meitar_automation` | המיתר האוטומטי: מקורות, run למקור, שנה"ל קודמת מסומנת, סיכומי מוסד, אינדקס נושאים, מצב ההורדות, `meitar_months` ([024](decisions/024-meitar-automation.md)). הוחלה 22.10 |
 | 048 | `meitar_run_topics` | סיכום לכל run × נושא × מוסד — `meitar_months` קורא ממנו (4.7 ש׳ ← 0.4 ש׳ על 112 אלף שורות); הטוען ממלא (`meitar_refresh_run_topics`). הוחלה 22.10 |
+| 049 | `budget_tracking` (מתן) | תמונות מצב לפני דריסה (טריגר), היסטוריית צפי, "בדקתי" על חריגות, אישור תכנית, תנועות שכר חסומות לאחראי ([025](decisions/025-budget-tracking.md)). הוחלה 21.10 — **בשם 047**; מוספרה מחדש במיזוג, כי 047 של אייל (המיתר) הוחלה וקיימת |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.
