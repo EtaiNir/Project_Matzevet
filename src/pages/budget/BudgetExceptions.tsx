@@ -112,7 +112,7 @@ export default function BudgetExceptions() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <h1 className="text-lg font-bold text-slate-800">🚩 חריגות לטיפול</h1>
+        <h1 className="text-lg font-bold text-slate-800">חריגות לטיפול</h1>
         <span className="rounded-lg bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-800">{periodLabel}</span>
         <div className="flex gap-0.5 rounded-lg bg-slate-100 p-0.5">
           {(Object.keys(SHOW_LABELS) as Show[]).map((k) => (
@@ -135,7 +135,7 @@ export default function BudgetExceptions() {
 
       {!shown.length ? (
         <p className="rounded-xl bg-white p-6 text-center text-sm text-slate-500 shadow-sm">
-          {show === 'open' ? 'אין חריגות לטיפול. 👌' : 'אין חריגות בתצוגה הזו.'}
+          {show === 'open' ? 'אין חריגות לטיפול.' : 'אין חריגות בתצוגה הזו.'}
         </p>
       ) : (
         <ul className="flex flex-col gap-2">

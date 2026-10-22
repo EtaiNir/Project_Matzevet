@@ -65,7 +65,7 @@ export default function BudgetChanges() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h1 className="text-lg font-bold text-slate-800">🔄 מה השתנה מאז העדכון הקודם</h1>
+        <h1 className="text-lg font-bold text-slate-800">מה השתנה מאז העדכון הקודם</h1>
         {state && (
           <span className="text-sm text-slate-500">
             נתונים ל-{dateLabel(state.snapshot.as_of)} ← נתונים ל-{dateLabel(b.asOf)} · נקלט {new Date(state.snapshot.taken_at).toLocaleDateString('he-IL')}

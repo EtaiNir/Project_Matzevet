@@ -128,7 +128,7 @@ export default function BudgetCard() {
         {/* 024 — פרטיות: אחראי תקציב אינו רואה תנועות בכרטיסי שכר (ה-RLS, מיגרציה 047), רק את הסיכומים */}
         {b.isOwner && isSalaryCard(row.code) ? (
           <p className="text-sm text-slate-500">
-            🔒 כרטיס שכר — התנועות עצמן (שמות עובדים ותשלומי שכר) מוצגות רק למנהל התקציב. הסיכומים החודשיים והביצוע — למעלה.
+            כרטיס שכר — התנועות עצמן (שמות עובדים ותשלומי שכר) מוצגות רק למנהל התקציב. הסיכומים החודשיים והביצוע — למעלה.
           </p>
         ) : txError ? <ErrorBox message={txError} /> : tx == null ? <Loading label="טוען תנועות…" /> : <Transactions rows={tx} name={`${row.code}_${row.name}`} />}
       </Card>

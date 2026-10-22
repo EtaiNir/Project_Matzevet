@@ -84,7 +84,7 @@ export default function BudgetScenarios() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h1 className="text-lg font-bold text-slate-800">🧪 סימולציית תקציב לשנה הבאה — {b.year + 1}</h1>
+        <h1 className="text-lg font-bold text-slate-800">סימולציית תקציב לשנה הבאה — {b.year + 1}</h1>
         <span className="text-xs text-slate-500">לא נשמר בתכנית · רק לבדיקה</span>
         <span className="mr-auto" />
         {changed && (
