@@ -280,10 +280,10 @@ function Rail({ base, search, cards, canManage, isOwner }: {
         <NavLink to={to('/cards')} className={link}>
           📒 מעקב ותכנון {cards != null && <span className="mr-auto text-xs tabular-nums text-slate-400">{cards}</span>}
         </NavLink>
-        {/* 024 — מעקב ותכנון: חריגות, מה השתנה, תרחישים */}
+        {/* 024 — מעקב ותכנון: חריגות, מה השתנה, סימולציית תקציב */}
         <NavLink to={to('/exceptions')} className={link}>🚩 חריגות לטיפול</NavLink>
         <NavLink to={to('/changes')} className={link}>🔄 מה השתנה</NavLink>
-        <NavLink to={to('/scenarios')} className={link}>🧪 תרחישים לשנה הבאה</NavLink>
+        <NavLink to={to('/scenarios')} className={link}>🧪 סימולציית תקציב</NavLink>
         <NavLink to={to('/actions')} className={link}>🧮 פירוט הפעולות</NavLink>
         {/* המיתר הוא הכנסות ברמת הרשות — לא לאחראי על כרטיסים (ה-RLS חוסם ממילא) */}
         {!isOwner && <NavLink to={to('/meitar')} className={link}>🏛 מיתר — הכנסות</NavLink>}

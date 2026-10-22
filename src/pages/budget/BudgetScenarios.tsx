@@ -13,7 +13,7 @@ import { useBudget } from './context'
 const EMPTY: ScenarioInputs = { categories: {}, cards: {} }
 
 /**
- * תרחישים לשנה הבאה (024, רעיון 6): "מה אם" — ומיד רואים את הגרעון או העודף.
+ * סימולציית תקציב לשנה הבאה (024, רעיון 6; נקראה "תרחישים" עד 22.10): "מה אם" — ומיד רואים את הגרעון או העודף.
  *   · לכל קטגוריה 1, ולכולן יחד — שינוי באחוזים להכנסות ולהוצאות.
  *   · לחיצה על קטגוריה פותחת את הכרטיסים שבה — הבסיס של כל אחד ומאיפה הוא נלקח,
  *     ולכל כרטיס אפשר להקליד שינוי משלו: אחוז ("+20%", נוסף על הקטגוריה), או
@@ -36,7 +36,7 @@ export default function BudgetScenarios() {
     try {
       localStorage.setItem(storeKey, JSON.stringify(inputs))
     } catch {
-      /* מצב פרטי — התרחיש פשוט לא יישמר */
+      /* מצב פרטי — הסימולציה פשוט לא תישמר */
     }
   }, [inputs, storeKey])
   const [open, setOpen] = useState<Set<string>>(new Set())
@@ -84,12 +84,12 @@ export default function BudgetScenarios() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
-        <h1 className="text-lg font-bold text-slate-800">🧪 תרחישים לשנה הבאה — {b.year + 1}</h1>
+        <h1 className="text-lg font-bold text-slate-800">🧪 סימולציית תקציב לשנה הבאה — {b.year + 1}</h1>
         <span className="text-xs text-slate-500">לא נשמר בתכנית · רק לבדיקה</span>
         <span className="mr-auto" />
         {changed && (
           <button onClick={() => setInputs(EMPTY)} className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50">
-            איפוס התרחיש{changedCards ? ` (${changedCards} כרטיסים שונו)` : ''}
+            איפוס הסימולציה{changedCards ? ` (${changedCards} כרטיסים שונו)` : ''}
           </button>
         )}
       </div>
@@ -109,7 +109,7 @@ export default function BudgetScenarios() {
           <div>{balance(base.inc, base.exp)}</div><div className="text-xs text-slate-500">בבסיס</div>
         </div>
         <div className={`rounded-xl px-4 py-2 shadow-sm ring-1 ${changed ? 'bg-violet-50 ring-violet-200' : 'bg-white ring-slate-200'}`}>
-          <div>{balance(result.income, result.expense)}</div><div className="text-xs text-slate-500">בתרחיש</div>
+          <div>{balance(result.income, result.expense)}</div><div className="text-xs text-slate-500">בסימולציה</div>
         </div>
       </div>
 
@@ -121,10 +121,10 @@ export default function BudgetScenarios() {
               <th className="px-3 py-2 font-semibold">כרטיסים</th>
               <th className="px-3 py-2 text-left font-semibold">הכנסות בבסיס</th>
               <th className="px-3 py-2 font-semibold">שינוי</th>
-              <th className="px-3 py-2 text-left font-semibold">הכנסות בתרחיש</th>
+              <th className="px-3 py-2 text-left font-semibold">הכנסות בסימולציה</th>
               <th className="px-3 py-2 text-left font-semibold">הוצאות בבסיס</th>
               <th className="px-3 py-2 font-semibold">שינוי</th>
-              <th className="px-3 py-2 text-left font-semibold">הוצאות בתרחיש</th>
+              <th className="px-3 py-2 text-left font-semibold">הוצאות בסימולציה</th>
             </tr>
           </thead>
           <tbody>

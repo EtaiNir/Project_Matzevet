@@ -5,7 +5,7 @@
 //   · הזמנות פתוחות — כסף שכבר מחויב ועוד לא נרשם (רעיון 1)
 //   · חריגות לטיפול — כללים קבועים, שקופים (רעיון 3)
 //   · מה השתנה מאז העדכון הקודם — מול תמונת המצב (רעיון 2)
-//   · תרחישים — "מה אם" על התכנית לשנה הבאה, בלי לשמור (רעיון 6)
+//   · סימולציית תקציב — "מה אם" על התכנית לשנה הבאה, בלי לשמור (רעיון 6)
 //
 // ⚠️ סימנים: כמו ב-budgetCalc — הכנסות = Σ זכות, הוצאות = Σ חובה, הכול חיובי.
 import type { BudgetOrder, MonthlyRow } from './budget'
@@ -270,7 +270,7 @@ export function cardChanges(
     .sort((a, b) => Math.abs(b.dIncome) + Math.abs(b.dExpense) - (Math.abs(a.dIncome) + Math.abs(a.dExpense)))
 }
 
-// ─────────────────────────────── תרחישים ───────────────────────────────
+// ─────────────────────────────── סימולציית תקציב ───────────────────────────────
 
 export type BaseSource = 'plan' | 'forecast' | 'season' | 'pace' | 'budget' | 'none'
 export const BASE_SOURCE_LABELS: Record<BaseSource, string> = {
@@ -314,7 +314,7 @@ function sideBase(next: number | null, forecast: number | null, suggested: numbe
 }
 
 /**
- * הבסיס לתרחיש לכל קטגוריה 1 ולכל כרטיס בה: התכנית לשנה הבאה כשהוזנה, אחרת
+ * הבסיס לסימולציה לכל קטגוריה 1 ולכל כרטיס בה: התכנית לשנה הבאה כשהוזנה, אחרת
  * הצפי (המוקלד, או ההצעה), אחרת התקציב של השנה. צד שהכרטיס אינו מסומן בו — 0.
  */
 export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPlan: number; fromForecast: number } {
@@ -326,7 +326,7 @@ export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPla
     const g = by.get(key) ?? { key, label: key, income: 0, expense: 0, cards: 0, items: [] }
     g.cards++
     // כרטיס שאינו מסומן באף צד (שני הדגלים כבויים בתוספתיים) — הצד לפי הנתונים, כדי
-    // שלא ייעלם מהתרחיש: במנשה, שני כרטיסי "חינוך קדם יסודי" עם תקציב הוצאות ותכנית 90,000
+    // שלא ייעלם מהסימולציה: במנשה, שני כרטיסי "חינוך קדם יסודי" עם תקציב הוצאות ותכנית 90,000
     const unflagged = !r.isIncome && !r.isExpense
     const has = (...v: (number | null)[]) => v.some((x) => x != null && x !== 0)
     const incSide = r.isIncome || (unflagged && has(r.nextIncome, r.forecastIncome, r.budgetIncome, r.cumIncome))
@@ -345,7 +345,7 @@ export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPla
   return { groups: [...by.values()].sort((a, b) => b.expense + b.income - (a.expense + a.income)), fromPlan, fromForecast }
 }
 
-// ── השינויים בתרחיש
+// ── השינויים בסימולציה
 
 /**
  * מה שהוקלד לכרטיס בצד אחד: "+20%" / "-5%" / "20%" — אחוז, נוסף על הקטגוריה;
@@ -371,16 +371,16 @@ export interface ScenarioInputs {
 }
 
 export interface ScenarioResult {
-  /** לכל קטגוריה: הסכומים בתרחיש, וכמה כרטיסים שונו בה */
+  /** לכל קטגוריה: הסכומים בסימולציה, וכמה כרטיסים שונו בה */
   groups: Map<string, { income: number; expense: number; changedCards: number }>
-  /** לכל כרטיס: הסכום בתרחיש לכל צד */
+  /** לכל כרטיס: הסכום בסימולציה לכל צד */
   cards: Map<string, { income: number; expense: number }>
   income: number
   expense: number
 }
 
 /**
- * התרחיש: לכל כרטיס, בשני הצדדים — סכום שהוקלד גובר על הכול; אחרת בסיס × (1 + אחוז הכרטיס)
+ * הסימולציה: לכל כרטיס, בשני הצדדים — סכום שהוקלד גובר על הכול; אחרת בסיס × (1 + אחוז הכרטיס)
  * × (1 + אחוז הקטגוריה) × (1 + אחוז הכלל). הקטגוריה והסה"כ — סכום הכרטיסים.
  */
 export function applyScenario(groups: ScenarioBase[], inputs: ScenarioInputs): ScenarioResult {
