@@ -70,9 +70,9 @@ export default function BudgetScenarios() {
       className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-center tabular-nums focus:border-emerald-400 focus:outline-none" dir="ltr" />
   )
   const cardInput = (c: ScenarioCard, side: 'inc' | 'exp') => {
-    const ok = side === 'inc' ? c.isIncome : c.isExpense
-    if (!ok) return <span className="text-slate-300">—</span>
-    return <CardChange raw={inputs.cards[c.code]?.[side] ?? ''} onChange={(v) => setCard(c.code, side, v)} />
+    // תיבה בשני הצדדים לכל כרטיס (22.10) — בצד שאין לו בסיס, סכום חדש מוסיף אותו
+    const empty = side === 'inc' ? !c.isIncome : !c.isExpense
+    return <CardChange raw={inputs.cards[c.code]?.[side] ?? ''} onChange={(v) => setCard(c.code, side, v)} emptySide={empty} />
   }
   // אפס מוצג כאפס — לא תא ריק שנראה כמו נתון חסר
   const amt = (n: number, tone: string) => <span className={`tabular-nums ${Math.round(n) ? tone : 'text-slate-300'}`}>{money(n)}</span>
@@ -98,6 +98,7 @@ export default function BudgetScenarios() {
         שינוי באחוזים — לכל קטגוריה, ובשורה הראשונה לכולן יחד. <b>לחיצה על קטגוריה</b> פותחת את הכרטיסים שבה, ולכל כרטיס
         אפשר שינוי משלו — מקלידים מספר, והכפתור שלידו קובע מה הוא: <b>%</b> — שינוי באחוזים, נוסף על הקטגוריה
         (למשל 20 או ‎-5); <b>₪</b> — סכום חדש שמחליף את הבסיס (למשל 150,000; 0 — הכרטיס נסגר).
+        התיבה בשני הצדדים לכל כרטיס: בצד שאין לכרטיס בסיס (0) אחוז לא משנה כלום, וסכום חדש מוסיף אותו.
         כרטיס שאינו מסומן "הכנסה" ולא "הוצאה" בתוספתיים — נספר לפי הנתונים שלו, ומסומן.
         0 = אין בקטגוריה תקציב, צפי או תכנית בצד הזה. קטגוריה קטנה עם שם דומה לאחרת (למשל "חינוך קדם יסודי" ליד "קדם יסודי")
         — כנראה כתיב שונה בקובץ התוספתיים; כדאי לאחד אותן בקטגוריה 1.
@@ -172,12 +173,12 @@ export default function BudgetScenarios() {
                         <td className="px-2 py-1 text-center text-[11px] text-slate-400" title="מאיפה נלקח הבסיס — הכנסות / הוצאות">
                           {[c.isIncome && BASE_SOURCE_LABELS[c.incomeFrom], c.isExpense && BASE_SOURCE_LABELS[c.expenseFrom]].filter(Boolean).join(' / ')}
                         </td>
-                        <td className="px-3 py-1 text-left">{c.isIncome ? amt(c.income, 'text-teal-700') : ''}</td>
+                        <td className="px-3 py-1 text-left">{amt(c.income, 'text-teal-700')}</td>
                         <td className="px-2 py-1 text-center">{cardInput(c, 'inc')}</td>
-                        <td className="px-3 py-1 text-left">{c.isIncome ? amt(cr.income, 'text-teal-800') : ''}</td>
-                        <td className="px-3 py-1 text-left">{c.isExpense ? amt(c.expense, 'text-rose-700') : ''}</td>
+                        <td className="px-3 py-1 text-left">{amt(cr.income, 'text-teal-800')}</td>
+                        <td className="px-3 py-1 text-left">{amt(c.expense, 'text-rose-700')}</td>
                         <td className="px-2 py-1 text-center">{cardInput(c, 'exp')}</td>
-                        <td className="px-3 py-1 text-left">{c.isExpense ? amt(cr.expense, 'text-rose-800') : ''}</td>
+                        <td className="px-3 py-1 text-left">{amt(cr.expense, 'text-rose-800')}</td>
                       </tr>
                     )
                   })}
@@ -204,7 +205,12 @@ export default function BudgetScenarios() {
  * או ₪ (סכום חדש שמחליף את הבסיס). נשמר כמו קודם: "20%" לאחוז, "150000" לסכום —
  * כך applyScenario ו-parseCardInput לא משתנים.
  */
-function CardChange({ raw, onChange }: { raw: string; onChange: (v: string) => void }) {
+function CardChange({ raw, onChange, emptySide = false }: {
+  raw: string
+  onChange: (v: string) => void
+  /** לכרטיס אין בסיס בצד הזה — אחוז לא ישנה כלום; סכום חדש מוסיף אותו */
+  emptySide?: boolean
+}) {
   const isAmount = raw !== '' && !raw.trim().endsWith('%')
   const [mode, setMode] = useState<'pct' | 'amount'>(isAmount ? 'amount' : 'pct')
   const number = raw.replace(/%$/, '')
@@ -216,7 +222,9 @@ function CardChange({ raw, onChange }: { raw: string; onChange: (v: string) => v
     <span className={`inline-flex items-stretch overflow-hidden rounded border ${tone}`} dir="ltr">
       <input value={number} onChange={(e) => store(e.target.value, mode)} inputMode="decimal"
         placeholder={mode === 'pct' ? 'שינוי' : 'סכום חדש'}
-        title={mode === 'pct' ? 'שינוי באחוזים, נוסף על האחוז של הקטגוריה — למשל 20 או -5' : 'סכום חדש שמחליף את הבסיס — למשל 150000; 0 = הכרטיס נסגר'}
+        title={emptySide
+          ? 'לכרטיס אין בסיס בצד הזה (0) — אחוז לא ישנה כלום. כדי להוסיף: ₪ וסכום חדש'
+          : mode === 'pct' ? 'שינוי באחוזים, נוסף על האחוז של הקטגוריה — למשל 20 או -5' : 'סכום חדש שמחליף את הבסיס — למשל 150000; 0 = הכרטיס נסגר'}
         className="w-20 bg-transparent px-1.5 py-0.5 text-center text-xs tabular-nums placeholder:text-slate-300 focus:outline-none" />
       <button type="button" onClick={() => { const m = mode === 'pct' ? 'amount' : 'pct'; setMode(m); store(number, m) }}
         title={mode === 'pct' ? 'עכשיו: שינוי באחוזים. לחיצה — סכום חדש בש"ח' : 'עכשיו: סכום חדש בש"ח. לחיצה — שינוי באחוזים'}

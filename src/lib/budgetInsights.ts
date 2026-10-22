@@ -380,7 +380,7 @@ export interface ScenarioResult {
 }
 
 /**
- * התרחיש: לכל כרטיס — סכום שהוקלד גובר על הכול; אחרת בסיס × (1 + אחוז הכרטיס)
+ * התרחיש: לכל כרטיס, בשני הצדדים — סכום שהוקלד גובר על הכול; אחרת בסיס × (1 + אחוז הכרטיס)
  * × (1 + אחוז הקטגוריה) × (1 + אחוז הכלל). הקטגוריה והסה"כ — סכום הכרטיסים.
  */
 export function applyScenario(groups: ScenarioBase[], inputs: ScenarioInputs): ScenarioResult {
@@ -396,8 +396,10 @@ export function applyScenario(groups: ScenarioBase[], inputs: ScenarioInputs): S
         const own = x && 'pct' in x ? x.pct : 0
         return [base * (1 + own / 100) * (1 + catPct / 100) * (1 + allPct / 100), Boolean(x && 'pct' in x && x.pct)]
       }
-      const [inc, ci] = c.isIncome ? side(c.income, inputs.cards[c.code]?.inc, cat.inc, all.inc) : [0, false]
-      const [exp, ce] = c.isExpense ? side(c.expense, inputs.cards[c.code]?.exp, cat.exp, all.exp) : [0, false]
+      // שני הצדדים לכל כרטיס (22.10): בצד שאין בו בסיס — 0, ואחוז לא משנה אותו; סכום
+      // חדש כן (למשל הוצאה חדשה בכרטיס שאין לו הוצאות)
+      const [inc, ci] = side(c.income, inputs.cards[c.code]?.inc, cat.inc, all.inc)
+      const [exp, ce] = side(c.expense, inputs.cards[c.code]?.exp, cat.exp, all.exp)
       out.cards.set(c.code, { income: inc, expense: exp })
       sum.income += inc
       sum.expense += exp
