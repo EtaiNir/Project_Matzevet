@@ -277,6 +277,8 @@ export interface ScenarioBase {
   label: string
   income: number
   expense: number
+  /** כמה כרטיסים בקטגוריה */
+  cards: number
 }
 
 /**
@@ -289,7 +291,8 @@ export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPla
   let fromForecast = 0
   for (const r of rows) {
     const key = r.meta?.category1?.trim() || '(לא סווג)'
-    const g = by.get(key) ?? { key, label: key, income: 0, expense: 0 }
+    const g = by.get(key) ?? { key, label: key, income: 0, expense: 0, cards: 0 }
+    g.cards++
     const inc = r.nextIncome ?? r.forecastIncome ?? r.suggestedIncome ?? r.budgetIncome ?? 0
     const exp = r.nextExpense ?? r.forecastExpense ?? r.suggestedExpense ?? r.budgetExpense ?? 0
     if (r.nextIncome != null || r.nextExpense != null) fromPlan++

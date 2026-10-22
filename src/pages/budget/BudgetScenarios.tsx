@@ -43,6 +43,8 @@ export default function BudgetScenarios() {
     <input type="number" step={1} value={adjust[key]?.[side] || ''} placeholder="0" onChange={(e) => set(key, side, e.target.value)}
       className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-center tabular-nums focus:border-emerald-400 focus:outline-none" dir="ltr" />
   )
+  // אפס מוצג כאפס — לא תא ריק שנראה כמו נתון חסר
+  const amt = (n: number, tone: string) => <span className={`tabular-nums ${Math.round(n) ? tone : 'text-slate-300'}`}>{money(n)}</span>
   const balance = (inc: number, exp: number) => {
     const g = inc - exp
     return <span className={`tabular-nums font-bold ${g < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{g < 0 ? 'גרעון ' : 'עודף '}{money(Math.abs(g))}</span>
@@ -59,6 +61,8 @@ export default function BudgetScenarios() {
       <p className="text-xs text-slate-500">
         הבסיס לכל כרטיס: התכנית ל-{b.year + 1} כשהוזנה ({fromPlan} כרטיסים), אחרת הצפי לסוף השנה או התקציב ({fromForecast}).
         שינוי באחוזים — לכל קטגוריה, ובשורה הראשונה לכולן יחד (מצטבר לשינוי של הקטגוריה).
+        0 = אין בקטגוריה תקציב, צפי או תכנית בצד הזה. קטגוריה קטנה עם שם דומה לאחרת (למשל "חינוך קדם יסודי" ליד "קדם יסודי")
+        — כנראה כתיב שונה בקובץ התוספתיים; כדאי לאחד אותן בקטגוריה 1.
       </p>
 
       <div className="flex flex-wrap gap-2 text-sm">
@@ -75,6 +79,7 @@ export default function BudgetScenarios() {
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
               <th className="px-3 py-2 text-right font-semibold">קטגוריה 1</th>
+              <th className="px-3 py-2 font-semibold">כרטיסים</th>
               <th className="px-3 py-2 text-left font-semibold">הכנסות בבסיס</th>
               <th className="px-3 py-2 font-semibold">שינוי %</th>
               <th className="px-3 py-2 text-left font-semibold">הכנסות בתרחיש</th>
@@ -86,22 +91,25 @@ export default function BudgetScenarios() {
           <tbody>
             <tr className="border-t border-slate-100 bg-violet-50/40 font-semibold">
               <td className="px-3 py-1.5">כל הקטגוריות</td>
+              <td className="px-3 py-1.5 text-center tabular-nums text-slate-500">{lines.reduce((n, l) => n + l.cards, 0)}</td>
               <td /><td className="px-3 py-1.5 text-center">{pctInput('*', 'inc')}</td><td />
               <td /><td className="px-3 py-1.5 text-center">{pctInput('*', 'exp')}</td><td />
             </tr>
             {lines.map((l) => (
               <tr key={l.key} className="border-t border-slate-100">
                 <td className="px-3 py-1.5 text-slate-800">{l.label}</td>
-                <td className="px-3 py-1.5 text-left tabular-nums text-teal-800">{money(l.income || null)}</td>
+                <td className="px-3 py-1.5 text-center tabular-nums text-slate-500">{l.cards}</td>
+                <td className="px-3 py-1.5 text-left">{amt(l.income, 'text-teal-800')}</td>
                 <td className="px-3 py-1.5 text-center">{pctInput(l.key, 'inc')}</td>
-                <td className="px-3 py-1.5 text-left tabular-nums font-semibold text-teal-800">{money(l.sInc || null)}</td>
-                <td className="px-3 py-1.5 text-left tabular-nums text-rose-800">{money(l.expense || null)}</td>
+                <td className="px-3 py-1.5 text-left font-semibold">{amt(l.sInc, 'text-teal-800')}</td>
+                <td className="px-3 py-1.5 text-left">{amt(l.expense, 'text-rose-800')}</td>
                 <td className="px-3 py-1.5 text-center">{pctInput(l.key, 'exp')}</td>
-                <td className="px-3 py-1.5 text-left tabular-nums font-semibold text-rose-800">{money(l.sExp || null)}</td>
+                <td className="px-3 py-1.5 text-left font-semibold">{amt(l.sExp, 'text-rose-800')}</td>
               </tr>
             ))}
             <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
               <td className="px-3 py-2">סה"כ</td>
+              <td />
               <td className="px-3 py-2 text-left tabular-nums">{money(t.inc)}</td><td />
               <td className="px-3 py-2 text-left tabular-nums">{money(t.sInc)}</td>
               <td className="px-3 py-2 text-left tabular-nums">{money(t.exp)}</td><td />
