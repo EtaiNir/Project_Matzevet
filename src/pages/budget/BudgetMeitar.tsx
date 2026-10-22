@@ -197,7 +197,7 @@ export default function BudgetMeitar() {
               sub={unmatched.length ? `פער ב: ${unmatched.map((t) => t.code).join(', ')}` : 'החשבונית = סכום הפירוט'} />
           </div>
           {saveError && <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{saveError}</p>}
-          <BagrutTable rows={topics} columns={columns} rowKey={(t) => t.code} onRowClick={(t) => setTopic(t.code === topic ? null : t.code)}
+          <BagrutTable rows={topics} columns={columns} rowKey={(t) => t.code} openLabel="פירוט הנושא" onRowClick={(t) => setTopic(t.code === topic ? null : t.code)}
             exportName={`מיתר_${b.authorityName || b.code}_${calcIso}`} sheetName={`מיתר ${calcIso}`} countLabel="נושאים"
             initialSort={{ key: 'pay', dir: 'desc' }} storageKey="budget-meitar" empty="אין נושאים בחשבונית" />
           {topic && (

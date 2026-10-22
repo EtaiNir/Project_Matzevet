@@ -151,6 +151,7 @@ export default function BudgetActions() {
           columns={columns}
           rowKey={(r) => String(r.tx.id)}
           onRowClick={openCard}
+          openLabel="כרטיס הסעיף"
           exportName={`פעולות_${card ?? b.authorityName ?? b.code}_${all ? 'כל_השנים' : b.year}`}
           sheetName="פעולות"
           empty="אין פעולות בתקופה"

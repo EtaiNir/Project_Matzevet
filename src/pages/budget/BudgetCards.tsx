@@ -226,6 +226,7 @@ export default function BudgetCards() {
         columns={columns}
         rowKey={(r) => r.code}
         onRowClick={openCard}
+        openLabel="כרטיס הסעיף"
         exportName={`מעקב_ותכנון_${b.authorityName || b.code}_${b.year}`}
         sheetName={`מעקב ותכנון ${b.year}`}
         empty="אין כרטיסים שעונים על הסינון"
