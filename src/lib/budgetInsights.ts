@@ -287,6 +287,10 @@ export interface ScenarioCard {
   expense: number
   incomeFrom: BaseSource
   expenseFrom: BaseSource
+  /** לא מסומן "הכנסה" ולא "הוצאה" בתוספתיים — הצד נקבע לפי הנתונים */
+  unflagged: boolean
+  /** קיים רק בתוספתיים, בלי שורה בדוח הכרטיסים (לעתים — מספר סעיף שגוי) */
+  onlyExtras: boolean
 }
 
 export interface ScenarioBase {
@@ -301,10 +305,11 @@ export interface ScenarioBase {
 
 /** הבסיס לצד אחד של כרטיס: תכנית ← צפי ← הצעת צפי ← תקציב */
 function sideBase(next: number | null, forecast: number | null, suggested: number | null, by: 'season' | 'pace', budget: number | null): [number, BaseSource] {
-  if (next != null) return [next, 'plan']
-  if (forecast != null) return [forecast, 'forecast']
-  if (suggested != null) return [suggested, by]
-  if (budget != null) return [budget, 'budget']
+  // || 0 — בלי "‎-0" (תקציב הוצאות 0 אחרי היפוך הסימן)
+  if (next != null) return [next || 0, 'plan']
+  if (forecast != null) return [forecast || 0, 'forecast']
+  if (suggested != null) return [suggested || 0, by]
+  if (budget != null) return [budget || 0, 'budget']
   return [0, 'none']
 }
 
@@ -320,13 +325,20 @@ export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPla
     const key = r.meta?.category1?.trim() || '(לא סווג)'
     const g = by.get(key) ?? { key, label: key, income: 0, expense: 0, cards: 0, items: [] }
     g.cards++
-    const [inc, incomeFrom] = r.isIncome ? sideBase(r.nextIncome, r.forecastIncome, r.suggestedIncome, r.suggestedBy, r.budgetIncome) : [0, 'none' as const]
-    const [exp, expenseFrom] = r.isExpense ? sideBase(r.nextExpense, r.forecastExpense, r.suggestedExpense, r.suggestedBy, r.budgetExpense) : [0, 'none' as const]
+    // כרטיס שאינו מסומן באף צד (שני הדגלים כבויים בתוספתיים) — הצד לפי הנתונים, כדי
+    // שלא ייעלם מהתרחיש: במנשה, שני כרטיסי "חינוך קדם יסודי" עם תקציב הוצאות ותכנית 90,000
+    const unflagged = !r.isIncome && !r.isExpense
+    const has = (...v: (number | null)[]) => v.some((x) => x != null && x !== 0)
+    const incSide = r.isIncome || (unflagged && has(r.nextIncome, r.forecastIncome, r.budgetIncome, r.cumIncome))
+    const expSide = r.isExpense || (unflagged && has(r.nextExpense, r.forecastExpense, r.budgetExpense, r.cumExpense))
+    const [inc, incomeFrom] = incSide ? sideBase(r.nextIncome, r.forecastIncome, r.suggestedIncome, r.suggestedBy, r.budgetIncome) : [0, 'none' as const]
+    const [exp, expenseFrom] = expSide ? sideBase(r.nextExpense, r.forecastExpense, r.suggestedExpense, r.suggestedBy, r.budgetExpense) : [0, 'none' as const]
     if (r.nextIncome != null || r.nextExpense != null) fromPlan++
     else fromForecast++
     g.income += inc
     g.expense += exp
-    g.items.push({ code: r.code, name: r.name, isIncome: r.isIncome, isExpense: r.isExpense, income: inc, expense: exp, incomeFrom, expenseFrom })
+    g.items.push({ code: r.code, name: r.name, isIncome: incSide, isExpense: expSide, income: inc, expense: exp, incomeFrom, expenseFrom,
+      unflagged, onlyExtras: r.card == null })
     by.set(key, g)
   }
   for (const g of by.values()) g.items.sort((a, b) => b.income + b.expense - (a.income + a.expense))

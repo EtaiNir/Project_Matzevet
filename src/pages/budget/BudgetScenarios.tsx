@@ -104,6 +104,7 @@ export default function BudgetScenarios() {
         הבסיס לכל כרטיס: התכנית ל-{b.year + 1} כשהוזנה ({fromPlan} כרטיסים), אחרת הצפי לסוף השנה או התקציב ({fromForecast}).
         שינוי באחוזים — לכל קטגוריה, ובשורה הראשונה לכולן יחד. <b>לחיצה על קטגוריה</b> פותחת את הכרטיסים שבה: לכל כרטיס
         אחוז משלו ("+20%", נוסף על הקטגוריה) או סכום שמחליף את הבסיס ("150,000"; 0 — הכרטיס נסגר).
+        כרטיס שאינו מסומן "הכנסה" ולא "הוצאה" בתוספתיים — נספר לפי הנתונים שלו, ומסומן.
         0 = אין בקטגוריה תקציב, צפי או תכנית בצד הזה. קטגוריה קטנה עם שם דומה לאחרת (למשל "חינוך קדם יסודי" ליד "קדם יסודי")
         — כנראה כתיב שונה בקובץ התוספתיים; כדאי לאחד אותן בקטגוריה 1.
       </p>
@@ -164,6 +165,15 @@ export default function BudgetScenarios() {
                       <tr key={c.code} className={`border-t border-slate-50 text-xs ${touched ? 'bg-violet-50/50' : 'bg-slate-50/40'}`}>
                         <td className="py-1 pl-3 pr-8">
                           <span className="font-mono text-slate-400" dir="ltr">{c.code}</span> <span className="text-slate-700">{c.name}</span>
+                          {c.unflagged && (c.isIncome || c.isExpense) && (
+                            <span className="mr-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700" title='בתוספתיים אינו מסומן "הכנסה" ולא "הוצאה" — הצד נקבע לפי התקציב / התכנית / הביצוע'>לא מסומן — לפי הנתונים</span>
+                          )}
+                          {c.unflagged && !c.isIncome && !c.isExpense && (
+                            <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500" title='לא מסומן "הכנסה" ולא "הוצאה", ואין בו נתונים'>לא מסומן, בלי נתונים</span>
+                          )}
+                          {c.onlyExtras && (
+                            <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500" title="אין לסעיף שורה בדוח הכרטיסים של הנהלת החשבונות — ייתכן שמספר הסעיף בתוספתיים שגוי">רק בתוספתיים</span>
+                          )}
                         </td>
                         <td className="px-2 py-1 text-center text-[11px] text-slate-400" title="מאיפה נלקח הבסיס — הכנסות / הוצאות">
                           {[c.isIncome && BASE_SOURCE_LABELS[c.incomeFrom], c.isExpense && BASE_SOURCE_LABELS[c.expenseFrom]].filter(Boolean).join(' / ')}
