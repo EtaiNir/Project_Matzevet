@@ -272,6 +272,23 @@ export function cardChanges(
 
 // ─────────────────────────────── תרחישים ───────────────────────────────
 
+export type BaseSource = 'plan' | 'forecast' | 'season' | 'pace' | 'budget' | 'none'
+export const BASE_SOURCE_LABELS: Record<BaseSource, string> = {
+  plan: 'תכנית', forecast: 'צפי', season: 'צפי לפי השנה שעברה', pace: 'צפי לפי הקצב', budget: 'תקציב', none: '—',
+}
+
+export interface ScenarioCard {
+  code: string
+  name: string
+  isIncome: boolean
+  isExpense: boolean
+  /** הבסיס לכל צד, ומאיפה הוא נלקח */
+  income: number
+  expense: number
+  incomeFrom: BaseSource
+  expenseFrom: BaseSource
+}
+
 export interface ScenarioBase {
   key: string
   label: string
@@ -279,11 +296,21 @@ export interface ScenarioBase {
   expense: number
   /** כמה כרטיסים בקטגוריה */
   cards: number
+  items: ScenarioCard[]
+}
+
+/** הבסיס לצד אחד של כרטיס: תכנית ← צפי ← הצעת צפי ← תקציב */
+function sideBase(next: number | null, forecast: number | null, suggested: number | null, by: 'season' | 'pace', budget: number | null): [number, BaseSource] {
+  if (next != null) return [next, 'plan']
+  if (forecast != null) return [forecast, 'forecast']
+  if (suggested != null) return [suggested, by]
+  if (budget != null) return [budget, 'budget']
+  return [0, 'none']
 }
 
 /**
- * הבסיס לתרחיש לכל קטגוריה 1: התכנית לשנה הבאה כשהוזנה, אחרת הצפי (המוקלד,
- * או ההצעה), אחרת התקציב של השנה.
+ * הבסיס לתרחיש לכל קטגוריה 1 ולכל כרטיס בה: התכנית לשנה הבאה כשהוזנה, אחרת
+ * הצפי (המוקלד, או ההצעה), אחרת התקציב של השנה. צד שהכרטיס אינו מסומן בו — 0.
  */
 export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPlan: number; fromForecast: number } {
   const by = new Map<string, ScenarioBase>()
@@ -291,15 +318,82 @@ export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPla
   let fromForecast = 0
   for (const r of rows) {
     const key = r.meta?.category1?.trim() || '(לא סווג)'
-    const g = by.get(key) ?? { key, label: key, income: 0, expense: 0, cards: 0 }
+    const g = by.get(key) ?? { key, label: key, income: 0, expense: 0, cards: 0, items: [] }
     g.cards++
-    const inc = r.nextIncome ?? r.forecastIncome ?? r.suggestedIncome ?? r.budgetIncome ?? 0
-    const exp = r.nextExpense ?? r.forecastExpense ?? r.suggestedExpense ?? r.budgetExpense ?? 0
+    const [inc, incomeFrom] = r.isIncome ? sideBase(r.nextIncome, r.forecastIncome, r.suggestedIncome, r.suggestedBy, r.budgetIncome) : [0, 'none' as const]
+    const [exp, expenseFrom] = r.isExpense ? sideBase(r.nextExpense, r.forecastExpense, r.suggestedExpense, r.suggestedBy, r.budgetExpense) : [0, 'none' as const]
     if (r.nextIncome != null || r.nextExpense != null) fromPlan++
     else fromForecast++
-    g.income += r.isIncome ? inc : 0
-    g.expense += r.isExpense ? exp : 0
+    g.income += inc
+    g.expense += exp
+    g.items.push({ code: r.code, name: r.name, isIncome: r.isIncome, isExpense: r.isExpense, income: inc, expense: exp, incomeFrom, expenseFrom })
     by.set(key, g)
   }
+  for (const g of by.values()) g.items.sort((a, b) => b.income + b.expense - (a.income + a.expense))
   return { groups: [...by.values()].sort((a, b) => b.expense + b.income - (a.expense + a.income)), fromPlan, fromForecast }
+}
+
+// ── השינויים בתרחיש
+
+/**
+ * מה שהוקלד לכרטיס בצד אחד: "+20%" / "-5%" / "20%" — אחוז, נוסף על הקטגוריה;
+ * "150000" / "150,000" — סכום שמחליף את הבסיס (ואת האחוזים). ריק — אין שינוי.
+ */
+export type CardInput = { pct: number } | { amount: number } | { invalid: true } | null
+
+export function parseCardInput(text: string | undefined): CardInput {
+  const t = (text ?? '').replace(/[,₪\s]/g, '')
+  if (!t) return null
+  const pct = t.match(/^([+-]?\d+(?:\.\d+)?)%$/)
+  if (pct) return { pct: Number(pct[1]) }
+  const n = Number(t)
+  if (Number.isFinite(n) && n >= 0) return { amount: n }
+  return { invalid: true }
+}
+
+export interface ScenarioInputs {
+  /** אחוז לקטגוריה (ו-'*' לכולן), לכל צד */
+  categories: Record<string, { inc: number; exp: number }>
+  /** מה שהוקלד לכל כרטיס — טקסט, לכל צד */
+  cards: Record<string, { inc?: string; exp?: string }>
+}
+
+export interface ScenarioResult {
+  /** לכל קטגוריה: הסכומים בתרחיש, וכמה כרטיסים שונו בה */
+  groups: Map<string, { income: number; expense: number; changedCards: number }>
+  /** לכל כרטיס: הסכום בתרחיש לכל צד */
+  cards: Map<string, { income: number; expense: number }>
+  income: number
+  expense: number
+}
+
+/**
+ * התרחיש: לכל כרטיס — סכום שהוקלד גובר על הכול; אחרת בסיס × (1 + אחוז הכרטיס)
+ * × (1 + אחוז הקטגוריה) × (1 + אחוז הכלל). הקטגוריה והסה"כ — סכום הכרטיסים.
+ */
+export function applyScenario(groups: ScenarioBase[], inputs: ScenarioInputs): ScenarioResult {
+  const all = inputs.categories['*'] ?? { inc: 0, exp: 0 }
+  const out: ScenarioResult = { groups: new Map(), cards: new Map(), income: 0, expense: 0 }
+  for (const g of groups) {
+    const cat = inputs.categories[g.key] ?? { inc: 0, exp: 0 }
+    const sum = { income: 0, expense: 0, changedCards: 0 }
+    for (const c of g.items) {
+      const side = (base: number, raw: string | undefined, catPct: number, allPct: number): [number, boolean] => {
+        const x = parseCardInput(raw)
+        if (x && 'amount' in x) return [x.amount, true]
+        const own = x && 'pct' in x ? x.pct : 0
+        return [base * (1 + own / 100) * (1 + catPct / 100) * (1 + allPct / 100), Boolean(x && 'pct' in x && x.pct)]
+      }
+      const [inc, ci] = c.isIncome ? side(c.income, inputs.cards[c.code]?.inc, cat.inc, all.inc) : [0, false]
+      const [exp, ce] = c.isExpense ? side(c.expense, inputs.cards[c.code]?.exp, cat.exp, all.exp) : [0, false]
+      out.cards.set(c.code, { income: inc, expense: exp })
+      sum.income += inc
+      sum.expense += exp
+      if (ci || ce) sum.changedCards++
+    }
+    out.groups.set(g.key, sum)
+    out.income += sum.income
+    out.expense += sum.expense
+  }
+  return out
 }

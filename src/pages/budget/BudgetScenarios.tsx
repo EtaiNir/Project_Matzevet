@@ -1,48 +1,86 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { money } from '@/lib/budgetCalc'
-import { scenarioBase } from '@/lib/budgetInsights'
+import {
+  applyScenario,
+  BASE_SOURCE_LABELS,
+  parseCardInput,
+  scenarioBase,
+  type ScenarioCard,
+  type ScenarioInputs,
+} from '@/lib/budgetInsights'
 import { useBudget } from './context'
 
-type Adjust = Record<string, { inc: number; exp: number }>
+const EMPTY: ScenarioInputs = { categories: {}, cards: {} }
 
 /**
- * תרחישים לשנה הבאה (024, רעיון 6): "מה אם" — שינוי באחוזים להכנסות ולהוצאות
- * של כל קטגוריה 1, וגם לכולן יחד, ומיד רואים את הגרעון או העודף. **לא נשמר
- * בתכנית** — רק בדפדפן של מי שבודק (כדי לחזור לתרחיש), והתכנית האמיתית לא נוגעת.
- *
- * הבסיס לכל כרטיס: התכנית לשנה הבאה כשהוזנה, אחרת הצפי, אחרת התקציב.
+ * תרחישים לשנה הבאה (024, רעיון 6): "מה אם" — ומיד רואים את הגרעון או העודף.
+ *   · לכל קטגוריה 1, ולכולן יחד — שינוי באחוזים להכנסות ולהוצאות.
+ *   · לחיצה על קטגוריה פותחת את הכרטיסים שבה — הבסיס של כל אחד ומאיפה הוא נלקח,
+ *     ולכל כרטיס אפשר להקליד שינוי משלו: אחוז ("+20%", נוסף על הקטגוריה), או
+ *     סכום שמחליף את הבסיס ("150,000"; 0 — הכרטיס נסגר).
+ * **לא נשמר בתכנית** — רק בדפדפן של מי שבודק; התכנית האמיתית לא נוגעת.
+ * החישוב — applyScenario ב-lib/budgetInsights.
  */
 export default function BudgetScenarios() {
   const b = useBudget()
-  const storeKey = `budget-scenario:${b.code}:${b.year}`
-  const [adjust, setAdjust] = useState<Adjust>(() => {
+  const storeKey = `budget-scenario-v2:${b.code}:${b.year}`
+  const [inputs, setInputs] = useState<ScenarioInputs>(() => {
     try {
-      return JSON.parse(localStorage.getItem(storeKey) ?? '{}') as Adjust
+      const saved = JSON.parse(localStorage.getItem(storeKey) ?? 'null') as ScenarioInputs | null
+      return saved?.categories && saved?.cards ? saved : EMPTY
     } catch {
-      return {}
+      return EMPTY
     }
   })
   useEffect(() => {
     try {
-      localStorage.setItem(storeKey, JSON.stringify(adjust))
+      localStorage.setItem(storeKey, JSON.stringify(inputs))
     } catch {
       /* מצב פרטי — התרחיש פשוט לא יישמר */
     }
-  }, [adjust, storeKey])
+  }, [inputs, storeKey])
+  const [open, setOpen] = useState<Set<string>>(new Set())
 
   const { groups, fromPlan, fromForecast } = useMemo(() => scenarioBase(b.rows), [b.rows])
-  const all = adjust['*'] ?? { inc: 0, exp: 0 }
-  const factor = (key: string, side: 'inc' | 'exp') => (1 + (adjust[key]?.[side] ?? 0) / 100) * (1 + all[side] / 100)
-  const lines = groups.map((g) => ({ ...g, sInc: g.income * factor(g.key, 'inc'), sExp: g.expense * factor(g.key, 'exp') }))
-  const t = lines.reduce((s, l) => ({ inc: s.inc + l.income, exp: s.exp + l.expense, sInc: s.sInc + l.sInc, sExp: s.sExp + l.sExp }), { inc: 0, exp: 0, sInc: 0, sExp: 0 })
-  const set = (key: string, side: 'inc' | 'exp', v: string) =>
-    setAdjust((a) => ({ ...a, [key]: { inc: a[key]?.inc ?? 0, exp: a[key]?.exp ?? 0, [side]: Number(v) || 0 } }))
-  const changed = Object.values(adjust).some((v) => v.inc || v.exp)
+  const result = useMemo(() => applyScenario(groups, inputs), [groups, inputs])
+  const base = groups.reduce((s, g) => ({ inc: s.inc + g.income, exp: s.exp + g.expense }), { inc: 0, exp: 0 })
+  const changedCards = [...result.groups.values()].reduce((n, g) => n + g.changedCards, 0)
+  const changed = changedCards > 0 || Object.values(inputs.categories).some((v) => v.inc || v.exp)
+
+  const setPct = (key: string, side: 'inc' | 'exp', v: string) =>
+    setInputs((s) => ({ ...s, categories: { ...s.categories, [key]: { inc: s.categories[key]?.inc ?? 0, exp: s.categories[key]?.exp ?? 0, [side]: Number(v) || 0 } } }))
+  const setCard = (code: string, side: 'inc' | 'exp', v: string) =>
+    setInputs((s) => {
+      const cur = { ...s.cards[code], [side]: v }
+      const cards = { ...s.cards }
+      if (!cur.inc && !cur.exp) delete cards[code]
+      else cards[code] = cur
+      return { ...s, cards }
+    })
+  const toggle = (key: string) => setOpen((o) => {
+    const n = new Set(o)
+    if (n.has(key)) n.delete(key)
+    else n.add(key)
+    return n
+  })
 
   const pctInput = (key: string, side: 'inc' | 'exp') => (
-    <input type="number" step={1} value={adjust[key]?.[side] || ''} placeholder="0" onChange={(e) => set(key, side, e.target.value)}
+    <input type="number" step={1} value={inputs.categories[key]?.[side] || ''} placeholder="0" onChange={(e) => setPct(key, side, e.target.value)}
+      onClick={(e) => e.stopPropagation()}
       className="w-16 rounded border border-slate-300 px-1.5 py-0.5 text-center tabular-nums focus:border-emerald-400 focus:outline-none" dir="ltr" />
   )
+  const cardInput = (c: ScenarioCard, side: 'inc' | 'exp') => {
+    const ok = side === 'inc' ? c.isIncome : c.isExpense
+    if (!ok) return <span className="text-slate-300">—</span>
+    const raw = inputs.cards[c.code]?.[side] ?? ''
+    const parsed = parseCardInput(raw)
+    const bad = parsed != null && 'invalid' in parsed
+    return (
+      <input value={raw} placeholder="% או סכום" onChange={(e) => setCard(c.code, side, e.target.value)} dir="ltr"
+        title='אחוז — "+20%" או "-5%" (נוסף על הקטגוריה); סכום — "150,000" (מחליף את הבסיס); 0 — הכרטיס נסגר'
+        className={`w-24 rounded border px-1.5 py-0.5 text-center text-xs tabular-nums focus:outline-none ${bad ? 'border-red-400 bg-red-50' : raw ? 'border-violet-400 bg-violet-50' : 'border-slate-200'} focus:border-emerald-400`} />
+    )
+  }
   // אפס מוצג כאפס — לא תא ריק שנראה כמו נתון חסר
   const amt = (n: number, tone: string) => <span className={`tabular-nums ${Math.round(n) ? tone : 'text-slate-300'}`}>{money(n)}</span>
   const balance = (inc: number, exp: number) => {
@@ -51,26 +89,31 @@ export default function BudgetScenarios() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 p-4">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-4">
       <div className="flex flex-wrap items-baseline gap-2">
         <h1 className="text-lg font-bold text-slate-800">🧪 תרחישים לשנה הבאה — {b.year + 1}</h1>
         <span className="text-xs text-slate-500">לא נשמר בתכנית · רק לבדיקה</span>
         <span className="mr-auto" />
-        {changed && <button onClick={() => setAdjust({})} className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50">איפוס התרחיש</button>}
+        {changed && (
+          <button onClick={() => setInputs(EMPTY)} className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50">
+            איפוס התרחיש{changedCards ? ` (${changedCards} כרטיסים שונו)` : ''}
+          </button>
+        )}
       </div>
       <p className="text-xs text-slate-500">
         הבסיס לכל כרטיס: התכנית ל-{b.year + 1} כשהוזנה ({fromPlan} כרטיסים), אחרת הצפי לסוף השנה או התקציב ({fromForecast}).
-        שינוי באחוזים — לכל קטגוריה, ובשורה הראשונה לכולן יחד (מצטבר לשינוי של הקטגוריה).
+        שינוי באחוזים — לכל קטגוריה, ובשורה הראשונה לכולן יחד. <b>לחיצה על קטגוריה</b> פותחת את הכרטיסים שבה: לכל כרטיס
+        אחוז משלו ("+20%", נוסף על הקטגוריה) או סכום שמחליף את הבסיס ("150,000"; 0 — הכרטיס נסגר).
         0 = אין בקטגוריה תקציב, צפי או תכנית בצד הזה. קטגוריה קטנה עם שם דומה לאחרת (למשל "חינוך קדם יסודי" ליד "קדם יסודי")
         — כנראה כתיב שונה בקובץ התוספתיים; כדאי לאחד אותן בקטגוריה 1.
       </p>
 
       <div className="flex flex-wrap gap-2 text-sm">
         <div className="rounded-xl bg-white px-4 py-2 shadow-sm ring-1 ring-slate-200">
-          <div>{balance(t.inc, t.exp)}</div><div className="text-xs text-slate-500">בבסיס</div>
+          <div>{balance(base.inc, base.exp)}</div><div className="text-xs text-slate-500">בבסיס</div>
         </div>
         <div className={`rounded-xl px-4 py-2 shadow-sm ring-1 ${changed ? 'bg-violet-50 ring-violet-200' : 'bg-white ring-slate-200'}`}>
-          <div>{balance(t.sInc, t.sExp)}</div><div className="text-xs text-slate-500">בתרחיש</div>
+          <div>{balance(result.income, result.expense)}</div><div className="text-xs text-slate-500">בתרחיש</div>
         </div>
       </div>
 
@@ -78,42 +121,72 @@ export default function BudgetScenarios() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
-              <th className="px-3 py-2 text-right font-semibold">קטגוריה 1</th>
+              <th className="px-3 py-2 text-right font-semibold">קטגוריה 1 / כרטיס</th>
               <th className="px-3 py-2 font-semibold">כרטיסים</th>
               <th className="px-3 py-2 text-left font-semibold">הכנסות בבסיס</th>
-              <th className="px-3 py-2 font-semibold">שינוי %</th>
+              <th className="px-3 py-2 font-semibold">שינוי</th>
               <th className="px-3 py-2 text-left font-semibold">הכנסות בתרחיש</th>
               <th className="px-3 py-2 text-left font-semibold">הוצאות בבסיס</th>
-              <th className="px-3 py-2 font-semibold">שינוי %</th>
+              <th className="px-3 py-2 font-semibold">שינוי</th>
               <th className="px-3 py-2 text-left font-semibold">הוצאות בתרחיש</th>
             </tr>
           </thead>
           <tbody>
             <tr className="border-t border-slate-100 bg-violet-50/40 font-semibold">
               <td className="px-3 py-1.5">כל הקטגוריות</td>
-              <td className="px-3 py-1.5 text-center tabular-nums text-slate-500">{lines.reduce((n, l) => n + l.cards, 0)}</td>
-              <td /><td className="px-3 py-1.5 text-center">{pctInput('*', 'inc')}</td><td />
-              <td /><td className="px-3 py-1.5 text-center">{pctInput('*', 'exp')}</td><td />
+              <td className="px-3 py-1.5 text-center tabular-nums text-slate-500">{groups.reduce((n, g) => n + g.cards, 0)}</td>
+              <td /><td className="px-3 py-1.5 text-center">{pctInput('*', 'inc')}<span className="mr-0.5 text-xs text-slate-400">%</span></td><td />
+              <td /><td className="px-3 py-1.5 text-center">{pctInput('*', 'exp')}<span className="mr-0.5 text-xs text-slate-400">%</span></td><td />
             </tr>
-            {lines.map((l) => (
-              <tr key={l.key} className="border-t border-slate-100">
-                <td className="px-3 py-1.5 text-slate-800">{l.label}</td>
-                <td className="px-3 py-1.5 text-center tabular-nums text-slate-500">{l.cards}</td>
-                <td className="px-3 py-1.5 text-left">{amt(l.income, 'text-teal-800')}</td>
-                <td className="px-3 py-1.5 text-center">{pctInput(l.key, 'inc')}</td>
-                <td className="px-3 py-1.5 text-left font-semibold">{amt(l.sInc, 'text-teal-800')}</td>
-                <td className="px-3 py-1.5 text-left">{amt(l.expense, 'text-rose-800')}</td>
-                <td className="px-3 py-1.5 text-center">{pctInput(l.key, 'exp')}</td>
-                <td className="px-3 py-1.5 text-left font-semibold">{amt(l.sExp, 'text-rose-800')}</td>
-              </tr>
-            ))}
+            {groups.map((g) => {
+              const r = result.groups.get(g.key)!
+              const isOpen = open.has(g.key)
+              return (
+                <Fragment key={g.key}>
+                  <tr onClick={() => toggle(g.key)} className={`cursor-pointer border-t border-slate-100 hover:bg-emerald-50/40 ${isOpen ? 'bg-emerald-50/30' : ''}`}>
+                    <td className="px-3 py-1.5 text-slate-800">
+                      <span className="ml-1 inline-block w-3 text-slate-400">{isOpen ? '▾' : '▸'}</span>
+                      {g.label}
+                      {r.changedCards > 0 && <span className="mr-2 rounded-full bg-violet-100 px-1.5 text-[11px] font-bold text-violet-800">{r.changedCards} שונו</span>}
+                    </td>
+                    <td className="px-3 py-1.5 text-center tabular-nums text-slate-500">{g.cards}</td>
+                    <td className="px-3 py-1.5 text-left">{amt(g.income, 'text-teal-800')}</td>
+                    <td className="px-3 py-1.5 text-center">{pctInput(g.key, 'inc')}<span className="mr-0.5 text-xs text-slate-400">%</span></td>
+                    <td className="px-3 py-1.5 text-left font-semibold">{amt(r.income, 'text-teal-800')}</td>
+                    <td className="px-3 py-1.5 text-left">{amt(g.expense, 'text-rose-800')}</td>
+                    <td className="px-3 py-1.5 text-center">{pctInput(g.key, 'exp')}<span className="mr-0.5 text-xs text-slate-400">%</span></td>
+                    <td className="px-3 py-1.5 text-left font-semibold">{amt(r.expense, 'text-rose-800')}</td>
+                  </tr>
+                  {isOpen && g.items.map((c) => {
+                    const cr = result.cards.get(c.code)!
+                    const touched = Boolean(inputs.cards[c.code])
+                    return (
+                      <tr key={c.code} className={`border-t border-slate-50 text-xs ${touched ? 'bg-violet-50/50' : 'bg-slate-50/40'}`}>
+                        <td className="py-1 pl-3 pr-8">
+                          <span className="font-mono text-slate-400" dir="ltr">{c.code}</span> <span className="text-slate-700">{c.name}</span>
+                        </td>
+                        <td className="px-2 py-1 text-center text-[11px] text-slate-400" title="מאיפה נלקח הבסיס — הכנסות / הוצאות">
+                          {[c.isIncome && BASE_SOURCE_LABELS[c.incomeFrom], c.isExpense && BASE_SOURCE_LABELS[c.expenseFrom]].filter(Boolean).join(' / ')}
+                        </td>
+                        <td className="px-3 py-1 text-left">{c.isIncome ? amt(c.income, 'text-teal-700') : ''}</td>
+                        <td className="px-2 py-1 text-center">{cardInput(c, 'inc')}</td>
+                        <td className="px-3 py-1 text-left">{c.isIncome ? amt(cr.income, 'text-teal-800') : ''}</td>
+                        <td className="px-3 py-1 text-left">{c.isExpense ? amt(c.expense, 'text-rose-700') : ''}</td>
+                        <td className="px-2 py-1 text-center">{cardInput(c, 'exp')}</td>
+                        <td className="px-3 py-1 text-left">{c.isExpense ? amt(cr.expense, 'text-rose-800') : ''}</td>
+                      </tr>
+                    )
+                  })}
+                </Fragment>
+              )
+            })}
             <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
               <td className="px-3 py-2">סה"כ</td>
               <td />
-              <td className="px-3 py-2 text-left tabular-nums">{money(t.inc)}</td><td />
-              <td className="px-3 py-2 text-left tabular-nums">{money(t.sInc)}</td>
-              <td className="px-3 py-2 text-left tabular-nums">{money(t.exp)}</td><td />
-              <td className="px-3 py-2 text-left tabular-nums">{money(t.sExp)}</td>
+              <td className="px-3 py-2 text-left tabular-nums">{money(base.inc)}</td><td />
+              <td className="px-3 py-2 text-left tabular-nums">{money(result.income)}</td>
+              <td className="px-3 py-2 text-left tabular-nums">{money(base.exp)}</td><td />
+              <td className="px-3 py-2 text-left tabular-nums">{money(result.expense)}</td>
             </tr>
           </tbody>
         </table>
