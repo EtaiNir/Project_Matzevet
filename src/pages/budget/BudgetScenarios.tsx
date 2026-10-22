@@ -3,6 +3,8 @@ import { money } from '@/lib/budgetCalc'
 import {
   applyScenario,
   BASE_SOURCE_LABELS,
+  CARD_SIDE_LABELS,
+  cardSide,
   parseCardInput,
   scenarioBase,
   type ScenarioCard,
@@ -158,11 +160,25 @@ export default function BudgetScenarios() {
                     <td className="px-3 py-1.5 text-center">{pctInput(g.key, 'exp')}<span className="mr-0.5 text-xs text-slate-400">%</span></td>
                     <td className="px-3 py-1.5 text-left font-semibold">{amt(r.expense, 'text-rose-800')}</td>
                   </tr>
-                  {isOpen && g.items.map((c) => {
+                  {isOpen && g.items.map((c, i) => {
                     const cr = result.cards.get(c.code)!
                     const touched = Boolean(inputs.cards[c.code])
+                    const side = cardSide(c)
+                    // כותרת קטנה בתחילת כל צד — הכנסה / שני הצדדים / הוצאה
+                    const head = i === 0 || cardSide(g.items[i - 1]) !== side
+                    const count = g.items.filter((x) => cardSide(x) === side).length
                     return (
-                      <tr key={c.code} className={`border-t border-slate-50 text-xs ${touched ? 'bg-violet-50/50' : 'bg-slate-50/40'}`}>
+                      <Fragment key={c.code}>
+                      {head && (
+                        <tr className="bg-slate-100/70 text-[11px] font-bold text-slate-500">
+                          <td colSpan={8} className="py-0.5 pr-8">
+                            {CARD_SIDE_LABELS[side]} ({count})
+                            {side === 'income' && <span className="mr-2 font-normal">— השינוי בעמודות ההכנסות</span>}
+                            {side === 'expense' && <span className="mr-2 font-normal">— השינוי בעמודות ההוצאות</span>}
+                          </td>
+                        </tr>
+                      )}
+                      <tr className={`border-t border-slate-50 text-xs ${touched ? 'bg-violet-50/50' : 'bg-slate-50/40'}`}>
                         <td className="py-1 pl-3 pr-8">
                           <span className="font-mono text-slate-400" dir="ltr">{c.code}</span> <span className="text-slate-700">{c.name}</span>
                           {c.unflagged && (c.isIncome || c.isExpense) && (
@@ -175,8 +191,8 @@ export default function BudgetScenarios() {
                             <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500" title="אין לסעיף שורה בדוח הכרטיסים של הנהלת החשבונות — ייתכן שמספר הסעיף בתוספתיים שגוי">רק בתוספתיים</span>
                           )}
                         </td>
-                        <td className="px-2 py-1 text-center text-[11px] text-slate-400" title="מאיפה נלקח הבסיס — הכנסות / הוצאות">
-                          {[c.isIncome && BASE_SOURCE_LABELS[c.incomeFrom], c.isExpense && BASE_SOURCE_LABELS[c.expenseFrom]].filter(Boolean).join(' / ')}
+                        <td className="px-2 py-1 text-center text-[11px] text-slate-400" title="הצד, ומאיפה נלקח הבסיס">
+                          {[c.isIncome && `הכנסה · ${BASE_SOURCE_LABELS[c.incomeFrom]}`, c.isExpense && `הוצאה · ${BASE_SOURCE_LABELS[c.expenseFrom]}`].filter(Boolean).join(' / ')}
                         </td>
                         <td className="px-3 py-1 text-left">{c.isIncome ? amt(c.income, 'text-teal-700') : ''}</td>
                         <td className="px-2 py-1 text-center">{cardInput(c, 'inc')}</td>
@@ -185,6 +201,7 @@ export default function BudgetScenarios() {
                         <td className="px-2 py-1 text-center">{cardInput(c, 'exp')}</td>
                         <td className="px-3 py-1 text-left">{c.isExpense ? amt(cr.expense, 'text-rose-800') : ''}</td>
                       </tr>
+                      </Fragment>
                     )
                   })}
                 </Fragment>
