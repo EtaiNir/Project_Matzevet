@@ -608,6 +608,167 @@ def process_budget(conn, job) -> None:
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+# ═══════════════════════════ המיתר — הורדה אוטומטית (024) ═══════════════════════════
+#
+# במקום הצינור של איתי (Task Scheduler ב-3 לחודש ← דפדפן ← אקסס): בכל 20 דקות
+# הסוכן בודק אילו מקורות (meitar_entities) עוד אין להם את החודש הקודם, מוריד
+# מאתר המשרד (meitar_download.py), ומעלה כקליטת תקציב רגילה — שנטענת מיד כי
+# היא ZIP מיתר בלבד. המצב בטבלה meitar_downloads, גלוי באתר.
+#
+# ההבדלים מאיתי, בכוונה: היעד נגזר מהתאריך ומהמסד (אצלו — מונה ב-codes.json
+# שנתקע פעמיים); גם כשל באתר נוסה שוב (אצלו — רק "לא פורסם"); "הורד עכשיו"
+# מהאתר, לכל חודש — כך ממלאים היסטוריה.
+
+MEITAR_CHECK_EVERY = 20 * 60   # כל כמה זמן לנסות שוב (אצל איתי: 1200 שניות)
+MEITAR_FROM_DAY = 3            # מהיום הזה בחודש מחפשים את החודש הקודם
+MEITAR_GIVE_UP_DAYS = 5        # אחרי כמה ימים מפסיקים לנסות (אצל איתי: 432000 שניות)
+MEITAR_SHOTS = AGENT_DIR / "meitar-shots"
+
+
+def meitar_targets(conn, today: datetime) -> list[dict]:
+    """
+    מה להוריד עכשיו:
+      · בקשות מהאתר (status='requested') — כל חודש, מיד;
+      · מהיום ה-3 בחודש — החודש הקודם לכל מקור פעיל עם הורדה אוטומטית, אם עוד
+        אין לו run (או סיכום מוסד) ולא הסתיים/ננטש;
+      · waiting / failed — שוב, אם עברו 20 דקות ולא עברו 5 ימים מהניסיון הראשון.
+    """
+    prev = (today.replace(day=1) - pd.DateOffset(months=1)).date()
+    with conn.cursor() as cur:
+        cur.execute("""
+            with auto as (
+              select e.authority_code, e.entity_code, e.kind, %(m)s::date as calc_month
+                from public.meitar_entities e
+               where e.active and e.auto_download and %(day)s >= %(from_day)s
+                 and not exists (select 1 from public.meitar_runs u
+                                  where u.authority_code = e.authority_code and u.entity_code = e.entity_code
+                                    and u.calc_month = %(m)s)
+                 and not exists (select 1 from public.meitar_institution_totals t
+                                  where t.authority_code = e.authority_code and t.institution_code = e.entity_code
+                                    and t.calc_month = %(m)s)
+            ), wanted as (
+              select a.authority_code, a.entity_code, a.kind, a.calc_month from auto a
+              union
+              select d.authority_code, d.entity_code, e.kind, d.calc_month
+                from public.meitar_downloads d
+                join public.meitar_entities e using (authority_code, entity_code)
+               where d.status in ('requested', 'waiting', 'failed', 'downloading')
+            )
+            select w.authority_code, w.entity_code, w.kind, w.calc_month,
+                   d.status, d.first_attempt_at, d.last_attempt_at
+              from wanted w
+              left join public.meitar_downloads d using (authority_code, entity_code, calc_month)
+             where coalesce(d.status, 'new') not in ('done', 'gave_up')
+             order by w.authority_code, w.calc_month, w.entity_code
+        """, {"m": prev, "day": today.day, "from_day": MEITAR_FROM_DAY})
+        rows = cur.fetchall()
+    out = []
+    now = time.time()
+    for code, entity, kind, month, status, first, last in rows:
+        # "downloading" שנשאר — הסוכן נקטע באמצע; מנסים שוב אחרי אותה המתנה
+        if status in ("waiting", "failed", "downloading") and last and now - last.timestamp() < MEITAR_CHECK_EVERY:
+            continue
+        out.append({"code": code, "entity": entity, "kind": kind, "month": month, "status": status,
+                    "first": first})
+    return out
+
+
+def meitar_mark(conn, t: dict, status: str, error: str | None = None, upload_id=None) -> None:
+    with conn.cursor() as cur:
+        cur.execute("""
+            insert into public.meitar_downloads (authority_code, entity_code, calc_month, status, attempts,
+                                                 first_attempt_at, last_attempt_at, last_error, upload_id)
+            values (%(c)s, %(e)s, %(m)s, %(s)s, case when %(s)s = 'downloading' then 1 else 0 end,
+                    case when %(s)s = 'downloading' then now() end,
+                    case when %(s)s = 'downloading' then now() end, %(err)s, %(up)s)
+            on conflict (authority_code, entity_code, calc_month) do update set
+              status = excluded.status,
+              attempts = public.meitar_downloads.attempts + (case when %(s)s = 'downloading' then 1 else 0 end),
+              -- בקשה חדשה מהאתר מתחילה את חלון 5 הימים מחדש
+              first_attempt_at = case when %(s)s = 'downloading' and (public.meitar_downloads.status = 'requested'
+                                        or public.meitar_downloads.first_attempt_at is null)
+                                      then now() else public.meitar_downloads.first_attempt_at end,
+              last_attempt_at = case when %(s)s = 'downloading' then now()
+                                     else public.meitar_downloads.last_attempt_at end,
+              last_error = %(err)s,
+              upload_id = coalesce(%(up)s, public.meitar_downloads.upload_id)
+        """, {"c": t["code"], "e": t["entity"], "m": t["month"], "s": status, "err": (error or "")[:800] or None,
+              "up": up_str(upload_id)})
+
+
+def up_str(v):
+    return str(v) if v else None
+
+
+def enqueue_meitar_zip(conn, code: str, entity: str, month, path: Path):
+    """מעלה את ה-ZIP ל-budget-uploads ופותח קליטה ממתינה — כמו העלאה מהאתר (uploadBudgetFiles)."""
+    url = require("SUPABASE_URL").rstrip("/")
+    stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S") + f"-meitar-{entity}"
+    name = f"{entity}_{month.month}_{month.year}_Horada.zip"
+    storage_path = f"{code}/{stamp}/1-{name}"          # ASCII בלבד (מלכודת 31); נתיב חדש תמיד — אין UPDATE
+    resp = requests.post(f"{url}/storage/v1/object/{BUDGET_BUCKET}/{storage_path}",
+                         headers={**storage_headers(), "Content-Type": "application/zip"},
+                         data=path.read_bytes(), verify=False, timeout=300)
+    if resp.status_code >= 300:
+        raise RuntimeError(f"העלאה ל-Storage נכשלה ({resp.status_code}): {resp.text[:200]}")
+    with conn.cursor() as cur:
+        cur.execute("""insert into public.budget_uploads (authority_code, fiscal_year, status, storage_prefix, files)
+                       values (%s, %s, 'pending', %s, %s) returning id""",
+                    (code, month.year, f"{code}/{stamp}",
+                     json.dumps([{"path": storage_path, "name": name}], ensure_ascii=False)))
+        return cur.fetchone()[0]
+
+
+def run_meitar_downloads(conn, today: datetime | None = None) -> int:
+    """סבב הורדות. מחזיר כמה ZIP הועלו. כשל — נרשם ב-meitar_downloads, לא מפיל את הלולאה."""
+    targets = meitar_targets(conn, today or datetime.now())
+    if not targets:
+        return 0
+    try:
+        import meitar_download as MD
+    except ImportError as exc:
+        log.warning("מיתר: %s מקורות ממתינים להורדה, אבל playwright לא מותקן (%s) — ראה agent/README.md",
+                    len(targets), exc)
+        return 0
+    log.info("═" * 60)
+    log.info("מיתר: %s הורדות — %s", len(targets),
+             ", ".join(f"{t['entity']} {t['month']:%m/%Y}" for t in targets))
+    work = Path(tempfile.mkdtemp(prefix="meitar-"))
+    done = 0
+    try:
+        with MD.Portal(shots_dir=MEITAR_SHOTS) as portal:
+            for t in targets:
+                meitar_mark(conn, t, "downloading")
+                try:
+                    path = portal.download(t["entity"], t["kind"], t["month"], work)
+                    upload_id = enqueue_meitar_zip(conn, t["code"], t["entity"], t["month"], path)
+                    meitar_mark(conn, t, "done", upload_id=upload_id)
+                    done += 1
+                    log.info("   ✓ %s %s — נפתחה קליטה", t["entity"], f"{t['month']:%m/%Y}")
+                except MD.MonthNotYetPublished as exc:
+                    meitar_mark(conn, t, meitar_retry_status(conn, t, "waiting"), str(exc))
+                    log.info("   … %s", exc)
+                except Exception as exc:  # noqa: BLE001 — כל כשל באתר: נרשם, ומנסים שוב בעוד 20 דקות
+                    meitar_mark(conn, t, meitar_retry_status(conn, t, "failed"), str(exc))
+                    log.warning("   ✗ %s %s: %s", t["entity"], f"{t['month']:%m/%Y}", exc)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return done
+
+
+def meitar_retry_status(conn, t: dict, status: str) -> str:
+    """אחרי 5 ימים מהניסיון הראשון — gave_up (אחרת המקור ננסה לנצח)."""
+    with conn.cursor() as cur:
+        cur.execute("""select first_attempt_at from public.meitar_downloads
+                        where authority_code=%s and entity_code=%s and calc_month=%s""",
+                    (t["code"], t["entity"], t["month"]))
+        row = cur.fetchone()
+    first = row[0] if row else None
+    if first and time.time() - first.timestamp() > MEITAR_GIVE_UP_DAYS * 86400:
+        return "gave_up"
+    return status
+
+
 def ensure_table(conn, code: str) -> bool:
     """
     מוודא שקיימת טבלת students_{code}. אם לא — משכפל את מבנה טבלת התבנית
@@ -1318,6 +1479,8 @@ def main() -> None:
                          "סוכן פיתוח היה עלול לחטוף עדכון מצב\"ת אמיתי, "
                          "להריץ אותו על המחשב הלא נכון, ולכתוב את גיבוי "
                          "הבטיחות לדיסק שאיש לא יחפש בו.")
+    ap.add_argument("--no-meitar", action="store_true",
+                    help="בלי הורדת המיתר האוטומטית מאתר המשרד")
     ap.add_argument("--process-existing", action="store_true",
                     help="לעבד עכשיו את מה שכבר בתיקייה (ברירת המחדל: לדלג "
                          "על הקיים ולעקוב רק אחרי מה שמתעדכן מכאן)")
@@ -1352,11 +1515,12 @@ def main() -> None:
             log.info('לא הוגדרה תיקיית מצב"ת מקומית — עובד מול האתר בלבד')
 
     last_scan = 0.0
+    last_meitar = 0.0
 
     # ריצה שנקטעה משאירה תיקיית עבודה זמנית. מנקים בעלייה כדי שלא
     # יצטברו עשרות תיקיות של 10MB לאורך חודשים.
     stale = 0
-    for pattern in ("matzevet-*", "tierb-*", "bagrut-*", "budget-*"):
+    for pattern in ("matzevet-*", "tierb-*", "bagrut-*", "budget-*", "meitar-*"):
         for leftover in Path(tempfile.gettempdir()).glob(pattern):
             if leftover.is_dir() and time.time() - leftover.stat().st_mtime > 3600:
                 shutil.rmtree(leftover, ignore_errors=True)
@@ -1400,9 +1564,14 @@ def main() -> None:
                     process_bagrut(conn, bagrut)
                 else:
                     log.info("אין סבבי בגרות ממתינים")
+                if not args.no_meitar:
+                    n = run_meitar_downloads(conn)
+                    if n:
+                        log.info("מיתר: %s קבצים הורדו — נקלטים עכשיו", n)
                 budget = claim_next_budget(conn)
-                if budget:
+                while budget:
                     process_budget(conn, budget)
+                    budget = claim_next_budget(conn)
                 else:
                     log.info("אין קליטות תקציב ממתינות")
                 log.info("סבב בדיקה הסתיים")
@@ -1434,6 +1603,15 @@ def main() -> None:
                 if not idle_logged:
                     log.info("אין העלאות ממתינות — ממתין…")
                     idle_logged = True
+
+            # המיתר — כל 20 דקות; כשל באתר המשרד נרשם ולא מפיל את הלולאה
+            if not args.no_meitar and time.time() - last_meitar > MEITAR_CHECK_EVERY:
+                last_meitar = time.time()
+                try:
+                    if run_meitar_downloads(conn):
+                        idle_logged = False
+                except Exception:
+                    log.exception("מיתר: סבב ההורדות נכשל — ינסה שוב בעוד 20 דקות")
 
             # סריקת התיקייה המקומית — בקצב נפרד, איטי יותר מהתשאול
             if watch_folder and time.time() - last_scan > WATCH_EVERY:

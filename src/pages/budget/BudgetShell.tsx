@@ -19,6 +19,7 @@ import {
 } from '@/lib/budget'
 import { buildRows, elapsedMonths, hebrewSchoolYear, periodRange, type Period } from '@/lib/budgetCalc'
 import { BudgetContext, type BudgetContextValue } from './context'
+import { MEITAR_PAGES, type BudgetBase } from './meitar/context'
 
 interface Loaded {
   cards: BudgetCard[]
@@ -143,8 +144,11 @@ export default function BudgetShell() {
       return next
     }, { replace: true })
 
+  // מסכים שאינם תלויים בכרטסת — נפתחים גם לרשות בלי EPR (המיתר, הקליטה)
   const isUpload = location.pathname.endsWith('/upload')
+  const standalone = isUpload || /\/meitar(\/|$)/.test(location.pathname)
   const authorityName = allAuthorities.find((a) => a.code === code)?.name
+  const base: BudgetBase = { authorityName: authorityName ?? '', canManage, isOwner, year, period }
   const identity = [profile?.display_name ?? profile?.email, isSuperAdmin ? 'מנהל־על' : role ? BUDGET_ROLE_LABELS[role] : '']
     .filter(Boolean).join(' · ')
 
@@ -201,11 +205,11 @@ export default function BudgetShell() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <Rail base={`/budget/${code}`} search={location.search} cards={ctx?.rows.length ?? null}
+        <Rail base={`/budget/${code}`} search={location.search} pathname={location.pathname} cards={ctx?.rows.length ?? null}
           canManage={canManage} isOwner={isOwner} />
         <main className="flex min-w-0 flex-1 flex-col overflow-auto">
-          {isUpload ? (
-            <Outlet />
+          {standalone ? (
+            <Outlet context={base} />
           ) : error ? (
             <ErrorBox message={error} />
           ) : years && years.length === 0 ? (
@@ -217,7 +221,7 @@ export default function BudgetShell() {
             </Empty>
           ) : ctx ? (
             <BudgetContext.Provider value={ctx}>
-              <Outlet />
+              <Outlet context={base} />
             </BudgetContext.Provider>
           ) : (
             <Loading label="טוען את נתוני התקציב…" />
@@ -228,10 +232,11 @@ export default function BudgetShell() {
   )
 }
 
-function Rail({ base, search, cards, canManage, isOwner }: {
+function Rail({ base, search, pathname, cards, canManage, isOwner }: {
   base: string
   /** השנה והתקופה עוברות בין המסכים בכתובת */
   search: string
+  pathname: string
   cards: number | null
   canManage: boolean
   isOwner: boolean
@@ -250,7 +255,7 @@ function Rail({ base, search, cards, canManage, isOwner }: {
         </NavLink>
         <NavLink to={to('/actions')} className={link}>🧮 פירוט הפעולות</NavLink>
         {/* המיתר הוא הכנסות ברמת הרשות — לא לאחראי על כרטיסים (ה-RLS חוסם ממילא) */}
-        {!isOwner && <NavLink to={to('/meitar')} className={link}>🏛 מיתר — הכנסות</NavLink>}
+        {!isOwner && <MeitarMenu base={base} search={search} pathname={pathname} to={to} link={link} />}
         <NavLink to={to('/orders')} className={link}>🧾 רכש</NavLink>
         {canManage && (
           <>
@@ -260,5 +265,44 @@ function Rail({ base, search, cards, canManage, isOwner }: {
         )}
       </nav>
     </aside>
+  )
+}
+
+/**
+ * המיתר בסרגל — תפריט שנפתח: חמשת המסכים מתחתיו (אייל, 22.10). פתוח מעצמו
+ * כשנמצאים במיתר; החץ פותח וסוגר. הקישורים שומרים את השנה, התקופה, המקור והחודש.
+ */
+function MeitarMenu({ base, search, pathname, to, link }: {
+  base: string
+  search: string
+  pathname: string
+  to: (path: string) => string
+  link: (a: { isActive: boolean }) => string
+}) {
+  const inMeitar = pathname.includes('/meitar')
+  const [open, setOpen] = useState(inMeitar)
+  useEffect(() => {
+    if (inMeitar) setOpen(true)
+  }, [inMeitar])
+  const keep = new URLSearchParams(search)
+  const q = ['year', 'period', 'entity', 'm'].filter((k) => keep.get(k)).map((k) => `${k}=${keep.get(k)}`).join('&')
+  const sub = (path: string) => `${base}/meitar${path ? `/${path}` : ''}${q ? `?${q}` : ''}`
+  const subLink = ({ isActive }: { isActive: boolean }) =>
+    `block rounded-md px-3 py-1 text-sm transition ${isActive ? 'bg-emerald-50 font-bold text-emerald-900' : 'text-slate-600 hover:bg-slate-100'}`
+  return (
+    <div>
+      <div className="flex items-center">
+        <NavLink to={inMeitar ? sub('') : to('/meitar')} end={false} className={(a) => `${link(a)} flex-1`}>🏛 מיתר — הכנסות</NavLink>
+        <button onClick={() => setOpen((o) => !o)} className="rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-slate-100"
+          title={open ? 'סגירה' : 'פתיחה'} aria-expanded={open}>{open ? '▴' : '▾'}</button>
+      </div>
+      {open && (
+        <div className="mr-5 mt-0.5 flex flex-col gap-0.5 border-r-2 border-emerald-100 pr-2">
+          {MEITAR_PAGES.map(([path, label]) => (
+            <NavLink key={path} end={path === ''} to={sub(path)} className={subLink}>{label}</NavLink>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

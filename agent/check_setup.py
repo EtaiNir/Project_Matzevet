@@ -39,6 +39,28 @@ def check_packages():
             problems.append(f"הספרייה {label} לא הותקנה")
 
 
+def check_meitar_browser():
+    """הורדת המיתר (024) — אופציונלי: בלי דפדפן, שאר הסוכן עובד והמיתר מדולג."""
+    print("
+הורדת המיתר:")
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print(f"{WARN} playwright לא מותקן — ההורדה האוטומטית של המיתר מדולגת")
+        return
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            browser.close()
+        print(f"{OK} הדפדפן עולה — הסוכן יוריד את קובצי המיתר בעצמו")
+    except Exception as exc:  # noqa: BLE001
+        msg = str(exc).splitlines()[0][:150]
+        print(f"{WARN} הדפדפן לא עולה ({msg})")
+        print("      להריץ: venv\Scripts\python.exe -m playwright install chromium")
+        if len(str(AGENT_DIR)) > 120:
+            print("      ⚠ נתיב התיקייה ארוך — Windows חוסם קבצים מעל 260 תווים (מלכודת 44)")
+
+
 def check_env_file(name, required_keys):
     path = DASHBOARD_DIR / name
     if not path.exists():
@@ -175,6 +197,7 @@ def main():
                                   "AGENT_EMAIL", "AGENT_PASSWORD"])
     check_pipeline()
     check_watch_folder()
+    check_meitar_browser()
     check_connections()
 
     print()

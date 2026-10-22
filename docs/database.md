@@ -233,13 +233,17 @@ student, school, grade, class, track)` על `bagrut_students`. ציונים ומ
 | `budget_cards` | כרטיס × שנת תקציב: תקציב הכנסות/הוצאות (המאושר — השערה, 023 §4), ביצוע, שריון, יתרה, דרישה. **סימני EPR: הוצאות שליליות** | דוח EPR "ברמת הכרטיס" | לפי (רשות, שנה) |
 | `budget_transactions` | תנועה בכרטסת, עד האסמכתא. `is_opening` = יתרת פתיחה | דוח EPR "ברמת הפעולה" | לפי טווח התאריכים שבקובץ; יתרות הפתיחה מתחלפות |
 | `budget_orders` | הזמנת רכש. עמודה שלא הותאמה → `extra` | דוח הזמנות מ-EPR | כולן |
-| `meitar_runs` | ZIP מיתר אחד: רשות × חודש חישוב | ZIP המיתר | לפי (רשות, חודש) — cascade |
-| `meitar_invoice` | שורה ב-`CHESHBONIT`: נושא × חודש תחולה × חשבות | ZIP | עם הריצה |
-| `meitar_rows` | שורה באחד מ-15 קובצי הפירוט; עמודות ליבה + `extra` | ZIP | עם הריצה |
+| `meitar_runs` | ZIP מיתר אחד: רשות × **מקור** × חודש חישוב (047) | ZIP המיתר | לפי (רשות, מקור, חודש) — cascade, אחרי גיבוי |
+| `meitar_invoice` | שורה ב-`CHESHBONIT`: נושא × חודש תחולה × חשבות. `effect_date`, `prior_year` (047) | ZIP | עם הריצה |
+| `meitar_rows` | שורה באחד מ-15 קובצי הפירוט; עמודות ליבה + `extra`. `effect_date`, `prior_year` — שנה"ל קודמת, נשמרת ומסומנת (047) | ZIP | עם הריצה |
+| `meitar_institution_totals` | מוסד × חודש: `RICUZMOSDOT` מה-ZIP של בית הספר — הסיכום הרשמי (047) | ZIP של בית ספר | לפי (רשות, מוסד, חודש) |
+| `meitar_topics` | נושא מיתר של המשרד — **משותף לכל הרשויות**; 382 מטבלה 9 באקסס, `is_new` לנושא שהגיע בקובץ (047) | זרע + הטוען | נוסף בלבד |
+| `meitar_entities` | מקור מיתר של רשות: מוטב (מועצה) / מוסד (בית ספר), הורדה אוטומטית (047) | מנהל־על | **לעולם לא** |
+| `meitar_downloads` | מקור × חודש: מצב ההורדה מאתר המשרד; מנהל רק מבקש (`requested`) (047) | הסוכן + "הורד עכשיו" | — |
 | `budget_card_meta` | כרטיס: קטגוריה 1/2/3, אחראי, מקור כספי, נושא מיתר, גפ"ן | המשתמש | **לעולם לא** |
 | `budget_card_plans` | כרטיס × שנה: צפי, תכנית לשנה הבאה, הערות. **בערך טבעי (חיובי)** | המשתמש | **לעולם לא** |
 | `budget_order_notes` | הזמנה: חשבונית, גפ"ן, תב"ר, הערות | המשתמש | **לעולם לא** |
-| `meitar_topic_plans` | נושא × שנה"ל: תקציב, צפי, שנה הבאה | המשתמש | **לעולם לא** |
+| `meitar_topic_plans` | **מקור** × נושא × שנה"ל: תקציב, צפי, שנה הבאה (מקור — 047) | המשתמש | **לעולם לא** |
 | `budget_card_files` | קובץ מצורף לכרטיס (באקט `budget-files`) | המשתמש | **לעולם לא** |
 | `budget_uploads` | תור הקליטה — בדפוס `tier_b_uploads`, עם שלב אישור התאמה | מסך הקליטה | — |
 | `budget_mappings` | תבנית התאמה שאושרה, לפי `(רשות, סוג, headers_hash)` | הסוכן אחרי טעינה | — |
@@ -251,7 +255,8 @@ student, school, grade, class, track)` על `bagrut_students`. ציונים ומ
 `budget_owner_cards()` (`'קוד:כרטיס'` לאחראי, לפי קטגוריה 1). קטגוריות — רק מנהל;
 צפי ותכנית — מנהל, או אחראי בכרטיסים שלו; מיתר — לא לאחראי. שכבת הקבצים — הסוכן
 בלבד (חיבור ישיר). ביצוע חודשי מסוכם ב-`budget_monthly(code, from, to)` —
-security invoker, כך שה-RLS חל.
+security invoker, כך שה-RLS חל. המיתר לפי חודש: `meitar_months(code, entity, school_year, institution)` ו-
+`meitar_invoice_months(…)` — ההיסטוריה נגזרת מה-runs, אין טבלת מונים ([024](decisions/024-meitar-automation.md)).
 
 **Storage:** `budget-uploads` (`{code}/{stamp}/…` — מנהל התקציב) ו-`budget-files`
 (`{code}/{card}/…`). נפרדים מ-`moe-uploads`, שכתיבה אליו דורשת `may_update_moe`.
@@ -403,6 +408,8 @@ security invoker, כך שה-RLS חל.
 | 044 | `status_override_role` | שינוי סטטוס ע"י מנהל־על: "שונה ע"י מנהל על", בלי מייל; `set_by_role` ([022](decisions/022-bagrut-status-override.md)). הוחלה 21.10 |
 | 045 | `budget` | מודול ניהול תקציב: 13 טבלאות, תפקידי תקציב, שני באקטים, `budget_monthly` ([023](decisions/023-budget-module.md)). הוחלה 20.10 |
 | 046 | `budget_extras` | קובץ התוספתיים: דגלים ושם כרטיס ב-`budget_card_meta`, `plan_income/expense` ב-`budget_card_plans`, `budget_cards.as_of` ([023 §8](decisions/023-budget-module.md)). הוחלה 21.10 |
+| 047 | `meitar_automation` | המיתר האוטומטי: מקורות, run למקור, שנה"ל קודמת מסומנת, סיכומי מוסד, אינדקס נושאים, מצב ההורדות, `meitar_months` ([024](decisions/024-meitar-automation.md)). הוחלה 22.10 |
+| 048 | `meitar_run_topics` | סיכום לכל run × נושא × מוסד — `meitar_months` קורא ממנו (4.7 ש׳ ← 0.4 ש׳ על 112 אלף שורות); הטוען ממלא (`meitar_refresh_run_topics`). הוחלה 22.10 |
 
 הרצה: [`scripts/run_migrations.py`](../scripts/run_migrations.py) (session
 pooler, IPv4), או הדבקה ב-SQL Editor של Supabase.

@@ -34,5 +34,12 @@ if errorlevel 1 (
         --trusted-host pypi.org --trusted-host files.pythonhosted.org
 )
 
+echo Installing the browser for Meitar downloads...
+venv\Scripts\python.exe -m playwright install chromium
+if errorlevel 1 (
+    echo   [WARN] Browser install failed - Meitar auto-download will be skipped.
+    echo   Other agent jobs are not affected. See agent\README.md.
+)
+
 venv\Scripts\python.exe check_setup.py
 pause

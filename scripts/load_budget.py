@@ -287,8 +287,10 @@ def parse_xls_rows(kind: str, headers: list[str], rows: list[list], mapping: dic
 
 
 # ── מיתר ──────────────────────────────────────────────────────────
-# שם הקובץ: {סמל מוטב}_{חודש}_{שנה}{סוג}.csv — למשל 12300141_9_2026SACAL.csv
-MEITAR_NAME = re.compile(r"^(\d+)_(\d{1,2})_(\d{4})([A-Za-z0-9]+)\.csv$")
+# שם הקובץ — שתי צורות (נבדק מול הורדות אמת, 22.10):
+#   מועצה:    {סמל מוטב}_{חודש}_{שנה}{סוג}.csv              12300141_9_2026SACAL.csv
+#   בית ספר:  {סמל מוסד}_{סמל מוטב}__{חודש}_{שנה}{סוג}.csv   360123_12300141__9_2026SACAL.csv
+MEITAR_NAME = re.compile(r"^(\d+)(?:_(\d+)_)?_(\d{1,2})_(\d{4})([A-Za-z0-9]+)\.csv$")
 
 # קבצים שאין בהם עמודת קוד נושא. השיוך נבדק מול החשבונית של 9/2026: סכום
 # הקובץ = בדיוק הסכום של הנושא (SACAL 749,088.28 = 001; AZAROLIM 1,227.34 = 009;
@@ -296,8 +298,44 @@ MEITAR_NAME = re.compile(r"^(\d+)_(\d{1,2})_(\d{4})([A-Za-z0-9]+)\.csv$")
 FILE_TOPIC = {"SACAL": ("001", 'שכ"ל על-יסודי'), "AZAROLIM": ("009", "שעורי עזר לעולים"),
               "MOADON": ("242", "מועדוניות ברשויות")}
 
-# קבצים בלי סכומים (משרות, איכלוס כיתות) — נשמרים, לא נכנסים להתאמה
-NO_MONEY = {"MISROT", "MISROTGY", "ICHLUSKITOT"}
+# קבצים בלי סכומים (משרות, איכלוס כיתות) — נשמרים, לא נכנסים להתאמה ולסכומים.
+# HASNET / HASMASLULIM — פירוט של ההסעות (הסכום כבר ב-HASAOT; ב-9/2026 ההפרש בהם 0).
+# איתי מוציא את חמשתם מהצבירה. RICUZMOSDOT — הסיכום של מוסד, נשמר בטבלה משלו.
+NO_MONEY = {"MISROT", "MISROTGY", "ICHLUSKITOT", "HASNET", "HASMASLULIM"}
+INSTITUTION_TOTAL = "RICUZMOSDOT"
+
+HEB_MONTH = {"ינו": 1, "פבר": 2, "מרץ": 3, "מרס": 3, "אפר": 4, "מאי": 5, "יונ": 6, "יול": 7, "אוג": 8,
+             "ספט": 9, "אוק": 10, "נוב": 11, "דצמ": 12}
+
+
+def parse_month(v) -> date | None:
+    """
+    חודש מכל הפורמטים שבקובצי המיתר: "01/2026", "9/2026", "2025/09" (HASAOT),
+    "202501" (SHEFI, HASNET), "2026-09-01", ועברי "אוק-24" (חודש חישוב ב-HASAOT, אצל איתי).
+    זהה ל-public.meitar_parse_month במיגרציה 047 (בלי העברי). לא מזוהה — None.
+    """
+    s = str(v or "").strip()
+    y = mo = None
+    if m := re.fullmatch(r"(\d{1,2})/(\d{4})", s):
+        mo, y = int(m.group(1)), int(m.group(2))
+    elif m := re.fullmatch(r"(\d{4})/(\d{1,2})", s):
+        y, mo = int(m.group(1)), int(m.group(2))
+    elif m := re.match(r"(\d{4})-(\d{1,2})(?:-\d{1,2})?", s):
+        y, mo = int(m.group(1)), int(m.group(2))
+    elif m := re.fullmatch(r"((?:19|20)\d{2})(\d{2})", s):
+        y, mo = int(m.group(1)), int(m.group(2))
+    elif m := re.fullmatch(r"(\d{2})(\d{4})", s):
+        mo, y = int(m.group(1)), int(m.group(2))
+    elif m := re.fullmatch(r"([א-ת]{3})[א-ת]*-(\d{2})", s):
+        mo, y = HEB_MONTH.get(m.group(1)), 2000 + int(m.group(2))
+    if mo and y and 1 <= mo <= 12 and 1990 <= y <= 2100:
+        return date(y, mo, 1)
+    return None
+
+
+def school_year_start(d: date) -> date:
+    """1 בספטמבר שפותח את שנה"ל של החודש"""
+    return date(d.year if d.month >= 9 else d.year - 1, 9, 1)
 
 CORE = {
     "topic_code":       ("קוד נושא", "נושא תשלום"),
@@ -328,8 +366,12 @@ def read_csv_text(raw: bytes) -> str:
 
 
 def parse_meitar_zip(path: Path) -> dict:
-    """מחזיר {calc_month, beneficiary, invoice: [...], rows: [...], files: {סוג: שורות}}"""
-    out = {"calc_month": None, "beneficiary": None, "invoice": [], "rows": [], "files": {}, "unknown": []}
+    """
+    מחזיר {calc_month, owner, kind, beneficiary, invoice, rows, totals, files, unknown}.
+    owner — של מי ה-ZIP: סמל המוטב (מועצה, kind='moteb') או סמל המוסד (בית ספר, 'mosad').
+    """
+    out = {"calc_month": None, "owner": None, "kind": None, "beneficiary": None, "invoice": [], "rows": [],
+           "totals": [], "files": {}, "unknown": [], "months": set(), "owners": set()}
     with zipfile.ZipFile(path) as z:
         for info in z.infolist():
             name = Path(info.filename).name
@@ -338,13 +380,26 @@ def parse_meitar_zip(path: Path) -> dict:
                 if not info.is_dir():
                     out["unknown"].append(name)
                 continue
-            beneficiary, month, year, kind = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4).upper()
+            first, moteb = m.group(1), m.group(2)
+            month, year, kind = int(m.group(3)), int(m.group(4)), m.group(5).upper()
+            out["months"].add(date(year, month, 1))
+            out["owners"].add(first)
             out["calc_month"] = out["calc_month"] or date(year, month, 1)
-            out["beneficiary"] = out["beneficiary"] or beneficiary
+            out["owner"] = out["owner"] or first
+            out["kind"] = out["kind"] or ("mosad" if moteb else "moteb")
+            out["beneficiary"] = out["beneficiary"] or (moteb or first)
             reader = csv.DictReader(io.StringIO(read_csv_text(z.read(info))))
             records = [{(k or "").strip(): (v or "").strip() for k, v in r.items()}
                        for r in reader if any((v or "").strip() for v in r.values())]
             out["files"][kind] = len(records)
+            if kind == INSTITUTION_TOTAL:
+                for r in records:
+                    out["totals"].append({
+                        "institution_code": r.get("סמל מוסד") or None, "institution_name": r.get("שם מוסד") or None,
+                        "computed": to_num(r.get("סכום מחושב")), "computed_prev": to_num(r.get("סכום מחושב קודם")),
+                        "diff": to_num(r.get("הפרש")) if r.get("הפרש") else to_num(r.get("הפרש מחושב")),
+                    })
+                continue
             if kind == "CHESHBONIT":
                 for r in records:
                     if not r.get("קוד נושא"):
@@ -377,7 +432,34 @@ def parse_meitar_zip(path: Path) -> dict:
                 extra = {k: v for k, v in r.items() if k not in used and v}
                 row["extra"] = extra or None
                 out["rows"].append(row)
+    # חודש התחולה, ו"שייך לשנה"ל קודמת" — נשמר ומסומן, לא נמחק (אייל, 22.10)
+    if out["calc_month"]:
+        start = school_year_start(out["calc_month"])
+        for r in out["rows"] + out["invoice"]:
+            r["effect_date"] = parse_month(r.get("effect_month"))
+            r["prior_year"] = bool(r["effect_date"] and r["effect_date"] < start)
     return out
+
+
+def meitar_entity(conn, code: str, m: dict) -> dict | None:
+    """
+    המקור הרשום של ה-ZIP. בלי חיבור (--dry-run) — לא נבדק, ומוחזר כפי שבקובץ.
+    totals_only: ZIP של בית ספר שהמוטב שלו רשום ברשות — השורות כבר ב-ZIP של
+    המועצה (זהות, נבדק 22.10); לוקחים ממנו רק את הסיכום הרשמי (RICUZMOSDOT).
+    """
+    if not m["owner"]:
+        return None
+    if conn is None:
+        return {"code": m["owner"], "kind": m["kind"], "name": None, "totals_only": False, "checked": False}
+    with conn.cursor() as cur:
+        cur.execute("""select entity_code, kind, name from public.meitar_entities
+                        where authority_code = %s and active""", (code,))
+        reg = {r[0]: {"code": r[0], "kind": r[1], "name": r[2]} for r in cur.fetchall()}
+    e = reg.get(m["owner"])
+    if e is None:
+        return None
+    moteb_registered = m["kind"] == "mosad" and reg.get(m["beneficiary"], {}).get("kind") == "moteb"
+    return {**e, "totals_only": moteb_registered, "checked": True}
 
 
 def reconcile_meitar(parsed: dict) -> dict:
@@ -556,6 +638,16 @@ def main() -> None:
             if not m["rows"] and not m["invoice"]:
                 report["errors"].append(f"{p.name}: אין בו קובצי מיתר בתבנית {{סמל}}_{{חודש}}_{{שנה}}{{סוג}}.csv")
                 continue
+            if len(m["months"]) > 1 or len(m["owners"]) > 1:
+                report["errors"].append(f"{p.name}: ב-ZIP קבצים של כמה חודשים או מקורות — "
+                                        f"{sorted(f'{d:%m/%Y}' for d in m['months'])} · {sorted(m['owners'])}")
+                continue
+            entity = meitar_entity(conn, args.code, m)
+            if entity is None:
+                report["errors"].append(f"{p.name}: {'בית הספר' if m['kind'] == 'mosad' else 'המוטב'} {m['owner']} "
+                                        f"אינו רשום במקורות המיתר של הרשות — מוסיפים אותו בניהול ← נתונים ← תקציב")
+                continue
+            m["entity"] = entity
             if m["unknown"]:
                 warn("meitar_unknown", f"{p.name}: קבצים שלא זוהו ודולגו — {', '.join(m['unknown'][:5])}")
             m["reconcile"] = reconcile_meitar(m)
@@ -614,8 +706,12 @@ def main() -> None:
         report.setdefault("meitar", []).append({
             "file": m["file"], "calc_month": m["calc_month"].isoformat() if m["calc_month"] else None,
             "files": m["files"], "invoice_rows": len(m["invoice"]), "rows": len(m["rows"]), "reconcile": rc,
+            "entity": m["entity"]["code"], "entity_kind": m["kind"], "entity_name": m["entity"].get("name"),
+            "totals_only": m["entity"]["totals_only"],
+            "prior_year_rows": sum(1 for r in m["rows"] if r["prior_year"]),
+            "institution_totals": m["totals"],
         })
-        if rc["mismatches"]:
+        if rc["mismatches"] and not m["entity"]["totals_only"]:
             warn("meitar_reconcile", f"מיתר {m['calc_month']:%m/%Y}: {len(rc['mismatches'])} מתוך {rc['total']} נושאים "
                  f"לא מתיישבים בין החשבונית לפירוט")
     if extras:
@@ -743,28 +839,64 @@ def main() -> None:
                       Json(o["extra"]) if o["extra"] else None, up) for o in orders],
                     page_size=1000)
             for m in meitar:
-                # קובצי המקור נשמרים ב-Storage; הריצה הקודמת לאותו חודש מתחלפת (cascade)
-                cur.execute("delete from public.meitar_runs where authority_code=%s and calc_month=%s",
-                            (code, m["calc_month"]))
-                cur.execute("""insert into public.meitar_runs (authority_code, calc_month, beneficiary, file_count, upload_id)
-                               values (%s, %s, %s, %s, %s) returning id""",
-                            (code, m["calc_month"], m["beneficiary"], len(m["files"]), up))
+                ent = m["entity"]["code"]
+                # הסיכום הרשמי של מוסד — מכל ZIP של בית ספר
+                if m["totals"]:
+                    execute_values(cur, """insert into public.meitar_institution_totals
+                        (authority_code, institution_code, calc_month, beneficiary, institution_name, computed,
+                         computed_prev, diff, upload_id) values %s
+                        on conflict (authority_code, institution_code, calc_month) do update set
+                          beneficiary = excluded.beneficiary, institution_name = excluded.institution_name,
+                          computed = excluded.computed, computed_prev = excluded.computed_prev,
+                          diff = excluded.diff, upload_id = excluded.upload_id, loaded_at = now()""",
+                        [(code, t["institution_code"], m["calc_month"], m["beneficiary"], t["institution_name"],
+                          t["computed"], t["computed_prev"], t["diff"], up) for t in m["totals"] if t["institution_code"]])
+                if m["entity"]["totals_only"]:
+                    continue   # השורות כבר ב-run של המועצה — לא נטענות פעמיים
+                # הריצה הקודמת לאותו מקור וחודש מתחלפת (cascade) — אחרי גיבוי
+                b = backup_rows(conn, code, f"meitar_{ent}_{m['calc_month']:%Y%m}",
+                                """select r.* from public.meitar_rows r join public.meitar_runs u on u.id = r.run_id
+                                    where u.authority_code=%s and u.entity_code=%s and u.calc_month=%s""",
+                                (code, ent, m["calc_month"]))
+                if b:
+                    report["backups"].append(b)
+                cur.execute("delete from public.meitar_runs where authority_code=%s and entity_code=%s and calc_month=%s",
+                            (code, ent, m["calc_month"]))
+                cur.execute("""insert into public.meitar_runs
+                                 (authority_code, entity_code, calc_month, beneficiary, file_count, upload_id)
+                               values (%s, %s, %s, %s, %s, %s) returning id""",
+                            (code, ent, m["calc_month"], m["beneficiary"], len(m["files"]), up))
                 run_id = cur.fetchone()[0]
                 execute_values(cur, """insert into public.meitar_invoice
-                    (run_id, authority_code, topic_code, topic_name, chashavut, effect_month, due, paid, to_pay,
-                     debt, month_balance, notes) values %s""",
-                    [(run_id, code, r["topic_code"], r["topic_name"], r["chashavut"], r["effect_month"], r["due"],
-                      r["paid"], r["to_pay"], r["debt"], r["month_balance"], r["notes"]) for r in m["invoice"]],
+                    (run_id, authority_code, topic_code, topic_name, chashavut, effect_month, effect_date, prior_year,
+                     due, paid, to_pay, debt, month_balance, notes) values %s""",
+                    [(run_id, code, r["topic_code"], r["topic_name"], r["chashavut"], r["effect_month"],
+                      r["effect_date"], r["prior_year"], r["due"], r["paid"], r["to_pay"], r["debt"],
+                      r["month_balance"], r["notes"]) for r in m["invoice"]],
                     page_size=1000)
                 execute_values(cur, """insert into public.meitar_rows
                     (run_id, authority_code, source_file, topic_code, topic_name, institution_code, institution_name,
-                     settlement_code, settlement_name, effect_month, units, cost, pct, computed, computed_prev, diff,
-                     extra) values %s""",
+                     settlement_code, settlement_name, effect_month, effect_date, prior_year, units, cost, pct,
+                     computed, computed_prev, diff, extra) values %s""",
                     [(run_id, code, r["source_file"], r["topic_code"], r["topic_name"], r["institution_code"],
                       r["institution_name"], r["settlement_code"], r["settlement_name"], r["effect_month"],
-                      r["units"], r["cost"], r["pct"], r["computed"], r["computed_prev"], r["diff"],
-                      Json(r["extra"]) if r["extra"] else None) for r in m["rows"]],
+                      r["effect_date"], r["prior_year"], r["units"], r["cost"], r["pct"], r["computed"],
+                      r["computed_prev"], r["diff"], Json(r["extra"]) if r["extra"] else None) for r in m["rows"]],
                     page_size=1000)
+                # הסיכום לכל נושא × מוסד — ממנו ההיסטוריה (meitar_months, מיגרציה 048)
+                cur.execute("select public.meitar_refresh_run_topics(%s)", (run_id,))
+                # נושא שאינו באינדקס — נוסף ומסומן חדש (אצל איתי נשמט ביישור לתבנית)
+                topics = {}
+                for r in m["rows"] + m["invoice"]:
+                    if r["topic_code"]:
+                        topics.setdefault(r["topic_code"], r["topic_name"])
+                if topics:
+                    new_topics = [r[0] for r in execute_values(
+                        cur, """insert into public.meitar_topics (topic_code, name, is_new, first_seen)
+                                values %s on conflict (topic_code) do nothing returning topic_code""",
+                        [(t, n, True, m["calc_month"]) for t, n in topics.items()], fetch=True)]
+                    if new_topics:
+                        report.setdefault("meitar_new_topics", []).extend(new_topics)
             # ZIP מיתר שהגיע אחרי התנועות: נושאים חדשים מוכרים עכשיו — משייכים את
             # התקבולים שכבר במסד ועוד בלי נושא (כשהתנועות בקליטה הזו, הן כבר שויכו)
             if meitar and not actions:

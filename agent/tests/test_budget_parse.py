@@ -151,6 +151,45 @@ check("₪ ופסיקים — מספר; ריק נשאר ריק",
       (ex[0]["plan_expense"], ex[0]["forecast_expense"]), (1135000.0, None))
 check("תיבות סימון", (ex[0]["in_meitar"], ex[0]["is_income"], ex[0]["is_expense"]), (True, False, True))
 check("תאריך הנתונים משם דוח EPR", L.as_of_from_name("EprRep19102026153012.xls"), date(2026, 10, 19))
+
+# ── 8. המיתר האוטומטי (024): חודשים, שנה"ל קודמת, ZIP של בית ספר ──
+check("חודש בכל הפורמטים שבקבצים",
+      [L.parse_month(v) for v in ("01/2026", "9/2026", "2025/09", "202501", "2026-09-01", "אוק-24", "13/2026", "", None)],
+      [date(2026, 1, 1), date(2026, 9, 1), date(2025, 9, 1), date(2025, 1, 1), date(2026, 9, 1), date(2024, 10, 1),
+       None, None, None])
+check("תחילת שנה\"ל: ספטמבר פותח שנה", (L.school_year_start(date(2026, 9, 1)), L.school_year_start(date(2026, 8, 1))),
+      (date(2026, 9, 1), date(2025, 9, 1)))
+SCHOOL_SHARATIM = ("חודש חישוב,שם מוטב,סמל מוטב,סמל מוסד,שם מוסד,חודש תחולה,קוד נושא,נושא,מספר יחידות,"
+                   "סכום מחושב,סכום מחושב קודם,הפרש מחושב\n"
+                   "9/2026,רשות,999,360123,מקיף,09/2026,002,שרתים,1,100,0,100\n"
+                   "9/2026,רשות,999,360123,מקיף,05/2026,002,שרתים,1,50,40,10\n")
+RICUZ = ("חודש חישוב,סמל מוטב,שם מוטב,סמל מוסד,שם מוסד,סכום מחושב,סכום מחושב קודם,הפרש\n"
+         "9/2026,999,רשות,360123,מקיף,100,0,100\n")
+with Sandbox() as folder:
+    zpath = folder / "360123_9_2026_Horada.zip"
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("360123_999__9_2026SHARATIM.csv", "﻿" + SCHOOL_SHARATIM)
+        z.writestr("360123_999__9_2026RICUZMOSDOT.csv", "﻿" + RICUZ)
+        z.writestr("360123_999__9_2026HASNET.csv", "﻿" + "חודש חישוב,נושא תשלום,הפרש מחושב\n9/2026,472,5\n")
+    p = L.parse_meitar_zip(zpath)
+    check("ZIP של בית ספר: הבעלים הוא המוסד, המוטב מהשם", (p["owner"], p["kind"], p["beneficiary"]),
+          ("360123", "mosad", "999"))
+    check("RICUZMOSDOT — סיכום המוסד, לא שורות", (len(p["totals"]), p["totals"][0]["computed"],
+                                                    any(r["source_file"] == "RICUZMOSDOT" for r in p["rows"])),
+          (1, 100.0, False))
+    check("תחולה 05/2026 בחודש חישוב 9/2026 — שנה\"ל קודמת", [r["prior_year"] for r in p["rows"]
+                                                         if r["source_file"] == "SHARATIM"], [False, True])
+    check("HASNET אינו נכנס להתאמה", L.reconcile_meitar(p)["not_in_invoice"], [{"topic": "002", "detail": 110.0}])
+
+    # ZIP עם שני חודשים — נעצר לפני כל כתיבה
+    mixed = folder / "mixed.zip"
+    with zipfile.ZipFile(mixed, "w") as z:
+        z.writestr("999_9_2026GY003EZ.csv", "﻿" + GARDENS)
+        z.writestr("999_8_2026GY003EZ.csv", "﻿" + GARDENS)
+    report = folder / "r.json"
+    proc = run("--code", "1400000", "--year", "2026", "--file", str(mixed), "--dry-run", "--report-json", str(report))
+    r = json.loads(report.read_text(encoding="utf-8"))
+    check("ZIP עם כמה חודשים נדחה", (proc.returncode != 0, any("כמה חודשים" in e for e in r["errors"])), (True, True))
 check("שם אחר — אין תאריך", L.as_of_from_name("cards.xlsx"), None)
 
 check.done()

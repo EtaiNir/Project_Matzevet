@@ -7,3 +7,5 @@ psycopg2-binary>=2.9.9
 requests>=2.31
 # קובצי .xls ישנים (BIFF) — דוחות EPR של התקציב וקובצי גנים ב-.xls (020)
 xlrd>=2.0
+# הורדת המיתר מאתר משרד החינוך (024). אחרי pip: python -m playwright install chromium
+playwright>=1.40

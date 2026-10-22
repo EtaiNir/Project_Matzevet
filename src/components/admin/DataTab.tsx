@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import BagrutData from '@/components/admin/BagrutData'
 import BudgetUploadPanel from '@/components/budget/BudgetUploadPanel'
+import MeitarSourcesPanel from '@/components/budget/MeitarSourcesPanel'
 import { PRODUCTS, type ProductKey } from '@/config/products'
 import {
   countStudents,
@@ -75,7 +76,12 @@ export default function DataTab({ code }: Props) {
       )}
       {product === 'bagrut' && <BagrutData code={code} />}
       {/* התקציב ברמת הרשות, כמו המצבת (023) */}
-      {product === 'budget' && <BudgetUploadPanel code={code} />}
+      {product === 'budget' && (
+        <>
+          <BudgetUploadPanel code={code} />
+          <MeitarSourcesPanel code={code} />
+        </>
+      )}
     </div>
   )
 }

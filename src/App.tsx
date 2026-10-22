@@ -25,7 +25,13 @@ import BudgetHome from './pages/budget/BudgetHome'
 import BudgetCards from './pages/budget/BudgetCards'
 import BudgetCard from './pages/budget/BudgetCard'
 import BudgetActions from './pages/budget/BudgetActions'
-import BudgetMeitar from './pages/budget/BudgetMeitar'
+import MeitarShell from './pages/budget/meitar/MeitarShell'
+import MeitarOverview from './pages/budget/meitar/MeitarOverview'
+import MeitarTopics from './pages/budget/meitar/MeitarTopics'
+import MeitarTopic from './pages/budget/meitar/MeitarTopic'
+import MeitarInstitutions from './pages/budget/meitar/MeitarInstitutions'
+import MeitarInvoice from './pages/budget/meitar/MeitarInvoice'
+import MeitarDownloads from './pages/budget/meitar/MeitarDownloads'
 import BudgetOrders from './pages/budget/BudgetOrders'
 import BudgetUpload from './pages/budget/BudgetUpload'
 import Home from './pages/Home'
@@ -112,7 +118,14 @@ export default function App() {
         <Route path="cards" element={<BudgetCards />} />
         <Route path="card/:card" element={<BudgetCard />} />
         <Route path="actions" element={<BudgetActions />} />
-        <Route path="meitar" element={<BudgetMeitar />} />
+        <Route path="meitar" element={<MeitarShell />}>
+          <Route index element={<MeitarOverview />} />
+          <Route path="topics" element={<MeitarTopics />} />
+          <Route path="topic/:topic" element={<MeitarTopic />} />
+          <Route path="institutions" element={<MeitarInstitutions />} />
+          <Route path="invoice" element={<MeitarInvoice />} />
+          <Route path="downloads" element={<MeitarDownloads />} />
+        </Route>
         <Route path="orders" element={<BudgetOrders />} />
         <Route path="upload" element={<BudgetUpload />} />
       </Route>

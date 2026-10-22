@@ -435,7 +435,11 @@ SVG בקווי מתאר. **כל הגרפיקה מוטבעת** — אין קרי�
 | תמונת תקציב — ניצול מול הקצב, גרעון מתוכנן, צפי, חריגות | `pages/budget/BudgetHome.tsx` | 🟡 |
 | כרטסת עם עריכה בשורה (צפי, תכנית שנה הבאה, קטגוריה) | `pages/budget/BudgetCards.tsx` | 🟡 |
 | כרטיס: סיווג ותכנון, ביצוע חודשי, תנועות, קבצים | `pages/budget/BudgetCard.tsx` | 🟡 |
-| מיתר — הפרש חודשי מוביל, רטרואקטיבי, תכנון לנושא | `pages/budget/BudgetMeitar.tsx` | 🟡 |
+| מיתר — סקירה, נושאים, נושא, מוסדות, חשבונית והתאמה, הורדות; בורר מקור/שנה"ל/חודש | `pages/budget/meitar/`, `lib/meitar.ts`, `lib/meitarCalc.ts` | 🟡 [024](decisions/024-meitar-automation.md) |
+| מיתר — היסטוריה חודשית, שנה"ל קודמת מסומנת, תכנון לנושא (גם לבית ספר) | `meitar_months` (047), `MeitarTopics.tsx` | 🟡 |
+| מיתר לבית ספר — שורות המוסד מקובץ המועצה, מול הסיכום הרשמי (RICUZMOSDOT) | `load_budget.py` (`meitar_entity`), `MeitarInstitutions.tsx` | 🟡 גוונים 9/2026 — מדויק |
+| הורדה אוטומטית מאתר המשרד בסוכן, "הורד עכשיו" באתר | `agent/meitar_download.py`, `worker.py` | 🟡 עבד מקומית; טרם בסוכן אצל סבא |
+| מקורות המיתר של רשות — ניהול | `components/budget/MeitarSourcesPanel.tsx` | 🟡 |
 | רכש — הזמנות, חשבונית, גפ"ן, תב"ר | `pages/budget/BudgetOrders.tsx` | 🟡 ממתין לדוח ההזמנות |
 | שלושה תפקידים: מנהל / אחראי לפי קטגוריות / צופה | `045_budget.sql`, `components/admin/ProductFields.tsx` | 🟡 |
 

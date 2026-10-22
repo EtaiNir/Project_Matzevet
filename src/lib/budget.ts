@@ -134,60 +134,6 @@ export interface OrderNote {
   updated_at: string
 }
 
-export interface MeitarRun {
-  id: string
-  authority_code: string
-  calc_month: string
-  beneficiary: string | null
-  file_count: number | null
-  loaded_at: string
-}
-
-export interface MeitarInvoiceRow {
-  id: number
-  topic_code: string
-  topic_name: string | null
-  chashavut: string | null
-  effect_month: string | null
-  due: number | null
-  paid: number | null
-  to_pay: number | null
-  debt: number | null
-  month_balance: number | null
-  notes: string | null
-}
-
-export interface MeitarRow {
-  id: number
-  source_file: string
-  topic_code: string | null
-  topic_name: string | null
-  institution_code: string | null
-  institution_name: string | null
-  settlement_code: string | null
-  settlement_name: string | null
-  effect_month: string | null
-  units: number | null
-  cost: number | null
-  pct: number | null
-  computed: number | null
-  computed_prev: number | null
-  diff: number | null
-  extra: Record<string, string> | null
-}
-
-export interface TopicPlan {
-  authority_code: string
-  topic_code: string
-  school_year: number
-  budget: number | null
-  forecast: number | null
-  next_year: number | null
-  category: string | null
-  notes: string | null
-  updated_at: string
-}
-
 export interface CardFile {
   id: string
   authority_code: string
@@ -324,7 +270,7 @@ export interface BudgetUpload {
 // ─────────────────────────── עזר ───────────────────────────
 
 /** שגיאת מסד שאומרת "הטבלה/הפונקציה לא קיימת" — מיגרציה 045 טרם הוחלה */
-function explain(e: { message: string; code?: string } | null, what: string): Error {
+export function explain(e: { message: string; code?: string } | null, what: string): Error {
   if (!e) return new Error(what)
   if (e.code === '42P01' || e.code === 'PGRST205' || e.code === 'PGRST202' || /does not exist|schema cache/i.test(e.message)) {
     return new Error(`${what} — מודול התקציב עוד לא הותקן במסד (מיגרציה 045)`)
@@ -401,14 +347,6 @@ export function clearTransactionsCache() {
   txCache.clear()
 }
 
-/** כמה נרשם בכרטסת לכל נושא מיתר בתקופה — הגשר בין המיתר להנהלת החשבונות */
-export async function fetchTopicTotals(code: string, from: string, to: string): Promise<Map<string, { booked: number; count: number }>> {
-  const { data, error } = await supabase.rpc('budget_topic_totals', { p_code: code, p_from: from, p_to: to })
-  if (error) throw explain(error, 'טעינת ההכנסות לפי נושא')
-  return new Map(((data ?? []) as { meitar_topic: string; booked: number; tx_count: number }[])
-    .map((r) => [r.meitar_topic, { booked: Number(r.booked), count: Number(r.tx_count) }]))
-}
-
 export async function fetchTransactions(code: string, card: string): Promise<BudgetTransaction[]> {
   return fetchAll<BudgetTransaction>((from, to) =>
     supabase.from('budget_transactions').select('*').eq('authority_code', code).eq('card_code', card)
@@ -440,34 +378,6 @@ export async function fetchOrderNotes(code: string): Promise<OrderNote[]> {
   ).catch((e) => { throw explain(e, 'טעינת הערות ההזמנות') })
 }
 
-export async function fetchMeitarRuns(code: string): Promise<MeitarRun[]> {
-  const { data, error } = await supabase.from('meitar_runs').select('*').eq('authority_code', code)
-    .order('calc_month', { ascending: false })
-  if (error) throw explain(error, 'טעינת חודשי המיתר')
-  return (data ?? []) as MeitarRun[]
-}
-
-export async function fetchMeitarInvoice(runId: string): Promise<MeitarInvoiceRow[]> {
-  const { data, error } = await supabase.from('meitar_invoice').select('*').eq('run_id', runId).order('topic_code').limit(2000)
-  if (error) throw explain(error, 'טעינת חשבונית המיתר')
-  return (data ?? []) as MeitarInvoiceRow[]
-}
-
-export async function fetchMeitarRows(runId: string, topic?: string): Promise<MeitarRow[]> {
-  return fetchAll<MeitarRow>((from, to) => {
-    let q = supabase.from('meitar_rows').select('*').eq('run_id', runId)
-    if (topic) q = q.eq('topic_code', topic)
-    return q.order('id').range(from, to)
-  }).catch((e) => { throw explain(e, 'טעינת פירוט המיתר') })
-}
-
-export async function fetchTopicPlans(code: string, schoolYear: number): Promise<TopicPlan[]> {
-  const { data, error } = await supabase.from('meitar_topic_plans').select('*').eq('authority_code', code)
-    .eq('school_year', schoolYear).limit(2000)
-  if (error) throw explain(error, 'טעינת תכנון המיתר')
-  return (data ?? []) as TopicPlan[]
-}
-
 // ─────────────────────────── שמירה ───────────────────────────
 // upsert מלא של השורה: current (מה שעל המסך) + patch. בלי זה upsert חלקי
 // היה מאפס עמודות שלא נשלחו.
@@ -486,7 +396,7 @@ const EMPTY_PLAN: PlanFields = {
   forecast_income: null, forecast_expense: null, next_income: null, next_expense: null, notes: null,
 }
 
-function pick<T extends object>(base: T, src: Partial<T> | null | undefined): T {
+export function pick<T extends object>(base: T, src: Partial<T> | null | undefined): T {
   const out = { ...base }
   for (const k of Object.keys(base) as (keyof T)[]) if (src && src[k] !== undefined) out[k] = src[k] as T[keyof T]
   return out
@@ -520,18 +430,6 @@ export async function saveOrderNote(code: string, orderNo: string, patch: Partia
   if (error) throw explain(error, 'שמירת פרטי ההזמנה')
   if (!data) throw new Error('השמירה נחסמה — רק מנהל התקציב עורך פרטי הזמנה')
   return data as OrderNote
-}
-
-type TopicFields = Omit<TopicPlan, 'authority_code' | 'topic_code' | 'school_year' | 'updated_at'>
-const EMPTY_TOPIC: TopicFields = { budget: null, forecast: null, next_year: null, category: null, notes: null }
-
-export async function saveTopicPlan(code: string, topic: string, schoolYear: number, patch: Partial<TopicFields>, current: TopicPlan | null): Promise<TopicPlan> {
-  const row = { authority_code: code, topic_code: topic, school_year: schoolYear, ...pick(EMPTY_TOPIC, current), ...patch }
-  const { data, error } = await supabase.from('meitar_topic_plans')
-    .upsert(row, { onConflict: 'authority_code,topic_code,school_year' }).select('*').maybeSingle()
-  if (error) throw explain(error, 'שמירת תכנון הנושא')
-  if (!data) throw new Error('השמירה נחסמה — רק מנהל התקציב עורך את תכנון המיתר')
-  return data as TopicPlan
 }
 
 // ─────────────────────────── קבצים מצורפים לכרטיס ───────────────────────────
