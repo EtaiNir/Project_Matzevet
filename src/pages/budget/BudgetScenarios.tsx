@@ -72,14 +72,7 @@ export default function BudgetScenarios() {
   const cardInput = (c: ScenarioCard, side: 'inc' | 'exp') => {
     const ok = side === 'inc' ? c.isIncome : c.isExpense
     if (!ok) return <span className="text-slate-300">—</span>
-    const raw = inputs.cards[c.code]?.[side] ?? ''
-    const parsed = parseCardInput(raw)
-    const bad = parsed != null && 'invalid' in parsed
-    return (
-      <input value={raw} placeholder="% או סכום" onChange={(e) => setCard(c.code, side, e.target.value)} dir="ltr"
-        title='אחוז — "+20%" או "-5%" (נוסף על הקטגוריה); סכום — "150,000" (מחליף את הבסיס); 0 — הכרטיס נסגר'
-        className={`w-24 rounded border px-1.5 py-0.5 text-center text-xs tabular-nums focus:outline-none ${bad ? 'border-red-400 bg-red-50' : raw ? 'border-violet-400 bg-violet-50' : 'border-slate-200'} focus:border-emerald-400`} />
-    )
+    return <CardChange raw={inputs.cards[c.code]?.[side] ?? ''} onChange={(v) => setCard(c.code, side, v)} />
   }
   // אפס מוצג כאפס — לא תא ריק שנראה כמו נתון חסר
   const amt = (n: number, tone: string) => <span className={`tabular-nums ${Math.round(n) ? tone : 'text-slate-300'}`}>{money(n)}</span>
@@ -102,8 +95,9 @@ export default function BudgetScenarios() {
       </div>
       <p className="text-xs text-slate-500">
         הבסיס לכל כרטיס: התכנית ל-{b.year + 1} כשהוזנה ({fromPlan} כרטיסים), אחרת הצפי לסוף השנה או התקציב ({fromForecast}).
-        שינוי באחוזים — לכל קטגוריה, ובשורה הראשונה לכולן יחד. <b>לחיצה על קטגוריה</b> פותחת את הכרטיסים שבה: לכל כרטיס
-        אחוז משלו ("+20%", נוסף על הקטגוריה) או סכום שמחליף את הבסיס ("150,000"; 0 — הכרטיס נסגר).
+        שינוי באחוזים — לכל קטגוריה, ובשורה הראשונה לכולן יחד. <b>לחיצה על קטגוריה</b> פותחת את הכרטיסים שבה, ולכל כרטיס
+        אפשר שינוי משלו — מקלידים מספר, והכפתור שלידו קובע מה הוא: <b>%</b> — שינוי באחוזים, נוסף על הקטגוריה
+        (למשל 20 או ‎-5); <b>₪</b> — סכום חדש שמחליף את הבסיס (למשל 150,000; 0 — הכרטיס נסגר).
         כרטיס שאינו מסומן "הכנסה" ולא "הוצאה" בתוספתיים — נספר לפי הנתונים שלו, ומסומן.
         0 = אין בקטגוריה תקציב, צפי או תכנית בצד הזה. קטגוריה קטנה עם שם דומה לאחרת (למשל "חינוך קדם יסודי" ליד "קדם יסודי")
         — כנראה כתיב שונה בקובץ התוספתיים; כדאי לאחד אותן בקטגוריה 1.
@@ -202,5 +196,33 @@ export default function BudgetScenarios() {
         </table>
       </div>
     </div>
+  )
+}
+
+/**
+ * שינוי לכרטיס בצד אחד: מספר + כפתור יחידה — % (שינוי באחוזים, נוסף על הקטגוריה)
+ * או ₪ (סכום חדש שמחליף את הבסיס). נשמר כמו קודם: "20%" לאחוז, "150000" לסכום —
+ * כך applyScenario ו-parseCardInput לא משתנים.
+ */
+function CardChange({ raw, onChange }: { raw: string; onChange: (v: string) => void }) {
+  const isAmount = raw !== '' && !raw.trim().endsWith('%')
+  const [mode, setMode] = useState<'pct' | 'amount'>(isAmount ? 'amount' : 'pct')
+  const number = raw.replace(/%$/, '')
+  const store = (n: string, m: 'pct' | 'amount') => onChange(n.trim() === '' ? '' : m === 'pct' ? `${n}%` : n)
+  const parsed = parseCardInput(raw)
+  const bad = parsed != null && 'invalid' in parsed
+  const tone = bad ? 'border-red-400 bg-red-50' : raw ? 'border-violet-400 bg-violet-50' : 'border-slate-200 bg-white'
+  return (
+    <span className={`inline-flex items-stretch overflow-hidden rounded border ${tone}`} dir="ltr">
+      <input value={number} onChange={(e) => store(e.target.value, mode)} inputMode="decimal"
+        placeholder={mode === 'pct' ? 'שינוי' : 'סכום חדש'}
+        title={mode === 'pct' ? 'שינוי באחוזים, נוסף על האחוז של הקטגוריה — למשל 20 או -5' : 'סכום חדש שמחליף את הבסיס — למשל 150000; 0 = הכרטיס נסגר'}
+        className="w-20 bg-transparent px-1.5 py-0.5 text-center text-xs tabular-nums placeholder:text-slate-300 focus:outline-none" />
+      <button type="button" onClick={() => { const m = mode === 'pct' ? 'amount' : 'pct'; setMode(m); store(number, m) }}
+        title={mode === 'pct' ? 'עכשיו: שינוי באחוזים. לחיצה — סכום חדש בש"ח' : 'עכשיו: סכום חדש בש"ח. לחיצה — שינוי באחוזים'}
+        className={`w-6 border-l text-xs font-bold ${mode === 'pct' ? 'border-slate-200 text-slate-500 hover:bg-slate-100' : 'border-violet-300 bg-violet-100 text-violet-800 hover:bg-violet-200'}`}>
+        {mode === 'pct' ? '%' : '₪'}
+      </button>
+    </span>
   )
 }
