@@ -303,13 +303,6 @@ export interface ScenarioBase {
   items: ScenarioCard[]
 }
 
-export type CardSide = 'income' | 'both' | 'expense' | 'none'
-export const CARD_SIDE_LABELS: Record<CardSide, string> = { income: 'סעיפי הכנסה', both: 'סעיפים בשני הצדדים', expense: 'סעיפי הוצאה', none: 'סעיפים בלי צד' }
-export function cardSide(c: Pick<ScenarioCard, 'isIncome' | 'isExpense'>): CardSide {
-  return c.isIncome && c.isExpense ? 'both' : c.isIncome ? 'income' : c.isExpense ? 'expense' : 'none'
-}
-const sideRank = (c: ScenarioCard) => ['income', 'both', 'expense', 'none'].indexOf(cardSide(c))
-
 /** הבסיס לצד אחד של כרטיס: תכנית ← צפי ← הצעת צפי ← תקציב */
 function sideBase(next: number | null, forecast: number | null, suggested: number | null, by: 'season' | 'pace', budget: number | null): [number, BaseSource] {
   // || 0 — בלי "‎-0" (תקציב הוצאות 0 אחרי היפוך הסימן)
@@ -348,9 +341,7 @@ export function scenarioBase(rows: CardRow[]): { groups: ScenarioBase[]; fromPla
       unflagged, onlyExtras: r.card == null })
     by.set(key, g)
   }
-  // בתוך הקטגוריה: הכנסה, אחר כך שני הצדדים, אחר כך הוצאה — כך משבצות השינוי של כל
-  // צד מסודרות בטור אחד ולא קופצות בין הצדדים. בתוך כל צד — מהגדול לקטן
-  for (const g of by.values()) g.items.sort((a, b) => sideRank(a) - sideRank(b) || b.income + b.expense - (a.income + a.expense))
+  for (const g of by.values()) g.items.sort((a, b) => b.income + b.expense - (a.income + a.expense))
   return { groups: [...by.values()].sort((a, b) => b.expense + b.income - (a.expense + a.income)), fromPlan, fromForecast }
 }
 
