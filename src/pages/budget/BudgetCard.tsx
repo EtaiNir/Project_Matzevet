@@ -17,6 +17,7 @@ import {
   type CardMeta,
   type CardPlan,
 } from '@/lib/budget'
+import { setLastBudgetCard } from '@/lib/lastBudgetCard'
 import { isSalaryCard } from '@/lib/budgetTracking'
 import { HEB_MONTH_NAMES, money, monthlySeries, pct, usageTone, type CardRow } from '@/lib/budgetCalc'
 import { useBudget, type CardNavState } from './context'
@@ -33,6 +34,10 @@ export default function BudgetCard() {
   const navigate = useNavigate()
   const nav = state as CardNavState | null
   const row = b.rows.find((r) => r.code === cardCode)
+  // "הסעיף האחרון" — כל כרטיס שנפתח הופך לאחרון (בזיכרון הדף בלבד, lib/lastBudgetCard)
+  useEffect(() => {
+    if (row) setLastBudgetCard({ code: b.code, card: row.code, name: row.name, href: `${b.base}/card/${row.code}${search}`, nav })
+  }, [row, b.code, b.base, search, nav])
 
   const [tx, setTx] = useState<BudgetTransaction[] | null>(null)
   const [txError, setTxError] = useState<string | null>(null)

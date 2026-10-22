@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext'
 import Logo from '@/components/brand/Logo'
 import ModuleSwitch from '@/components/ModuleSwitch'
 import HomeLink from '@/components/HomeLink'
+import { BackButton, LastCardLink } from '@/components/budget/BudgetNavButtons'
 import { Empty, ErrorBox, Loading } from '@/components/bagrut/ui'
 import { BUDGET_ROLE_LABELS, fetchAuthorities, type Authority } from '@/lib/admin'
 import {
@@ -203,6 +204,9 @@ export default function BudgetShell() {
         )}
         <ModuleSwitch authorityCode={code} />
         <HomeLink />
+        {/* חזרה לדף הקודם, ולכרטיס הסעיף האחרון — כמו "התלמיד האחרון" בבגרות */}
+        <BackButton home={`/budget/${code}`} />
+        <LastCardLink code={code} />
 
         {years && years.length > 0 && (
           <>
